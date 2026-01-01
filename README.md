@@ -49,8 +49,7 @@ sudo apt install ffmpeg
 2. Run it in terminal:
 ```bash
 chmod +x ./ContextMenu_MediaTools_KDE6.sh
-./ContextMenu_MediaTools_KDE6.sh install
-# or simply
+
 ./ContextMenu_MediaTools_KDE6.sh
 ```
 To make it work restart Dolphin or log out and back in
