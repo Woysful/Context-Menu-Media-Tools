@@ -45,7 +45,7 @@ sudo apt install ffmpeg
 ```
 
 ### Install Context Menu
-1. Download [`ContextMenu_MediaTools_KDE6.sh`](https://github.com)
+1. Download [`ContextMenu_MediaTools_KDE6.sh`](https://github.com/Woysful/Context-Menu-Media-Tools/blob/main/ContextMenu_MediaTools_KDE6.sh)
 2. Run it in terminal:
 ```bash
 ./ContextMenu_MediaTools_KDE6.sh install
@@ -72,13 +72,13 @@ To make it work restart Dolphin or log out and back in
 2. Put `ffmpeg.exe` and `ffprobe.exe` in **"windows"** folder on system drive. Or setup ffmpeg PATH.
 
 ### Install Context Menu
- 1. Download [`ContextMenu_MediaTools_Windows.reg`](https://github.com)
+ 1. Download [`ContextMenu_MediaTools_Windows.reg`](https://github.com/Woysful/Context-Menu-Media-Tools/blob/main/ContextMenu_MediaTools_Windows.reg)
  2. Make a backup of your registry and then run the file
 
 To make it work you need to reboot `file explorer` or your PC
 
 ### How to uninstall
-Download and run [`ContextMenu_MediaTools_Windows_Uninstall.reg`](https://github.com)
+Download and run [`ContextMenu_MediaTools_Windows_Uninstall.reg`](https://github.com/Woysful/Context-Menu-Media-Tools/blob/main/ContextMenu_MediaTools_Windows_Uninstall.reg)
 
 ## How It Works
 
