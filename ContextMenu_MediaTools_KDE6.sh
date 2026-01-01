@@ -147,6 +147,7 @@ print_completion() {
     echo
     echo -e "${MSG_RESTART_DOLPHIN}"
     echo
+    echo repo: https://github.com/Woysful/Context-Menu-Media-Tools
 }
 
 # Function to check dependencies
