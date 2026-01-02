@@ -1,4 +1,4 @@
-# Context-Menu-Media-Tools
+# Context Menu Media Tools
 FFmpeg based tools that baked into context menu to compress, convert media files, delete or extract sound, and look for detailed stats with ffprobe.
 
 It was created for my personal use, but you may find it useful too.
