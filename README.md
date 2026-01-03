@@ -103,4 +103,4 @@ Or set `chmod +x ~/.local/share/kio/servicemenus/*.desktop` by yourself
 
 ## Localization
 
-Linus version supports English, Russian, and Ukrainian languages. KDE automatically selects the appropriate language based on system settings.
+Linux version supports English, Russian, and Ukrainian languages. KDE automatically selects the appropriate language based on system settings.
