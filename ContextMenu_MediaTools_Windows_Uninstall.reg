@@ -49,31 +49,37 @@ Windows Registry Editor Version 5.00
 
 ; ================================ [ Video ] ================================
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mp4\shell\Convert]
+[-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mp4\shell\Convert Audio]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mp4\shell\Compress]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mp4\shell\Options]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mp4\shell\Stats]
 
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.avi\shell\Convert]
+[-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.avi\shell\Convert Audio]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.avi\shell\Compress]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.avi\shell\Options]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.avi\shell\Stats]
 
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.m4v\shell\Convert]
+[-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.m4v\shell\Convert Audio]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.m4v\shell\Compress]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.m4v\shell\Options]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.m4v\shell\Stats]
 
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mov\shell\Convert]
+[-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mov\shell\Convert Audio]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mov\shell\Compress]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mov\shell\Options]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mov\shell\Stats]
 
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mkv\shell\Convert]
+[-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mkv\shell\Convert Audio]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mkv\shell\Compress]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mkv\shell\Options]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.mkv\shell\Stats]
 
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.webm\shell\Convert]
+[-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.webm\shell\Convert Audio]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.webm\shell\Compress]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.webm\shell\Options]
 [-HKEY_CURRENT_USER\SOFTWARE\Classes\SystemFileAssociations\.webm\shell\Stats]

@@ -19,6 +19,7 @@ It was created for my personal use, but you may find it useful too.
 - **Compress to MP4++** - Compress to MP4 (small size)
   - H.264 (CPU), H.265 (CPU), AV1 (CPU Fast/Slow), AV1 (GPU Nvidia)
 - **Convert Video** - Convert to other formats (MP4, AVI, MOV, MKV, WebM, M4V)
+- **Convert Audio** - Convert all audio tracks (WAV, MP3, FLAC, AAC, OGG, WMA, M4A, Opus)
 - **Delete Sound** - Remove audio track from video
 - **Extract Audio** - Extract audio track (MP3, AAC, Opus, WAV, M4A, MKA)
 - **Make Frame Sequence** - Create frame sequence (PNG, JPG, WebP)

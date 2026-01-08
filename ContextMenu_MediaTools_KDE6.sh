@@ -44,6 +44,7 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Меню изображений создано"
         MSG_CREATING_VIDEO="Создание меню видео..."
         MSG_VIDEO_CREATED="✓ Меню видео создано"
+        MSG_CONVERT_AUDIO="Конвертировать аудио"
         MSG_SETUP_DIR="Настройка директории установки..."
         MSG_DIR_READY="✓ Директория настроена"
         MSG_INSTALL_COMPLETE="Установка завершена!"
@@ -67,6 +68,7 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Меню зображень створено"
         MSG_CREATING_VIDEO="Створення меню відео..."
         MSG_VIDEO_CREATED="✓ Меню відео створено"
+        MSG_CONVERT_AUDIO="Конвертувати аудіо"
         MSG_SETUP_DIR="Налаштування директорії встановлення..."
         MSG_DIR_READY="✓ Директорія налаштована"
         MSG_INSTALL_COMPLETE="Встановлення завершено!"
@@ -90,6 +92,7 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Image menu created"
         MSG_CREATING_VIDEO="Creating video menu..."
         MSG_VIDEO_CREATED="✓ Video menu created"
+        MSG_CONVERT_AUDIO="Convert Audio"
         MSG_SETUP_DIR="Setting up installation directory..."
         MSG_DIR_READY="✓ Directory configured"
         MSG_INSTALL_COMPLETE="Installation completed!"
@@ -317,7 +320,7 @@ Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
 Actions=convertMP4;convertAVI;convertMOV;convertMKV;convertM4V;convertWebM
-X-KDE-Submenu=Convert video
+X-KDE-Submenu=Convert Video
 X-KDE-Submenu[ru]=Конвертировать
 X-KDE-Submenu[uk]=Конвертувати
 X-KDE-Priority=TopLevel
@@ -592,6 +595,60 @@ Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_out
 Icon=video-compress
 EOF
 
+    # Convert Audio Menu (Video)
+    cat > "$INSTALL_DIR/multimedia-convert-video-audio.desktop" << 'EOF'
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
+Actions=convertAudioWAV;convertAudioMP3;convertAudioFLAC;convertAudioAAC;convertAudioOGG;convertAudioWMA;convertAudioM4A;convertAudioOpus
+X-KDE-Submenu=Convert Audio
+X-KDE-Submenu[ru]=Конвертировать аудио
+X-KDE-Submenu[uk]=Конвертувати аудіо
+X-KDE-Priority=TopLevel
+X-KDE-AuthorizeAction=shell_access
+
+[Desktop Action convertAudioWAV]
+Name=WAV
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a pcm_s16le "${file%.*}_audio_wav.${file##*.}"; done' bash %F
+Icon=audio-wav
+
+[Desktop Action convertAudioMP3]
+Name=MP3
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a mp3 -b:a 192k "${file%.*}_audio_mp3.${file##*.}"; done' bash %F
+Icon=audio-mpeg
+
+[Desktop Action convertAudioFLAC]
+Name=FLAC
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a flac "${file%.*}_audio_flac.${file##*.}"; done' bash %F
+Icon=audio-flac
+
+[Desktop Action convertAudioAAC]
+Name=AAC
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k "${file%.*}_audio_aac.${file##*.}"; done' bash %F
+Icon=audio-aac
+
+[Desktop Action convertAudioOGG]
+Name=OGG
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a libvorbis -q:a 0 "${file%.*}_audio_ogg.${file##*.}"; done' bash %F
+Icon=audio-ogg
+
+[Desktop Action convertAudioWMA]
+Name=WMA
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a wmav2 -b:a 192k "${file%.*}_audio_wma.${file##*.}"; done' bash %F
+Icon=audio-x-ms-wma
+
+[Desktop Action convertAudioM4A]
+Name=M4A
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k "${file%.*}_audio_m4a.${file##*.}"; done' bash %F
+Icon=audio-mp4
+
+[Desktop Action convertAudioOpus]
+Name=Opus
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a libopus -q:a 0 "${file%.*}_audio_opus.${file##*.}"; done' bash %F
+Icon=audio-opus
+EOF
+
     # Stats Menu
     cat > "$INSTALL_DIR/multimedia-stats.desktop" << 'EOF'
 [Desktop Entry]
@@ -642,6 +699,7 @@ uninstall() {
         print_info "$MSG_REMOVING_FILES"
         rm -f "$INSTALL_DIR"/multimedia-convert-*.desktop
         rm -f "$INSTALL_DIR"/multimedia-compress-*.desktop
+        rm -f "$INSTALL_DIR"/multimedia-convert-video-audio.desktop
         rm -f "$INSTALL_DIR"/multimedia-delete-sound.desktop
         rm -f "$INSTALL_DIR"/multimedia-extract-audio.desktop
         rm -f "$INSTALL_DIR"/multimedia-make-frame-sequence.desktop
