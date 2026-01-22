@@ -47,7 +47,7 @@ sudo apt install ffmpeg
 ```
 
 ### Install Context Menu
-1. Download [`ContextMenu_MediaTools_KDE6.sh`](https://github.com/Woysful/Context-Menu-Media-Tools/blob/main/ContextMenu_MediaTools_KDE6.sh)
+1. Download [`ContextMenu_MediaTools_KDE6.sh`](https://github.com/Woysful/Context-Menu-Media-Tools/blob/main/ContextMenu_MediaTools_KDE6-Dolphin.sh)
 2. Run it in terminal:
 ```bash
 chmod +x ./ContextMenu_MediaTools_KDE6.sh
