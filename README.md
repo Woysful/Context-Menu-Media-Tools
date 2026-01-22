@@ -12,12 +12,8 @@ It was created for my personal use, but you may find it useful too.
 - **Convert Image** - Convert to various formats (JPG, PNG, BMP, TIFF, GIF, WebP, TGA)
 
 ### Video Files (MP4, AVI, MOV, MKV, WebM, M4V)
-- **Compress to MP4** - Compress to MP4 (good quality)
-  - H.264 (CPU), H.265 (CPU), AV1 (CPU Fast/Slow), AV1 (GPU Nvidia)
-- **Compress to MP4+** - Compress to MP4 (medium quality)
-  - H.264 (CPU), H.265 (CPU), AV1 (CPU Fast/Slow), AV1 (GPU Nvidia)
-- **Compress to MP4++** - Compress to MP4 (small size)
-  - H.264 (CPU), H.265 (CPU), AV1 (CPU Fast/Slow), AV1 (GPU Nvidia)
+- **Compress to MP4 / MP4+ / MP4++**  - Compress to MP4 (High / Balanced / Low bitrate)
+  - H.264, H.265, AV1 | + Nvidia GPU encoging
 - **Convert Video** - Convert to other formats (MP4, AVI, MOV, MKV, WebM, M4V)
 - **Convert Audio** - Convert all audio tracks (WAV, MP3, FLAC, AAC, OGG, WMA, M4A, Opus)
 - **Delete Sound** - Remove audio track from video
