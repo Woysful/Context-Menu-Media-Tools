@@ -29,7 +29,8 @@ It was created for my personal use, but you may find it useful too.
 ## 🐧 Installation Linux
 
 ### Requirements
-- KDE Plasma 6 (Not tested in other env versions)
+- KDE Plasma 6
+- Dolphin file manager
 - ffmpeg
 - ffprobe
 
@@ -70,7 +71,7 @@ To make it work restart Dolphin or log out and back in
 ### Install Dependencies
 
 1. Download [`ffmpeg build`](https://ffmpeg.org/download.html)
-2. Put `ffmpeg.exe` and `ffprobe.exe` in **"windows"** folder on system drive. Or setup ffmpeg PATH.
+2. Put `ffmpeg.exe` and `ffprobe.exe` in **"windows"** folder on system drive. Or setup ffmpeg PATH in environment variables by yourself.
 
 ### Install Context Menu
  1. Download [`ContextMenu_MediaTools_Windows.reg`](https://github.com/Woysful/Context-Menu-Media-Tools/blob/main/ContextMenu_MediaTools_Windows.reg)
@@ -85,7 +86,7 @@ Download and run [`ContextMenu_MediaTools_Windows_Uninstall.reg`](https://github
 
 Basicaly each menu item runs ffmpeg terminal command with pre-made settings. The terminal automatically closes after completion, except for the Stats command which keeps it open for you to review the information.
 
-# Troubleshooting Linux
+# Troubleshooting: Linux
 
 ### Menu doesn't appear
 1. Restart Dolphin: `killall dolphin && dolphin`

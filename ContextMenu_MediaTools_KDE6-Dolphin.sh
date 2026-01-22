@@ -454,7 +454,7 @@ EOF
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=compressH264;compressH265;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
+Actions=compressH264;compressH264GpuNvidia;compressH265;compressH265GpuNvidia;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
 X-KDE-Submenu=Compress to MP4
 X-KDE-Submenu[ru]=Сжать в MP4
 X-KDE-Submenu[uk]=Стиснути в MP4
@@ -462,17 +462,31 @@ X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
 [Desktop Action compressH264]
-Name=H.264 [CPU] AVC
-Name[ru]=H.264 [CPU] AVC
-Name[uk]=H.264 [CPU] AVC
+Name=H.264 [CPU]
+Name[ru]=H.264 [CPU]
+Name[uk]=H.264 [CPU]
 Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
+[Desktop Action compressH264GpuNvidia]
+Name=H.264 [GPU] Nvidia
+Name[ru]=H.264 [GPU] Nvidia
+Name[uk]=H.264 [GPU] Nvidia
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -cq 29 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Icon=video-compress
+
 [Desktop Action compressH265]
-Name=H.265 [CPU] HEVC
-Name[ru]=H.265 [CPU] HEVC
-Name[uk]=H.265 [CPU] HEVC
+Name=H.265 [CPU]
+Name[ru]=H.265 [CPU]
+Name[uk]=H.265 [CPU]
 Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
+Icon=video-compress
+
+[Desktop Action compressH265GpuNvidia]
+Name=H.265 [GPU] Nvidia
+Name[ru]=H.265 [GPU] Nvidia
+Name[uk]=H.265 [GPU] Nvidia
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -cq 28 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -503,7 +517,7 @@ EOF
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=compressH264;compressH265;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
+Actions=compressH264;compressH264GpuNvidia;compressH265;compressH265GpuNvidia;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
 X-KDE-Submenu=Compress to MP4+
 X-KDE-Submenu[ru]=Сжать в MP4+
 X-KDE-Submenu[uk]=Стиснути в MP4+
@@ -511,17 +525,31 @@ X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
 [Desktop Action compressH264]
-Name=H.264 [CPU] AVC
-Name[ru]=H.264 [CPU] AVC
-Name[uk]=H.264 [CPU] AVC
+Name=H.264 [CPU]
+Name[ru]=H.264 [CPU]
+Name[uk]=H.264 [CPU]
 Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
+[Desktop Action compressH264GpuNvidia]
+Name=H.264 [GPU] Nvidia
+Name[ru]=H.264 [GPU] Nvidia
+Name[uk]=H.264 [GPU] Nvidia
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Icon=video-compress
+
 [Desktop Action compressH265]
-Name=H.265 [CPU] HEVC
-Name[ru]=H.265 [CPU] HEVC
-Name[uk]=H.265 [CPU] HEVC
+Name=H.265 [CPU]
+Name[ru]=H.265 [CPU]
+Name[uk]=H.265 [CPU]
 Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
+Icon=video-compress
+
+[Desktop Action compressH265GpuNvidia]
+Name=H.265 [GPU] Nvidia
+Name[ru]=H.265 [GPU] Nvidia
+Name[uk]=H.265 [GPU] Nvidia
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -552,7 +580,7 @@ EOF
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=compressH264;compressH265;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
+Actions=compressH264;compressH264GpuNvidia;compressH265;compressH265GpuNvidia;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
 X-KDE-Submenu=Compress to MP4++
 X-KDE-Submenu[ru]=Сжать в MP4++
 X-KDE-Submenu[uk]=Стиснути в MP4++
@@ -560,17 +588,31 @@ X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
 [Desktop Action compressH264]
-Name=H.264 [CPU] AVC
-Name[ru]=H.264 [CPU] AVC
-Name[uk]=H.264 [CPU] AVC
+Name=H.264 [CPU]
+Name[ru]=H.264 [CPU]
+Name[uk]=H.264 [CPU]
 Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
+[Desktop Action compressH264GpuNvidia]
+Name=H.264 [GPU] Nvidia
+Name[ru]=H.264 [GPU] Nvidia
+Name[uk]=H.264 [GPU] Nvidia
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -cq 41 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Icon=video-compress
+
 [Desktop Action compressH265]
-Name=H.265 [CPU] HEVC
-Name[ru]=H.265 [CPU] HEVC
-Name[uk]=H.265 [CPU] HEVC
+Name=H.265 [CPU]
+Name[ru]=H.265 [CPU]
+Name[uk]=H.265 [CPU]
 Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
+Icon=video-compress
+
+[Desktop Action compressH265GpuNvidia]
+Name=H.265 [GPU] Nvidia
+Name[ru]=H.265 [GPU] Nvidia
+Name[uk]=H.265 [GPU] Nvidia
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -cq 43 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
