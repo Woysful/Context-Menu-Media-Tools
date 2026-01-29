@@ -465,28 +465,28 @@ X-KDE-AuthorizeAction=shell_access
 Name=H.264 [CPU]
 Name[ru]=H.264 [CPU]
 Name[uk]=H.264 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -profile:v main -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH264GpuNvidia]
 Name=H.264 [GPU] Nvidia
 Name[ru]=H.264 [GPU] Nvidia
 Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -cq 29 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -profile:v main -cq 29 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265]
 Name=H.265 [CPU]
 Name[ru]=H.265 [CPU]
 Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -profile:v main -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265GpuNvidia]
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -cq 28 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 28 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -528,28 +528,28 @@ X-KDE-AuthorizeAction=shell_access
 Name=H.264 [CPU]
 Name[ru]=H.264 [CPU]
 Name[uk]=H.264 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -profile:v main -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH264GpuNvidia]
 Name=H.264 [GPU] Nvidia
 Name[ru]=H.264 [GPU] Nvidia
 Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265]
 Name=H.265 [CPU]
 Name[ru]=H.265 [CPU]
 Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -profile:v main -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265GpuNvidia]
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -591,28 +591,28 @@ X-KDE-AuthorizeAction=shell_access
 Name=H.264 [CPU]
 Name[ru]=H.264 [CPU]
 Name[uk]=H.264 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx264 -profile:v main -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH264GpuNvidia]
 Name=H.264 [GPU] Nvidia
 Name[ru]=H.264 [GPU] Nvidia
 Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -cq 41 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -profile:v main -cq 41 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265]
 Name=H.265 [CPU]
 Name[ru]=H.265 [CPU]
 Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libx265 -profile:v main -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265GpuNvidia]
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -cq 43 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 43 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
