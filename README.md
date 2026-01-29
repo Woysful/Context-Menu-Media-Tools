@@ -22,6 +22,9 @@ It was created for my personal use, but you may find it useful too.
 
 **Stats** - View file information using ffprobe
 
+> Windows version has much less options because of it's context menu item limits.
+> Only h265 [CPU], AV1[CPU] and AV1[GPU] presented
+
 ## 🐧 Installation Linux
 
 ### Requirements
