@@ -472,7 +472,7 @@ Icon=video-compress
 Name=H.264 [GPU] Nvidia
 Name[ru]=H.264 [GPU] Nvidia
 Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -pix_fmt yuv420p -c:v h264_nvenc -profile:v main -cq 29 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -vf scale_cuda=format=yuv420p -c:v h264_nvenc -profile:v main -cq 29 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265]
@@ -486,7 +486,7 @@ Icon=video-compress
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -pix_fmt yuv420p -c:v hevc_nvenc -profile:v main -cq 28 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -vf scale_cuda=format=yuv420p -c:v hevc_nvenc -profile:v main -cq 28 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -535,7 +535,7 @@ Icon=video-compress
 Name=H.264 [GPU] Nvidia
 Name[ru]=H.264 [GPU] Nvidia
 Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -pix_fmt yuv420p -c:v h264_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -vf scale_cuda=format=yuv420p -c:v h264_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265]
@@ -549,7 +549,7 @@ Icon=video-compress
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -pix_fmt yuv420p -c:v hevc_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -vf scale_cuda=format=yuv420p -c:v hevc_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -598,7 +598,7 @@ Icon=video-compress
 Name=H.264 [GPU] Nvidia
 Name[ru]=H.264 [GPU] Nvidia
 Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -pix_fmt yuv420p -c:v h264_nvenc -profile:v main -cq 41 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -vf scale_cuda=format=yuv420p -c:v h264_nvenc -profile:v main -cq 41 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265]
@@ -612,7 +612,7 @@ Icon=video-compress
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -pix_fmt yuv420p -c:v hevc_nvenc -profile:v main -cq 43 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -vf scale_cuda=format=yuv420p -c:v hevc_nvenc -profile:v main -cq 43 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
