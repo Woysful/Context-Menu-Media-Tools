@@ -17,6 +17,9 @@ NC='\033[0m' # No Color
 # kio/servicemenus is correct for KDE Plasma 6 Service Menus
 INSTALL_DIR="$HOME/.local/share/kio/servicemenus"
 
+# Directory for helper scripts used by service menu actions (e.g. Compress Limit)
+SCRIPTS_DIR="$HOME/.local/share/multimedia-context-menu-scripts"
+
 # Function to detect user language
 detect_language() {
     local lang="${LANG:-${LC_MESSAGES:-en}}"
@@ -44,6 +47,8 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Меню изображений создано"
         MSG_CREATING_VIDEO="Создание меню видео..."
         MSG_VIDEO_CREATED="✓ Меню видео создано"
+        MSG_CREATING_COMPRESS_LIMIT="Создание меню сжатия до лимита..."
+        MSG_COMPRESS_LIMIT_CREATED="✓ Меню сжатия до лимита создано"
         MSG_CONVERT_AUDIO="Конвертировать аудио"
         MSG_SETUP_DIR="Настройка директории установки..."
         MSG_DIR_READY="✓ Директория настроена"
@@ -68,6 +73,8 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Меню зображень створено"
         MSG_CREATING_VIDEO="Створення меню відео..."
         MSG_VIDEO_CREATED="✓ Меню відео створено"
+        MSG_CREATING_COMPRESS_LIMIT="Створення меню стиснення до ліміту..."
+        MSG_COMPRESS_LIMIT_CREATED="✓ Меню стиснення до ліміту створено"
         MSG_CONVERT_AUDIO="Конвертувати аудіо"
         MSG_SETUP_DIR="Налаштування директорії встановлення..."
         MSG_DIR_READY="✓ Директорія налаштована"
@@ -92,6 +99,8 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Image menu created"
         MSG_CREATING_VIDEO="Creating video menu..."
         MSG_VIDEO_CREATED="✓ Video menu created"
+        MSG_CREATING_COMPRESS_LIMIT="Creating compress limit menu..."
+        MSG_COMPRESS_LIMIT_CREATED="✓ Compress limit menu created"
         MSG_CONVERT_AUDIO="Convert Audio"
         MSG_SETUP_DIR="Setting up installation directory..."
         MSG_DIR_READY="✓ Directory configured"
@@ -155,9 +164,9 @@ print_completion() {
 
 # Function to check dependencies
 check_dependencies() {
-    print_step "1" "5" "$MSG_CHECKING_DEPS"
+    print_step "1" "6" "$MSG_CHECKING_DEPS"
 
-    local deps=("ffmpeg" "ffprobe")
+    local deps=("ffmpeg" "ffprobe" "kdialog")
     local missing_deps=()
 
     for dep in "${deps[@]}"; do
@@ -169,8 +178,8 @@ check_dependencies() {
     if [ ${#missing_deps[@]} -ne 0 ]; then
         print_error "$MSG_MISSING_DEPS ${missing_deps[*]}"
         print_info "$MSG_INSTALL_DEPS"
-        print_info "  Arch Linux: sudo pacman -S ffmpeg"
-        print_info "  Ubuntu/Debian: sudo apt install ffmpeg"
+        print_info "  Arch Linux: sudo pacman -S ffmpeg kdialog"
+        print_info "  Ubuntu/Debian: sudo apt install ffmpeg kdialog"
         exit 1
     fi
 
@@ -180,7 +189,7 @@ check_dependencies() {
 
 # Function to create audio context menu
 create_audio_menu() {
-    print_step "2" "5" "$MSG_CREATING_AUDIO"
+    print_step "3" "6" "$MSG_CREATING_AUDIO"
 
     # Audio Convert Menu
     cat > "$INSTALL_DIR/multimedia-convert-audio.desktop" << 'EOF'
@@ -248,7 +257,7 @@ EOF
 
 # Function to create image context menu
 create_image_menu() {
-    print_step "3" "5" "$MSG_CREATING_IMAGE"
+    print_step "4" "6" "$MSG_CREATING_IMAGE"
 
     # Image Convert Menu
     cat > "$INSTALL_DIR/multimedia-convert-image.desktop" << 'EOF'
@@ -311,7 +320,7 @@ EOF
 
 # Function to create video context menu
 create_video_menu() {
-    print_step "4" "5" "$MSG_CREATING_VIDEO"
+    print_step "5" "6" "$MSG_CREATING_VIDEO"
 
     # Video Convert Menu
     cat > "$INSTALL_DIR/multimedia-convert-video.desktop" << 'EOF'
@@ -715,13 +724,252 @@ EOF
     print_success "$MSG_VIDEO_CREATED"
 }
 
+# Function to create the Compress Limit menu and its helper script
+create_compress_limit_menu() {
+    print_step "6" "6" "$MSG_CREATING_COMPRESS_LIMIT"
+
+    mkdir -p "$SCRIPTS_DIR"
+
+    # Helper script: computes a single-pass target bitrate from the requested
+    # size budget and the source file's duration, then encodes the video
+    # exactly once (no two-pass / no re-encoding) to fit that budget.
+    cat > "$SCRIPTS_DIR/compress_limit.sh" << 'HELPEREOF'
+#!/bin/bash
+# compress_limit.sh - Compress video(s) to a target size budget in a single encoding pass.
+# Usage: compress_limit.sh <codec_key> <fixed_budget_mb|""> -- file1 [file2 ...]
+
+set -e
+
+# Detect user language, same logic as the installer (ru/uk/en)
+_lang="${LANG:-${LC_MESSAGES:-en}}"
+case "${_lang%%_*}" in
+    ru|be|kk) HL_LANG="ru" ;;
+    uk) HL_LANG="uk" ;;
+    *) HL_LANG="en" ;;
+esac
+
+case "$HL_LANG" in
+    ru)
+        MSG_INPUT_PROMPT="Укажите лимит размера итогового файла (в МБ):"
+        MSG_INVALID_LIMIT="Некорректный лимит размера:"
+        MSG_UNKNOWN_CODEC="Неизвестный кодек:"
+        MSG_HEADER="Сжатие до лимита:"
+        MSG_BUDGET="лимит на файл:"
+        MSG_TIGHT="Лимит слишком мал для такой длительности, качество будет очень низким."
+        MSG_DONE="Готово:"
+        MSG_TARGET="цель"
+        ;;
+    uk)
+        MSG_INPUT_PROMPT="Вкажіть ліміт розміру підсумкового файлу (у МБ):"
+        MSG_INVALID_LIMIT="Некоректний ліміт розміру:"
+        MSG_UNKNOWN_CODEC="Невідомий кодек:"
+        MSG_HEADER="Стиснення до ліміту:"
+        MSG_BUDGET="ліміт на файл:"
+        MSG_TIGHT="Ліміт занадто малий для такої тривалості, якість буде дуже низькою."
+        MSG_DONE="Готово:"
+        MSG_TARGET="ціль"
+        ;;
+    *)
+        MSG_INPUT_PROMPT="Enter the target size limit for the final file (in MB):"
+        MSG_INVALID_LIMIT="Invalid size limit:"
+        MSG_UNKNOWN_CODEC="Unknown codec:"
+        MSG_HEADER="Compress Limit:"
+        MSG_BUDGET="budget per file:"
+        MSG_TIGHT="Budget is very tight for this duration, quality will be poor."
+        MSG_DONE="Done:"
+        MSG_TARGET="target"
+        ;;
+esac
+
+CODEC_KEY="$1"; shift
+FIXED_BUDGET_MB="$1"; shift
+if [ "$1" = "--" ]; then shift; fi
+FILES=("$@")
+
+case "$CODEC_KEY" in
+    h264_cpu)
+        LABEL="H.264 [CPU]"
+        PRE=()
+        ENC=(-c:v libx264 -profile:v main -pix_fmt yuv420p -preset medium)
+        SUFFIX="h264cpu"
+        ;;
+    h264_gpu)
+        LABEL="H.264 [GPU]"
+        PRE=(-hwaccel cuda -hwaccel_output_format cuda)
+        ENC=(-c:v h264_nvenc -profile:v main -preset p7 -rc:v vbr)
+        SUFFIX="h264gpu"
+        ;;
+    h265_cpu)
+        LABEL="HEVC [CPU]"
+        PRE=()
+        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium)
+        SUFFIX="hevccpu"
+        ;;
+    h265_gpu)
+        LABEL="HEVC [GPU]"
+        PRE=(-hwaccel cuda -hwaccel_output_format cuda)
+        ENC=(-c:v hevc_nvenc -profile:v main -preset p7 -rc:v vbr)
+        SUFFIX="hevcgpu"
+        ;;
+    av1_cpu)
+        LABEL="AV1 [CPU]"
+        PRE=()
+        ENC=(-c:v libsvtav1 -preset 6 -pix_fmt yuv420p)
+        SUFFIX="av1cpu"
+        ;;
+    av1_gpu)
+        LABEL="AV1 [GPU]"
+        PRE=(-hwaccel cuda -hwaccel_output_format cuda)
+        ENC=(-c:v av1_nvenc -preset p7 -rc:v vbr)
+        SUFFIX="av1gpu"
+        ;;
+    discord)
+        LABEL="Discord (HEVC [CPU])"
+        PRE=()
+        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium)
+        SUFFIX="discord"
+        ;;
+    *)
+        kdialog --error "$MSG_UNKNOWN_CODEC $CODEC_KEY"
+        exit 1
+        ;;
+esac
+
+# Ask the user for the size budget, unless one is fixed for this action (e.g. Discord = 20 MB)
+if [ -n "$FIXED_BUDGET_MB" ]; then
+    BUDGET_MB="$FIXED_BUDGET_MB"
+else
+    BUDGET_MB=$(kdialog --title "Compress Limit — $LABEL" --inputbox "$MSG_INPUT_PROMPT" "20")
+    if [ $? -ne 0 ] || [ -z "$BUDGET_MB" ]; then
+        exit 0
+    fi
+fi
+
+if ! [[ "$BUDGET_MB" =~ ^[0-9]+([.][0-9]+)?$ ]] || ! awk -v v="$BUDGET_MB" 'BEGIN { exit !(v > 0) }'; then
+    kdialog --error "$MSG_INVALID_LIMIT $BUDGET_MB"
+    exit 1
+fi
+
+echo "=== $MSG_HEADER $LABEL | $MSG_BUDGET ${BUDGET_MB} MB ==="
+echo
+
+for file in "${FILES[@]}"; do
+    [ -f "$file" ] || continue
+
+    # Duration in whole seconds (rounded down); fall back to 1s if ffprobe can't tell
+    DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$file" 2>/dev/null)
+    DURATION=${DURATION%.*}
+    if [ -z "$DURATION" ] || [ "$DURATION" -le 0 ] 2>/dev/null; then
+        DURATION=1
+    fi
+
+    # Total bitrate available for the whole budget (kbps), with a 3% safety
+    # margin to cover container/muxing overhead so the real file lands under budget.
+    TOTAL_KBPS=$(awk -v mb="$BUDGET_MB" -v dur="$DURATION" 'BEGIN { v = (mb * 8192 * 0.97) / dur; if (v < 1) v = 1; printf "%d", v }')
+
+    # Pick an audio bitrate that scales down for very tight budgets
+    if [ "$TOTAL_KBPS" -gt 400 ]; then
+        AUDIO_KBPS=128
+    elif [ "$TOTAL_KBPS" -gt 150 ]; then
+        AUDIO_KBPS=96
+    else
+        AUDIO_KBPS=64
+    fi
+
+    VIDEO_KBPS=$((TOTAL_KBPS - AUDIO_KBPS))
+    if [ "$VIDEO_KBPS" -lt 50 ]; then
+        VIDEO_KBPS=50
+        echo "[!] \"$(basename "$file")\": $MSG_TIGHT"
+    fi
+
+    MAXRATE_KBPS=$(( VIDEO_KBPS * 145 / 100 ))
+    BUFSIZE_KBPS=$(( VIDEO_KBPS * 2 ))
+
+    if [ "$CODEC_KEY" = "discord" ]; then
+        OUTPUT="${file%.*}_discord.mp4"
+    else
+        OUTPUT="${file%.*}_limit_${BUDGET_MB}MB_${SUFFIX}.mp4"
+    fi
+
+    echo "-> $(basename "$file") | duration=${DURATION}s | video=${VIDEO_KBPS}k audio=${AUDIO_KBPS}k -> $(basename "$OUTPUT")"
+
+    # Single encoding pass: bitrate is pre-computed above, no second/duplicate encode.
+    ffmpeg -y "${PRE[@]}" -i "$file" "${ENC[@]}" \
+        -b:v "${VIDEO_KBPS}k" -maxrate "${MAXRATE_KBPS}k" -bufsize "${BUFSIZE_KBPS}k" \
+        -c:a aac -b:a "${AUDIO_KBPS}k" \
+        "$OUTPUT"
+
+    if [ -f "$OUTPUT" ]; then
+        ACTUAL_MB=$(du -m "$OUTPUT" | cut -f1)
+        echo "   $MSG_DONE ~${ACTUAL_MB} MB ($MSG_TARGET ${BUDGET_MB} MB)"
+    fi
+    echo
+done
+HELPEREOF
+
+    chmod +x "$SCRIPTS_DIR/compress_limit.sh"
+
+    # Compress Limit Menu
+    cat > "$INSTALL_DIR/multimedia-compress-limit.desktop" << EOF
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
+Actions=compressLimit1Discord;compressLimit2H264Cpu;compressLimit3H264Gpu;compressLimit4H265Cpu;compressLimit5H265Gpu;compressLimit6AV1Cpu;compressLimit7AV1Gpu
+X-KDE-Submenu=Compress Limit
+X-KDE-Submenu[ru]=Сжать до лимита
+X-KDE-Submenu[uk]=Стиснути до ліміту
+X-KDE-Priority=TopLevel
+X-KDE-AuthorizeAction=shell_access
+
+[Desktop Action compressLimit2H264Cpu]
+Name=h264 [CPU]
+Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h264_cpu "" -- "\$@"' bash %F
+Icon=video-compress
+
+[Desktop Action compressLimit3H264Gpu]
+Name=h264 [GPU]
+Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h264_gpu "" -- "\$@"' bash %F
+Icon=video-compress
+
+[Desktop Action compressLimit4H265Cpu]
+Name=HEVC [CPU]
+Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h265_cpu "" -- "\$@"' bash %F
+Icon=video-compress
+
+[Desktop Action compressLimit5H265Gpu]
+Name=HEVC [GPU]
+Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h265_gpu "" -- "\$@"' bash %F
+Icon=video-compress
+
+[Desktop Action compressLimit6AV1Cpu]
+Name=AV1 [CPU]
+Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" av1_cpu "" -- "\$@"' bash %F
+Icon=video-compress
+
+[Desktop Action compressLimit7AV1Gpu]
+Name=AV1 [GPU]
+Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" av1_gpu "" -- "\$@"' bash %F
+Icon=video-compress
+
+[Desktop Action compressLimit1Discord]
+Name=Discord
+Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" discord 20 -- "\$@"' bash %F
+Icon=video-compress
+EOF
+
+    chmod +x "$INSTALL_DIR/multimedia-compress-limit.desktop"
+
+    print_success "$MSG_COMPRESS_LIMIT_CREATED"
+}
+
 # Function to install
 install() {
     print_header "$MSG_TITLE"
 
     check_dependencies
 
-    print_step "5" "5" "$MSG_SETUP_DIR"
+    print_step "2" "6" "$MSG_SETUP_DIR"
     # Create installation directory
     mkdir -p "$INSTALL_DIR"
     print_success "$MSG_DIR_READY"
@@ -729,6 +977,7 @@ install() {
     create_audio_menu
     create_image_menu
     create_video_menu
+    create_compress_limit_menu
 
     print_completion
 }
@@ -747,6 +996,8 @@ uninstall() {
         rm -f "$INSTALL_DIR"/multimedia-make-frame-sequence.desktop
         rm -f "$INSTALL_DIR"/multimedia-stats.desktop
         rm -f "$INSTALL_DIR"/multimedia-video-options.desktop
+        rm -f "$INSTALL_DIR"/multimedia-compress-limit.desktop
+        rm -rf "$SCRIPTS_DIR"
         print_success "$MSG_FILES_REMOVED"
     else
         print_warning "$MSG_DIR_NOT_FOUND $INSTALL_DIR"
