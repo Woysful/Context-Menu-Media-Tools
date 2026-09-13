@@ -488,14 +488,14 @@ Icon=video-compress
 Name=H.265 [CPU]
 Name[ru]=H.265 [CPU]
 Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 22 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265GpuNvidia]
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 28 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 28 -preset p7 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -551,14 +551,14 @@ Icon=video-compress
 Name=H.265 [CPU]
 Name[ru]=H.265 [CPU]
 Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 30 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265GpuNvidia]
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 37 -preset p7 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -614,14 +614,14 @@ Icon=video-compress
 Name=H.265 [CPU]
 Name[ru]=H.265 [CPU]
 Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 35 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressH265GpuNvidia]
 Name=H.265 [GPU] Nvidia
 Name[ru]=H.265 [GPU] Nvidia
 Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 43 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
+Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 43 -preset p7 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
 Icon=video-compress
 
 [Desktop Action compressAV1CpuFast]
@@ -802,13 +802,13 @@ case "$CODEC_KEY" in
     h265_cpu)
         LABEL="HEVC [CPU]"
         PRE=()
-        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium)
+        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium -tag:v hvc1)
         SUFFIX="hevccpu"
         ;;
     h265_gpu)
         LABEL="HEVC [GPU]"
         PRE=(-hwaccel cuda -hwaccel_output_format cuda)
-        ENC=(-c:v hevc_nvenc -profile:v main -preset p7 -rc:v vbr)
+        ENC=(-c:v hevc_nvenc -profile:v main -preset p7 -rc:v vbr -tag:v hvc1)
         SUFFIX="hevcgpu"
         ;;
     av1_cpu)
@@ -826,7 +826,7 @@ case "$CODEC_KEY" in
     discord)
         LABEL="Discord (HEVC [CPU])"
         PRE=()
-        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium)
+        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium -tag:v hvc1)
         SUFFIX="discord"
         ;;
     *)
@@ -923,12 +923,12 @@ X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
 [Desktop Action compressLimit2H264Cpu]
-Name=h264 [CPU]
+Name=H.264 [CPU]
 Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h264_cpu "" -- "\$@"' bash %F
 Icon=video-compress
 
 [Desktop Action compressLimit3H264Gpu]
-Name=h264 [GPU]
+Name=H.264 [GPU]
 Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h264_gpu "" -- "\$@"' bash %F
 Icon=video-compress
 
