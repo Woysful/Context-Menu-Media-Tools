@@ -17,8 +17,25 @@ NC='\033[0m' # No Color
 # kio/servicemenus is correct for KDE Plasma 6 Service Menus
 INSTALL_DIR="$HOME/.local/share/kio/servicemenus"
 
-# Directory for helper scripts used by service menu actions (e.g. Compress Limit)
+# Directory for helper scripts used by service menu actions
+# (terminal launcher, dialog, GPU helper, Compress Video, Convert Video / Audio,
+# Extract Audio, Make frame sequence, Convert to WebP anim)
 SCRIPTS_DIR="$HOME/.local/share/multimedia-context-menu-scripts"
+
+# Helper scripts live in the repository under linux/scripts/.
+# The installer uses a local copy when it is run from a cloned repository and
+# downloads the files from GitHub otherwise.
+#   MMT_BRANCH        - branch/tag to download from (default: main)
+#   MMT_REPO_RAW_URL  - override the raw files base URL (forks, mirrors, testing)
+REPO_RAW_URL="${MMT_REPO_RAW_URL:-https://raw.githubusercontent.com/Woysful/Context-Menu-Media-Tools/${MMT_BRANCH:-main}}"
+HELPER_SCRIPTS_PATH="linux/scripts"
+HELPER_SCRIPTS=(mmt-terminal mmt-dialog mmt-gpu.sh compress_video.sh compress_mp4.sh compress_limit.sh convert_media.sh convert_webp_anim.sh)
+
+# Directory of this installer (empty when the script is piped into bash)
+SOURCE_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 
 # Function to detect user language
 detect_language() {
@@ -47,8 +64,13 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Меню изображений создано"
         MSG_CREATING_VIDEO="Создание меню видео..."
         MSG_VIDEO_CREATED="✓ Меню видео создано"
-        MSG_CREATING_COMPRESS_LIMIT="Создание меню сжатия до лимита..."
-        MSG_COMPRESS_LIMIT_CREATED="✓ Меню сжатия до лимита создано"
+        MSG_INSTALLING_SCRIPTS="Установка вспомогательных скриптов..."
+        MSG_SCRIPTS_READY="✓ Вспомогательные скрипты установлены"
+        MSG_COPYING="копирование"
+        MSG_DOWNLOADING="загрузка"
+        MSG_DOWNLOAD_FAILED="Не удалось загрузить:"
+        MSG_BAD_SCRIPT="Получен некорректный файл (ожидался shell-скрипт):"
+        MSG_NEED_DOWNLOADER="Для загрузки скриптов нужен curl или wget"
         MSG_CONVERT_AUDIO="Конвертировать аудио"
         MSG_SETUP_DIR="Настройка директории установки..."
         MSG_DIR_READY="✓ Директория настроена"
@@ -73,8 +95,13 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Меню зображень створено"
         MSG_CREATING_VIDEO="Створення меню відео..."
         MSG_VIDEO_CREATED="✓ Меню відео створено"
-        MSG_CREATING_COMPRESS_LIMIT="Створення меню стиснення до ліміту..."
-        MSG_COMPRESS_LIMIT_CREATED="✓ Меню стиснення до ліміту створено"
+        MSG_INSTALLING_SCRIPTS="Встановлення допоміжних скриптів..."
+        MSG_SCRIPTS_READY="✓ Допоміжні скрипти встановлено"
+        MSG_COPYING="копіювання"
+        MSG_DOWNLOADING="завантаження"
+        MSG_DOWNLOAD_FAILED="Не вдалося завантажити:"
+        MSG_BAD_SCRIPT="Отримано некоректний файл (очікувався shell-скрипт):"
+        MSG_NEED_DOWNLOADER="Для завантаження скриптів потрібен curl або wget"
         MSG_CONVERT_AUDIO="Конвертувати аудіо"
         MSG_SETUP_DIR="Налаштування директорії встановлення..."
         MSG_DIR_READY="✓ Директорія налаштована"
@@ -99,8 +126,13 @@ case "$USER_LANG" in
         MSG_IMAGE_CREATED="✓ Image menu created"
         MSG_CREATING_VIDEO="Creating video menu..."
         MSG_VIDEO_CREATED="✓ Video menu created"
-        MSG_CREATING_COMPRESS_LIMIT="Creating compress limit menu..."
-        MSG_COMPRESS_LIMIT_CREATED="✓ Compress limit menu created"
+        MSG_INSTALLING_SCRIPTS="Installing helper scripts..."
+        MSG_SCRIPTS_READY="✓ Helper scripts installed"
+        MSG_COPYING="copying"
+        MSG_DOWNLOADING="downloading"
+        MSG_DOWNLOAD_FAILED="Failed to download:"
+        MSG_BAD_SCRIPT="Received an unexpected file (a shell script was expected):"
+        MSG_NEED_DOWNLOADER="curl or wget is required to download the helper scripts"
         MSG_CONVERT_AUDIO="Convert Audio"
         MSG_SETUP_DIR="Setting up installation directory..."
         MSG_DIR_READY="✓ Directory configured"
@@ -166,7 +198,7 @@ print_completion() {
 check_dependencies() {
     print_step "1" "6" "$MSG_CHECKING_DEPS"
 
-    local deps=("ffmpeg" "ffprobe" "kdialog")
+    local deps=("ffmpeg" "ffprobe" "python3")
     local missing_deps=()
 
     for dep in "${deps[@]}"; do
@@ -175,11 +207,18 @@ check_dependencies() {
         fi
     done
 
+    # The dialogs are drawn with Qt: PyQt6 or PySide6 is needed
+    if command -v python3 &> /dev/null \
+        && ! python3 -c 'import PyQt6.QtWidgets' &> /dev/null \
+        && ! python3 -c 'import PySide6.QtWidgets' &> /dev/null; then
+        missing_deps+=("python-pyqt6 (or python-pyside6)")
+    fi
+
     if [ ${#missing_deps[@]} -ne 0 ]; then
         print_error "$MSG_MISSING_DEPS ${missing_deps[*]}"
         print_info "$MSG_INSTALL_DEPS"
-        print_info "  Arch Linux: sudo pacman -S ffmpeg kdialog"
-        print_info "  Ubuntu/Debian: sudo apt install ffmpeg kdialog"
+        print_info "  Arch Linux: sudo pacman -S ffmpeg python-pyqt6"
+        print_info "  Ubuntu/Debian: sudo apt install ffmpeg python3-pyqt6"
         exit 1
     fi
 
@@ -189,7 +228,7 @@ check_dependencies() {
 
 # Function to create audio context menu
 create_audio_menu() {
-    print_step "3" "6" "$MSG_CREATING_AUDIO"
+    print_step "4" "6" "$MSG_CREATING_AUDIO"
 
     # Audio Convert Menu
     cat > "$INSTALL_DIR/multimedia-convert-audio.desktop" << 'EOF'
@@ -206,49 +245,49 @@ X-KDE-AuthorizeAction=shell_access
 
 [Desktop Action convertWAV]
 Name=WAV
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a pcm_s16le "${file%.*}.wav"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a pcm_s16le "${file%.*}.wav"; done' bash %F
 Icon=audio-wav
 
 [Desktop Action convertMP3]
 Name=MP3
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -ab 192k -map_metadata 0 -id3v2_version 3 "${file%.*}.mp3"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -ab 192k -map_metadata 0 -id3v2_version 3 "${file%.*}.mp3"; done' bash %F
 Icon=audio-mpeg
 
 [Desktop Action convertFLAC]
 Name=FLAC
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a flac "${file%.*}.flac"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a flac "${file%.*}.flac"; done' bash %F
 Icon=audio-flac
 
 [Desktop Action convertAAC]
 Name=AAC
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a aac -b:a 192k "${file%.*}.aac"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a aac -b:a 192k "${file%.*}.aac"; done' bash %F
 Icon=audio-aac
 
 [Desktop Action convertOGG]
 Name=OGG
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a libvorbis -q:a 0 "${file%.*}.ogg"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a libvorbis -q:a 0 "${file%.*}.ogg"; done' bash %F
 Icon=audio-ogg
 
 [Desktop Action convertWMA]
 Name=WMA
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a wmav2 -b:a 192k "${file%.*}.wma"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a wmav2 -b:a 192k "${file%.*}.wma"; done' bash %F
 Icon=audio-x-ms-wma
 
 [Desktop Action convertM4A]
 Name=M4A
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a aac -b:a 192k "${file%.*}.m4a"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:a aac -b:a 192k "${file%.*}.m4a"; done' bash %F
 Icon=audio-mp4
 
 [Desktop Action convertOpus]
 Name=Opus
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -q:a 0 -c:a libopus "${file%.*}.opus"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -q:a 0 -c:a libopus "${file%.*}.opus"; done' bash %F
 Icon=audio-opus
 
 [Desktop Action statsAudio]
 Name=Stats
 Name[ru]=Детали
 Name[uk]=Деталі
-Exec=konsole --hold -e bash -c 'for file in "$@" ; do ffprobe -hide_banner -i "$file"; echo "Press Enter to continue..."; read; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffprobe -hide_banner -i "$file"; echo "Press Enter to continue..."; read; done' bash %F
 Icon=documentinfo
 EOF
 
@@ -257,7 +296,7 @@ EOF
 
 # Function to create image context menu
 create_image_menu() {
-    print_step "4" "6" "$MSG_CREATING_IMAGE"
+    print_step "5" "6" "$MSG_CREATING_IMAGE"
 
     # Image Convert Menu
     cat > "$INSTALL_DIR/multimedia-convert-image.desktop" << 'EOF'
@@ -274,44 +313,44 @@ X-KDE-AuthorizeAction=shell_access
 
 [Desktop Action convertJPG]
 Name=JPG
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -q:v 5 "${file%.*}.jpg"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -q:v 5 "${file%.*}.jpg"; done' bash %F
 Icon=image-jpeg
 
 [Desktop Action convertPNG]
 Name=PNG
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.png"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.png"; done' bash %F
 Icon=image-png
 
 [Desktop Action convertBMP]
 Name=BMP
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.bmp"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.bmp"; done' bash %F
 Icon=image-bmp
 
 [Desktop Action convertTIFF]
 Name=TIFF
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.tiff"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.tiff"; done' bash %F
 Icon=image-tiff
 
 [Desktop Action convertGIF]
 Name=GIF
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -f gif "${file%.*}.gif"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -f gif "${file%.*}.gif"; done' bash %F
 Icon=image-gif
 
 [Desktop Action convertWebP]
 Name=WebP
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libwebp -q:v 95 "${file%.*}.webp"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libwebp -q:v 95 "${file%.*}.webp"; done' bash %F
 Icon=image-webp
 
 [Desktop Action convertTGA]
 Name=TGA
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.tga"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" "${file%.*}.tga"; done' bash %F
 Icon=image-x-tga
 
 [Desktop Action statsImage]
 Name=Stats
 Name[ru]=Детали
 Name[uk]=Деталі
-Exec=konsole --hold -e bash -c 'for file in "$@" ; do ffprobe -hide_banner -i "$file"; echo "Press Enter to continue..."; read; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffprobe -hide_banner -i "$file"; echo "Press Enter to continue..."; read; done' bash %F
 Icon=documentinfo
 EOF
 
@@ -320,50 +359,88 @@ EOF
 
 # Function to create video context menu
 create_video_menu() {
-    print_step "5" "6" "$MSG_CREATING_VIDEO"
+    print_step "6" "6" "$MSG_CREATING_VIDEO"
 
-    # Video Convert Menu
+    # The video items are plain (top-level) actions. Dolphin lists plain actions
+    # sorted by their action identifier (the name in Actions=), so the numeric
+    # prefix ("01_", "02_", ...) defines the order of the menu:
+    #   Compress Video, Convert Video, Convert Audio,
+    #   Extract Audio, Delete sound, Make frame sequence, Convert to WebP anim, Stats
+    # (Submenus are always listed before plain actions, which is why every
+    # item is a plain action with its own dialog instead of a submenu.)
+
+    # Compress Video: one item, one dialog with two tabs - "Presets" (compression level +
+    # codec, compress_mp4.sh) and "Size limit" (encode to a target file size,
+    # compress_limit.sh). compress_video.sh shows the dialog and starts the chosen one.
+    cat > "$INSTALL_DIR/multimedia-compress-video.desktop" << 'EOF'
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
+Actions=01_compressVideo
+X-KDE-Priority=TopLevel
+X-KDE-AuthorizeAction=shell_access
+
+[Desktop Action 01_compressVideo]
+Name=Compress Video
+Name[ru]=Сжать видео
+Name[uk]=Стиснути відео
+Exec=@SCRIPTS_DIR@/compress_video.sh %F
+Icon=video-compress
+EOF
+
+    # Convert Video: the output format is chosen in a dialog
     cat > "$INSTALL_DIR/multimedia-convert-video.desktop" << 'EOF'
 [Desktop Entry]
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=convertMP4;convertAVI;convertMOV;convertMKV;convertM4V;convertWebM
-X-KDE-Submenu=Convert Video
-X-KDE-Submenu[ru]=Конвертировать
-X-KDE-Submenu[uk]=Конвертувати
+Actions=02_convertVideo
 X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
-[Desktop Action convertMP4]
-Name=MP4
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v copy -c:a aac "${file%.*}.mp4"; done' bash %F
+[Desktop Action 02_convertVideo]
+Name=Convert Video
+Name[ru]=Конвертировать видео
+Name[uk]=Конвертувати відео
+Exec=@SCRIPTS_DIR@/convert_media.sh video %F
 Icon=video-mp4
+EOF
 
-[Desktop Action convertAVI]
-Name=AVI
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v mpeg4 -q:v 2 "${file%.*}.avi"; done' bash %F
-Icon=video-x-msvideo
+    # Convert Audio (audio tracks of a video): the output format is chosen in a dialog
+    cat > "$INSTALL_DIR/multimedia-convert-video-audio.desktop" << 'EOF'
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
+Actions=03_convertAudio
+X-KDE-Priority=TopLevel
+X-KDE-AuthorizeAction=shell_access
 
-[Desktop Action convertMOV]
-Name=MOV
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v copy "${file%.*}.mov"; done' bash %F
-Icon=video-quicktime
+[Desktop Action 03_convertAudio]
+Name=Convert Audio
+Name[ru]=Конвертировать аудио
+Name[uk]=Конвертувати аудіо
+Exec=@SCRIPTS_DIR@/convert_media.sh audio %F
+Icon=audio-wav
+EOF
 
-[Desktop Action convertMKV]
-Name=MKV
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v copy -c:a copy "${file%.*}.mkv"; done' bash %F
-Icon=video-x-matroska
+    # Extract Audio: the output format is chosen in a dialog
+    cat > "$INSTALL_DIR/multimedia-extract-audio.desktop" << 'EOF'
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
+Actions=04_extractAudio
+X-KDE-Priority=TopLevel
+X-KDE-AuthorizeAction=shell_access
 
-[Desktop Action convertM4V]
-Name=M4V
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v copy -c:a aac "${file%.*}.m4v"; done' bash %F
-Icon=video-mp4
-
-[Desktop Action convertWebM]
-Name=WebM
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libvpx-vp9 -c:a libopus "${file%.*}.webm"; done' bash %F
-Icon=video-webm
+[Desktop Action 04_extractAudio]
+Name=Extract Audio
+Name[ru]=Извлечь аудио
+Name[uk]=Витягнути аудіо
+Exec=@SCRIPTS_DIR@/convert_media.sh extract %F
+Icon=audio-mpeg
 EOF
 
     # Delete Sound Menu
@@ -372,332 +449,52 @@ EOF
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=deleteSound
+Actions=05_deleteSound
 X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
-[Desktop Action deleteSound]
+[Desktop Action 05_deleteSound]
 Name=Delete sound
 Name[ru]=Удалить звук
 Name[uk]=Видалити звук
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -an -c copy "${file%.*} (no audio).${file##*.}"; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffmpeg -i "$file" -an -c copy "${file%.*} (no audio).${file##*.}"; done' bash %F
 Icon=media-track-remove-amarok
 EOF
 
-    # Extract Audio Menu
-    cat > "$INSTALL_DIR/multimedia-extract-audio.desktop" << 'EOF'
-[Desktop Entry]
-Type=Service
-X-KDE-ServiceTypes=KonqPopupMenu/Plugin
-MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=extractMP3;extractAAC;extractOpus;extractWAV;extractM4A;extractMKA
-X-KDE-Submenu=Extract Audio
-X-KDE-Submenu[ru]=Извлечь аудио
-X-KDE-Submenu[uk]=Витягнути аудіо
-X-KDE-Priority=TopLevel
-X-KDE-AuthorizeAction=shell_access
-
-[Desktop Action extractMP3]
-Name=Mp3
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -vn -q:a 0 "${file%.*}.mp3"; done' bash %F
-Icon=audio-mpeg
-
-[Desktop Action extractAAC]
-Name=AAC
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -vn -c copy "${file%.*}.aac"; done' bash %F
-Icon=audio-aac
-
-[Desktop Action extractOpus]
-Name=Opus
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -vn -c:a libopus -q:a 0 -vbr on "${file%.*}.opus"; done' bash %F
-Icon=audio-opus
-
-[Desktop Action extractWAV]
-Name=WAV
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -vn -q:a 0 "${file%.*}.wav"; done' bash %F
-Icon=audio-wav
-
-[Desktop Action extractM4A]
-Name=M4A
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -vn -q:a 0 -map a -map_metadata 0 "${file%.*}.m4a"; done' bash %F
-Icon=audio-mp4
-
-[Desktop Action extractMKA]
-Name=MKA
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -vn -c:a copy -map a -map_metadata 0 "${file%.*}.mka"; done' bash %F
-Icon=audio-x-matroska
-EOF
-
-    # Make Frame Sequence Menu
+    # Make Frame Sequence: the image format is chosen in a dialog
     cat > "$INSTALL_DIR/multimedia-make-frame-sequence.desktop" << 'EOF'
 [Desktop Entry]
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=makePNG;makeJPG;makeWebP
-X-KDE-Submenu=Make frame sequence
-X-KDE-Submenu[ru]=Разбить на кадры
-X-KDE-Submenu[uk]=Розбити на кадри
+Actions=06_makeFrames
 X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
-[Desktop Action makePNG]
-Name=PNG
-Exec=konsole -e bash -c 'for file in "$@" ; do mkdir -p "${file%.*}"; ffmpeg -i "$file" "${file%.*}/frame_%06d.png"; done' bash %F
+[Desktop Action 06_makeFrames]
+Name=Make frame sequence
+Name[ru]=Разбить на кадры
+Name[uk]=Розбити на кадри
+Exec=@SCRIPTS_DIR@/convert_media.sh frames %F
 Icon=image-png
+EOF
 
-[Desktop Action makeJPG]
-Name=JPG
-Exec=konsole -e bash -c 'for file in "$@" ; do mkdir -p "${file%.*}"; ffmpeg -i "$file" -q:v 1 "${file%.*}/frame_%06d.jpg"; done' bash %F
-Icon=image-jpeg
+    # Convert to animated WebP: size limit, FPS, quality and compression are chosen in one dialog
+    cat > "$INSTALL_DIR/multimedia-convert-webp-anim.desktop" << 'EOF'
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
+Actions=07_convertWebPAnim
+X-KDE-Priority=TopLevel
+X-KDE-AuthorizeAction=shell_access
 
-[Desktop Action makeWebP]
-Name=WebP
-Exec=konsole -e bash -c 'for file in "$@" ; do mkdir -p "${file%.*}"; ffmpeg -i "$file" -c:v libwebp -q:v 95 -pix_fmt yuva420p "${file%.*}/frame_%06d.webp"; done' bash %F
+[Desktop Action 07_convertWebPAnim]
+Name=Convert to WebP anim
+Name[ru]=Конвертировать в анимированный WebP
+Name[uk]=Конвертувати в анімований WebP
+Exec=@SCRIPTS_DIR@/convert_webp_anim.sh %F
 Icon=image-webp
-EOF
-
-    # Compress to MP4 Menu (Good Quality)
-    cat > "$INSTALL_DIR/multimedia-compress-mp4.desktop" << 'EOF'
-[Desktop Entry]
-Type=Service
-X-KDE-ServiceTypes=KonqPopupMenu/Plugin
-MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=compressH264;compressH264GpuNvidia;compressH265;compressH265GpuNvidia;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
-X-KDE-Submenu=Compress to MP4
-X-KDE-Submenu[ru]=Сжать в MP4
-X-KDE-Submenu[uk]=Стиснути в MP4
-X-KDE-Priority=TopLevel
-X-KDE-AuthorizeAction=shell_access
-
-[Desktop Action compressH264]
-Name=H.264 [CPU]
-Name[ru]=H.264 [CPU]
-Name[uk]=H.264 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx264 -profile:v main -crf 22 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH264GpuNvidia]
-Name=H.264 [GPU] Nvidia
-Name[ru]=H.264 [GPU] Nvidia
-Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -profile:v main -cq 29 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH265]
-Name=H.265 [CPU]
-Name[ru]=H.265 [CPU]
-Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 22 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH265GpuNvidia]
-Name=H.265 [GPU] Nvidia
-Name[ru]=H.265 [GPU] Nvidia
-Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 28 -preset p7 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1CpuFast]
-Name=AV1 [CPU] Fast
-Name[ru]=AV1 [CPU] Быстрый
-Name[uk]=AV1 [CPU] Швидкий
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libsvtav1 -preset 7 -rc vbr -crf 32 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1CpuSlow]
-Name=AV1 [CPU] Slow
-Name[ru]=AV1 [CPU] Медленный
-Name[uk]=AV1 [CPU] Повільний
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libsvtav1 -preset 5 -rc vbr -crf 32 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1GpuNvidia]
-Name=AV1 [GPU] Nvidia
-Name[ru]=AV1 [GPU] Nvidia
-Name[uk]=AV1 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v av1_nvenc -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-EOF
-
-    # Compress to MP4+ Menu (Medium Quality)
-    cat > "$INSTALL_DIR/multimedia-compress-mp4-plus.desktop" << 'EOF'
-[Desktop Entry]
-Type=Service
-X-KDE-ServiceTypes=KonqPopupMenu/Plugin
-MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=compressH264;compressH264GpuNvidia;compressH265;compressH265GpuNvidia;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
-X-KDE-Submenu=Compress to MP4+
-X-KDE-Submenu[ru]=Сжать в MP4+
-X-KDE-Submenu[uk]=Стиснути в MP4+
-X-KDE-Priority=TopLevel
-X-KDE-AuthorizeAction=shell_access
-
-[Desktop Action compressH264]
-Name=H.264 [CPU]
-Name[ru]=H.264 [CPU]
-Name[uk]=H.264 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx264 -profile:v main -crf 30 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH264GpuNvidia]
-Name=H.264 [GPU] Nvidia
-Name[ru]=H.264 [GPU] Nvidia
-Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -profile:v main -cq 37 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH265]
-Name=H.265 [CPU]
-Name[ru]=H.265 [CPU]
-Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 30 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH265GpuNvidia]
-Name=H.265 [GPU] Nvidia
-Name[ru]=H.265 [GPU] Nvidia
-Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 37 -preset p7 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1CpuFast]
-Name=AV1 [CPU] Fast
-Name[ru]=AV1 [CPU] Быстрый
-Name[uk]=AV1 [CPU] Швидкий
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libsvtav1 -preset 7 -rc vbr -crf 44 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1CpuSlow]
-Name=AV1 [CPU] Slow
-Name[ru]=AV1 [CPU] Медленный
-Name[uk]=AV1 [CPU] Повільний
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libsvtav1 -preset 5 -rc vbr -crf 44 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1GpuNvidia]
-Name=AV1 [GPU] Nvidia
-Name[ru]=AV1 [GPU] Nvidia
-Name[uk]=AV1 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v av1_nvenc -cq 47 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-EOF
-
-    # Compress to MP4++ Menu (Bad Quality/Small Size)
-    cat > "$INSTALL_DIR/multimedia-compress-mp4-plus-plus.desktop" << 'EOF'
-[Desktop Entry]
-Type=Service
-X-KDE-ServiceTypes=KonqPopupMenu/Plugin
-MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=compressH264;compressH264GpuNvidia;compressH265;compressH265GpuNvidia;compressAV1CpuFast;compressAV1CpuSlow;compressAV1GpuNvidia
-X-KDE-Submenu=Compress to MP4++
-X-KDE-Submenu[ru]=Сжать в MP4++
-X-KDE-Submenu[uk]=Стиснути в MP4++
-X-KDE-Priority=TopLevel
-X-KDE-AuthorizeAction=shell_access
-
-[Desktop Action compressH264]
-Name=H.264 [CPU]
-Name[ru]=H.264 [CPU]
-Name[uk]=H.264 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx264 -profile:v main -crf 35 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH264GpuNvidia]
-Name=H.264 [GPU] Nvidia
-Name[ru]=H.264 [GPU] Nvidia
-Name[uk]=H.264 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v h264_nvenc -profile:v main -cq 41 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH265]
-Name=H.265 [CPU]
-Name[ru]=H.265 [CPU]
-Name[uk]=H.265 [CPU]
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -pix_fmt yuv420p -c:v libx265 -profile:v main -crf 35 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressH265GpuNvidia]
-Name=H.265 [GPU] Nvidia
-Name[ru]=H.265 [GPU] Nvidia
-Name[uk]=H.265 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v hevc_nvenc -profile:v main -cq 43 -preset p7 -tag:v hvc1 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1CpuFast]
-Name=AV1 [CPU] Fast
-Name[ru]=AV1 [CPU] Быстрый
-Name[uk]=AV1 [CPU] Швидкий
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libsvtav1 -preset 5 -rc vbr -crf 55 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1CpuSlow]
-Name=AV1 [CPU] Slow
-Name[ru]=AV1 [CPU] Медленный
-Name[uk]=AV1 [CPU] Повільний
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -c:v libsvtav1 -preset 4 -rc vbr -crf 55 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-
-[Desktop Action compressAV1GpuNvidia]
-Name=AV1 [GPU] Nvidia
-Name[ru]=AV1 [GPU] Nvidia
-Name[uk]=AV1 [GPU] Nvidia
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i "$file" -c:v av1_nvenc -cq 56 -preset p7 "${file%.*}_compressed.mp4"; done' bash %F
-Icon=video-compress
-EOF
-
-    # Convert Audio Menu (Video)
-    cat > "$INSTALL_DIR/multimedia-convert-video-audio.desktop" << 'EOF'
-[Desktop Entry]
-Type=Service
-X-KDE-ServiceTypes=KonqPopupMenu/Plugin
-MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=convertAudioWAV;convertAudioMP3;convertAudioFLAC;convertAudioAAC;convertAudioOGG;convertAudioWMA;convertAudioM4A;convertAudioOpus
-X-KDE-Submenu=Convert Audio
-X-KDE-Submenu[ru]=Конвертировать аудио
-X-KDE-Submenu[uk]=Конвертувати аудіо
-X-KDE-Priority=TopLevel
-X-KDE-AuthorizeAction=shell_access
-
-[Desktop Action convertAudioWAV]
-Name=WAV
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a pcm_s16le "${file%.*}_audio_wav.${file##*.}"; done' bash %F
-Icon=audio-wav
-
-[Desktop Action convertAudioMP3]
-Name=MP3
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a mp3 -b:a 192k "${file%.*}_audio_mp3.${file##*.}"; done' bash %F
-Icon=audio-mpeg
-
-[Desktop Action convertAudioFLAC]
-Name=FLAC
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a flac "${file%.*}_audio_flac.${file##*.}"; done' bash %F
-Icon=audio-flac
-
-[Desktop Action convertAudioAAC]
-Name=AAC
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k "${file%.*}_audio_aac.${file##*.}"; done' bash %F
-Icon=audio-aac
-
-[Desktop Action convertAudioOGG]
-Name=OGG
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a libvorbis -q:a 0 "${file%.*}_audio_ogg.${file##*.}"; done' bash %F
-Icon=audio-ogg
-
-[Desktop Action convertAudioWMA]
-Name=WMA
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a wmav2 -b:a 192k "${file%.*}_audio_wma.${file##*.}"; done' bash %F
-Icon=audio-x-ms-wma
-
-[Desktop Action convertAudioM4A]
-Name=M4A
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k "${file%.*}_audio_m4a.${file##*.}"; done' bash %F
-Icon=audio-mp4
-
-[Desktop Action convertAudioOpus]
-Name=Opus
-Exec=konsole -e bash -c 'for file in "$@" ; do ffmpeg -i "$file" -map 0:v -c:v copy -map 0:a -c:a libopus -q:a 0 "${file%.*}_audio_opus.${file##*.}"; done' bash %F
-Icon=audio-opus
 EOF
 
     # Stats Menu
@@ -706,261 +503,95 @@ EOF
 Type=Service
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
 MimeType=audio/wav;audio/mpeg;audio/flac;audio/aac;audio/ogg;audio/x-ms-wma;audio/mp4;audio/webm;audio/opus;image/jpeg;image/png;image/bmp;image/tiff;image/gif;image/webp;image/x-tga;image/vnd.adobe.photoshop;video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=stats
+Actions=08_stats
 X-KDE-Priority=TopLevel
 X-KDE-AuthorizeAction=shell_access
 
-[Desktop Action stats]
+[Desktop Action 08_stats]
 Name=Stats
 Name[ru]=Детали
 Name[uk]=Деталі
-Exec=konsole --hold -e bash -c 'for file in "$@" ; do ffprobe -hide_banner -i "$file"; echo "Press Enter to continue..."; read; done' bash %F
+Exec=@TERMINAL@ bash -c 'for file in "$@" ; do ffprobe -hide_banner -i "$file"; echo "Press Enter to continue..."; read; done' bash %F
 Icon=documentinfo
 EOF
-
-    # Set executable permissions for all desktop files
-    chmod +x "$INSTALL_DIR"/*.desktop
 
     print_success "$MSG_VIDEO_CREATED"
 }
 
-# Function to create the Compress Limit menu and its helper script
-create_compress_limit_menu() {
-    print_step "6" "6" "$MSG_CREATING_COMPRESS_LIMIT"
+# Download a URL into a file using curl or wget
+download_file() {
+    local url="$1" dest="$2"
+    if command -v curl &> /dev/null; then
+        curl -fsSL --retry 2 -o "$dest" "$url"
+    elif command -v wget &> /dev/null; then
+        wget -q -O "$dest" "$url"
+    else
+        print_error "$MSG_NEED_DOWNLOADER"
+        return 2
+    fi
+}
+
+# Function to install helper scripts (local copy if available, GitHub otherwise)
+install_helper_scripts() {
+    print_step "3" "6" "$MSG_INSTALLING_SCRIPTS"
 
     mkdir -p "$SCRIPTS_DIR"
 
-    # Helper script: computes a single-pass target bitrate from the requested
-    # size budget and the source file's duration, then encodes the video
-    # exactly once (no two-pass / no re-encoding) to fit that budget.
-    cat > "$SCRIPTS_DIR/compress_limit.sh" << 'HELPEREOF'
-#!/bin/bash
-# compress_limit.sh - Compress video(s) to a target size budget in a single encoding pass.
-# Usage: compress_limit.sh <codec_key> <fixed_budget_mb|""> -- file1 [file2 ...]
+    local name tmp local_path url
+    for name in "${HELPER_SCRIPTS[@]}"; do
+        tmp="$(mktemp)"
+        local_path="$SOURCE_DIR/$HELPER_SCRIPTS_PATH/$name"
+        url="$REPO_RAW_URL/$HELPER_SCRIPTS_PATH/$name"
 
-set -e
+        if [ -n "$SOURCE_DIR" ] && [ -f "$local_path" ]; then
+            print_info "  $MSG_COPYING $name"
+            cp "$local_path" "$tmp"
+        else
+            print_info "  $MSG_DOWNLOADING $name"
+            if ! download_file "$url" "$tmp"; then
+                rm -f "$tmp"
+                print_error "$MSG_DOWNLOAD_FAILED $url"
+                exit 1
+            fi
+        fi
 
-# Detect user language, same logic as the installer (ru/uk/en)
-_lang="${LANG:-${LC_MESSAGES:-en}}"
-case "${_lang%%_*}" in
-    ru|be|kk) HL_LANG="ru" ;;
-    uk) HL_LANG="uk" ;;
-    *) HL_LANG="en" ;;
-esac
+        # Sanity check: must be a script (guards against HTML error pages etc.)
+        if [ "$(head -c 2 "$tmp")" != "#!" ]; then
+            rm -f "$tmp"
+            print_error "$MSG_BAD_SCRIPT $name"
+            exit 1
+        fi
 
-case "$HL_LANG" in
-    ru)
-        MSG_INPUT_PROMPT="Укажите лимит размера итогового файла (в МБ):"
-        MSG_INVALID_LIMIT="Некорректный лимит размера:"
-        MSG_UNKNOWN_CODEC="Неизвестный кодек:"
-        MSG_HEADER="Сжатие до лимита:"
-        MSG_BUDGET="лимит на файл:"
-        MSG_TIGHT="Лимит слишком мал для такой длительности, качество будет очень низким."
-        MSG_DONE="Готово:"
-        MSG_TARGET="цель"
-        ;;
-    uk)
-        MSG_INPUT_PROMPT="Вкажіть ліміт розміру підсумкового файлу (у МБ):"
-        MSG_INVALID_LIMIT="Некоректний ліміт розміру:"
-        MSG_UNKNOWN_CODEC="Невідомий кодек:"
-        MSG_HEADER="Стиснення до ліміту:"
-        MSG_BUDGET="ліміт на файл:"
-        MSG_TIGHT="Ліміт занадто малий для такої тривалості, якість буде дуже низькою."
-        MSG_DONE="Готово:"
-        MSG_TARGET="ціль"
-        ;;
-    *)
-        MSG_INPUT_PROMPT="Enter the target size limit for the final file (in MB):"
-        MSG_INVALID_LIMIT="Invalid size limit:"
-        MSG_UNKNOWN_CODEC="Unknown codec:"
-        MSG_HEADER="Compress Limit:"
-        MSG_BUDGET="budget per file:"
-        MSG_TIGHT="Budget is very tight for this duration, quality will be poor."
-        MSG_DONE="Done:"
-        MSG_TARGET="target"
-        ;;
-esac
+        # (not "install": that name is taken by this script's own install() function)
+        cp "$tmp" "$SCRIPTS_DIR/$name"
+        chmod 755 "$SCRIPTS_DIR/$name"
+        rm -f "$tmp"
+    done
 
-CODEC_KEY="$1"; shift
-FIXED_BUDGET_MB="$1"; shift
-if [ "$1" = "--" ]; then shift; fi
-FILES=("$@")
+    print_success "$MSG_SCRIPTS_READY"
+}
 
-case "$CODEC_KEY" in
-    h264_cpu)
-        LABEL="H.264 [CPU]"
-        PRE=()
-        ENC=(-c:v libx264 -profile:v main -pix_fmt yuv420p -preset medium)
-        SUFFIX="h264cpu"
-        ;;
-    h264_gpu)
-        LABEL="H.264 [GPU]"
-        PRE=(-hwaccel cuda -hwaccel_output_format cuda)
-        ENC=(-c:v h264_nvenc -profile:v main -preset p7 -rc:v vbr)
-        SUFFIX="h264gpu"
-        ;;
-    h265_cpu)
-        LABEL="HEVC [CPU]"
-        PRE=()
-        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium -tag:v hvc1)
-        SUFFIX="hevccpu"
-        ;;
-    h265_gpu)
-        LABEL="HEVC [GPU]"
-        PRE=(-hwaccel cuda -hwaccel_output_format cuda)
-        ENC=(-c:v hevc_nvenc -profile:v main -preset p7 -rc:v vbr -tag:v hvc1)
-        SUFFIX="hevcgpu"
-        ;;
-    av1_cpu)
-        LABEL="AV1 [CPU]"
-        PRE=()
-        ENC=(-c:v libsvtav1 -preset 6 -pix_fmt yuv420p)
-        SUFFIX="av1cpu"
-        ;;
-    av1_gpu)
-        LABEL="AV1 [GPU]"
-        PRE=(-hwaccel cuda -hwaccel_output_format cuda)
-        ENC=(-c:v av1_nvenc -preset p7 -rc:v vbr)
-        SUFFIX="av1gpu"
-        ;;
-    discord)
-        LABEL="Discord (HEVC [CPU])"
-        PRE=()
-        ENC=(-c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium -tag:v hvc1)
-        SUFFIX="discord"
-        ;;
-    *)
-        kdialog --error "$MSG_UNKNOWN_CODEC $CODEC_KEY"
-        exit 1
-        ;;
-esac
+# Remove menu files left over from older versions
+remove_legacy_files() {
+    # "Compress to MP4+" / "MP4++" were merged into "Compress to MP4"
+    rm -f "$INSTALL_DIR/multimedia-compress-mp4-plus.desktop"
+    rm -f "$INSTALL_DIR/multimedia-compress-mp4-plus-plus.desktop"
+    # "Compress to MP4" and "Compress to Limit" were merged into "Compress Video"
+    rm -f "$INSTALL_DIR/multimedia-compress-mp4.desktop"
+    rm -f "$INSTALL_DIR/multimedia-compress-limit.desktop"
+}
 
-# Ask the user for the size budget, unless one is fixed for this action (e.g. Discord = 20 MB)
-if [ -n "$FIXED_BUDGET_MB" ]; then
-    BUDGET_MB="$FIXED_BUDGET_MB"
-else
-    BUDGET_MB=$(kdialog --title "Compress Limit — $LABEL" --inputbox "$MSG_INPUT_PROMPT" "20")
-    if [ $? -ne 0 ] || [ -z "$BUDGET_MB" ]; then
-        exit 0
-    fi
-fi
+# Fill in install-time paths and set permissions on the generated .desktop files
+finalize_desktop_files() {
+    local dir_escaped
+    dir_escaped="$(printf '%s' "$SCRIPTS_DIR" | sed 's/[&|\\]/\\&/g')"
 
-if ! [[ "$BUDGET_MB" =~ ^[0-9]+([.][0-9]+)?$ ]] || ! awk -v v="$BUDGET_MB" 'BEGIN { exit !(v > 0) }'; then
-    kdialog --error "$MSG_INVALID_LIMIT $BUDGET_MB"
-    exit 1
-fi
+    sed -i \
+        -e "s|@TERMINAL@|$dir_escaped/mmt-terminal|g" \
+        -e "s|@SCRIPTS_DIR@|$dir_escaped|g" \
+        "$INSTALL_DIR"/multimedia-*.desktop
 
-echo "=== $MSG_HEADER $LABEL | $MSG_BUDGET ${BUDGET_MB} MB ==="
-echo
-
-for file in "${FILES[@]}"; do
-    [ -f "$file" ] || continue
-
-    # Duration in whole seconds (rounded down); fall back to 1s if ffprobe can't tell
-    DURATION=$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$file" 2>/dev/null)
-    DURATION=${DURATION%.*}
-    if [ -z "$DURATION" ] || [ "$DURATION" -le 0 ] 2>/dev/null; then
-        DURATION=1
-    fi
-
-    # Total bitrate available for the whole budget (kbps), with a 3% safety
-    # margin to cover container/muxing overhead so the real file lands under budget.
-    TOTAL_KBPS=$(awk -v mb="$BUDGET_MB" -v dur="$DURATION" 'BEGIN { v = (mb * 8192 * 0.97) / dur; if (v < 1) v = 1; printf "%d", v }')
-
-    # Pick an audio bitrate that scales down for very tight budgets
-    if [ "$TOTAL_KBPS" -gt 400 ]; then
-        AUDIO_KBPS=128
-    elif [ "$TOTAL_KBPS" -gt 150 ]; then
-        AUDIO_KBPS=96
-    else
-        AUDIO_KBPS=64
-    fi
-
-    VIDEO_KBPS=$((TOTAL_KBPS - AUDIO_KBPS))
-    if [ "$VIDEO_KBPS" -lt 50 ]; then
-        VIDEO_KBPS=50
-        echo "[!] \"$(basename "$file")\": $MSG_TIGHT"
-    fi
-
-    MAXRATE_KBPS=$(( VIDEO_KBPS * 145 / 100 ))
-    BUFSIZE_KBPS=$(( VIDEO_KBPS * 2 ))
-
-    if [ "$CODEC_KEY" = "discord" ]; then
-        OUTPUT="${file%.*}_discord.mp4"
-    else
-        OUTPUT="${file%.*}_limit_${BUDGET_MB}MB_${SUFFIX}.mp4"
-    fi
-
-    echo "-> $(basename "$file") | duration=${DURATION}s | video=${VIDEO_KBPS}k audio=${AUDIO_KBPS}k -> $(basename "$OUTPUT")"
-
-    # Single encoding pass: bitrate is pre-computed above, no second/duplicate encode.
-    ffmpeg -y "${PRE[@]}" -i "$file" "${ENC[@]}" \
-        -b:v "${VIDEO_KBPS}k" -maxrate "${MAXRATE_KBPS}k" -bufsize "${BUFSIZE_KBPS}k" \
-        -c:a aac -b:a "${AUDIO_KBPS}k" \
-        "$OUTPUT"
-
-    if [ -f "$OUTPUT" ]; then
-        ACTUAL_MB=$(du -m "$OUTPUT" | cut -f1)
-        echo "   $MSG_DONE ~${ACTUAL_MB} MB ($MSG_TARGET ${BUDGET_MB} MB)"
-    fi
-    echo
-done
-HELPEREOF
-
-    chmod +x "$SCRIPTS_DIR/compress_limit.sh"
-
-    # Compress Limit Menu
-    cat > "$INSTALL_DIR/multimedia-compress-limit.desktop" << EOF
-[Desktop Entry]
-Type=Service
-X-KDE-ServiceTypes=KonqPopupMenu/Plugin
-MimeType=video/mp4;video/x-msvideo;video/quicktime;video/x-matroska;video/webm
-Actions=compressLimit1Discord;compressLimit2H264Cpu;compressLimit3H264Gpu;compressLimit4H265Cpu;compressLimit5H265Gpu;compressLimit6AV1Cpu;compressLimit7AV1Gpu
-X-KDE-Submenu=Compress Limit
-X-KDE-Submenu[ru]=Сжать до лимита
-X-KDE-Submenu[uk]=Стиснути до ліміту
-X-KDE-Priority=TopLevel
-X-KDE-AuthorizeAction=shell_access
-
-[Desktop Action compressLimit2H264Cpu]
-Name=H.264 [CPU]
-Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h264_cpu "" -- "\$@"' bash %F
-Icon=video-compress
-
-[Desktop Action compressLimit3H264Gpu]
-Name=H.264 [GPU]
-Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h264_gpu "" -- "\$@"' bash %F
-Icon=video-compress
-
-[Desktop Action compressLimit4H265Cpu]
-Name=HEVC [CPU]
-Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h265_cpu "" -- "\$@"' bash %F
-Icon=video-compress
-
-[Desktop Action compressLimit5H265Gpu]
-Name=HEVC [GPU]
-Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" h265_gpu "" -- "\$@"' bash %F
-Icon=video-compress
-
-[Desktop Action compressLimit6AV1Cpu]
-Name=AV1 [CPU]
-Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" av1_cpu "" -- "\$@"' bash %F
-Icon=video-compress
-
-[Desktop Action compressLimit7AV1Gpu]
-Name=AV1 [GPU]
-Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" av1_gpu "" -- "\$@"' bash %F
-Icon=video-compress
-
-[Desktop Action compressLimit1Discord]
-Name=Discord
-Exec=konsole -e bash -c '"$SCRIPTS_DIR/compress_limit.sh" discord 20 -- "\$@"' bash %F
-Icon=video-compress
-EOF
-
-    chmod +x "$INSTALL_DIR/multimedia-compress-limit.desktop"
-
-    print_success "$MSG_COMPRESS_LIMIT_CREATED"
+    chmod +x "$INSTALL_DIR"/multimedia-*.desktop
 }
 
 # Function to install
@@ -974,10 +605,14 @@ install() {
     mkdir -p "$INSTALL_DIR"
     print_success "$MSG_DIR_READY"
 
+    install_helper_scripts
+    remove_legacy_files
+
     create_audio_menu
     create_image_menu
     create_video_menu
-    create_compress_limit_menu
+
+    finalize_desktop_files
 
     print_completion
 }
@@ -997,6 +632,7 @@ uninstall() {
         rm -f "$INSTALL_DIR"/multimedia-stats.desktop
         rm -f "$INSTALL_DIR"/multimedia-video-options.desktop
         rm -f "$INSTALL_DIR"/multimedia-compress-limit.desktop
+        rm -f "$INSTALL_DIR"/multimedia-convert-webp-anim.desktop
         rm -rf "$SCRIPTS_DIR"
         print_success "$MSG_FILES_REMOVED"
     else
@@ -1030,8 +666,22 @@ Supported file types:
 
 Requirements:
   - ffmpeg and ffprobe
+  - python3 with PyQt6 or PySide6 (for the dialogs)
   - KDE Plasma 6
   - Dolphin file manager
+  - Any terminal emulator (detected automatically, see below)
+  - curl or wget (only when the helper scripts are not next to the installer)
+
+Helper scripts (linux/scripts/) are copied from the local repository when the
+installer is run from a clone, otherwise they are downloaded from GitHub.
+  MMT_BRANCH=<ref>        download from another branch/tag
+  MMT_REPO_RAW_URL=<url>  download from another location (fork, mirror)
+
+Terminal selection (first match wins):
+  1. \$MMT_TERMINAL or ~/.config/multimedia-context-menu/terminal
+  2. Terminal configured in KDE
+  3. xdg-terminal-exec, then \$TERMINAL
+  4. konsole, gnome-terminal, alacritty, kitty, xterm, ... (first installed)
 
 EOF
 }

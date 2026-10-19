@@ -1,0 +1,690 @@
+#!/usr/bin/env python3
+"""mmt-dialog - show ONE form dialog with several fields and print the answers.
+
+Usage:  mmt-dialog [--probe FILE...]  < form.json
+
+The form is described by a JSON document read from stdin:
+
+    {
+      "title": "Compress to MP4",
+      "text":  "optional text above the fields",
+      "probe_texts": {"audio": "audio", "more": "more"},       # only used with --probe
+      "fields": [
+        {"id": "codec", "type": "combo", "label": "Video codec:",
+         "default": "h264_cpu", "hint": "optional small text under the field",
+         "items": [
+           {"header": "CPU"},                              # category header (not selectable)
+           {"value": "h264_cpu", "text": "H.264 [CPU]"},
+           {"header": "GPU"},
+           {"value": "h264_gpu", "text": "H.264 [GPU]",
+            "lock": {"limit": 20}}                         # selecting it fixes field "limit" to 20
+         ]},
+        {"id": "fps",   "type": "int",   "label": "FPS:", "default": 20,
+         "min": 1, "max": 120, "suffix": " fps"},
+        {"id": "limit", "type": "float", "label": "Limit:", "default": 20,
+         "min": 0.1, "max": 100000, "decimals": 2, "suffix": " MB"},
+        {"id": "twopass", "type": "check", "label": "Two-pass", "default": false},
+        {"id": "scale", "type": "scale", "label": "Resolution:", "default": "orig",
+         "texts": {"invalid": "...", "auto": "...", "unchanged": "..."},
+         "items": [                                        # values: orig | auto | h<px> | s<factor>
+           {"value": "orig", "text": "Original"}, {"value": "auto", "text": "Auto"},
+           {"header": "Shorter side"}, {"value": "h720", "text": "720p"},
+           {"header": "Scale"},        {"value": "s0.5", "text": "50%"}
+         ]}
+      ]
+    }
+
+Output (stdout), one line per field, in the order of "fields":
+
+    codec=h264_cpu
+    fps=20
+
+TABS. Instead of "fields" the form may have "tabs": a list of scenarios the user switches
+between with a tab bar. Every tab has its own fields (the same field id may be used in
+several tabs) and its own locks:
+
+    {"title": "Compress video",
+     "tabs": [
+       {"id": "preset", "title": "Presets", "text": "optional text under the tab bar",
+        "fields": [ ...as above... ]},
+       {"id": "limit",  "title": "Size limit", "probe_texts": {...}, "fields": [ ... ]}
+     ]}
+
+Only the fields of the tab that was active when OK was pressed are printed, preceded by
+the id of that tab:
+
+    mode=limit
+    limit=20
+    codec=h265_cpu
+
+The files described by --probe are shown above the tab bar (shared by all tabs).
+
+A combo with "show_group": true lists its items under the group headers, but when the list
+is closed it shows "item — group" (so "H.264" under "GPU · AMD" reads "H.264 — GPU · AMD").
+A header with "no_suffix": true is left out of that text.
+
+A "check" field prints 1 (ticked) or 0. A "scale" field is an editable drop-down
+list: besides the listed items the user may type 50%, x0.5, 0.5, 540p or 720
+(numbers without "p" are pixels of the shorter side). It prints orig, auto,
+h<pixels of the shorter side> or s<factor>; nothing ever scales up.
+
+With --probe the files are examined with ffprobe: their resolution, frame rate
+and bitrates are shown above the fields and the "scale" field previews the
+resulting size.
+
+Exit status: 0 = OK pressed, 1 = cancelled, 2 = error (message already shown).
+
+Needs python3 with PyQt6 or PySide6 (the Qt bindings KDE Plasma 6 users have
+or can install: python-pyqt6 / python3-pyqt6 / python-pyside6).
+"""
+
+import html
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+MAX_PROBE = 4  # files described in the dialog; the rest is summarised as "+N more"
+
+
+def _language():
+    raw = os.environ.get("LANG") or os.environ.get("LC_MESSAGES") or "en"
+    code = re.split(r"[_.@]", raw)[0]
+    if code in ("ru", "be", "kk"):
+        return "ru"
+    if code == "uk":
+        return "uk"
+    return "en"
+
+
+MSG_NO_QT = {
+    "en": "PyQt6 or PySide6 is required to show the dialog.\n"
+          "Arch Linux: sudo pacman -S python-pyqt6\n"
+          "Ubuntu/Debian: sudo apt install python3-pyqt6",
+    "ru": "Для показа диалога нужен PyQt6 или PySide6.\n"
+          "Arch Linux: sudo pacman -S python-pyqt6\n"
+          "Ubuntu/Debian: sudo apt install python3-pyqt6",
+    "uk": "Для показу діалогу потрібен PyQt6 або PySide6.\n"
+          "Arch Linux: sudo pacman -S python-pyqt6\n"
+          "Ubuntu/Debian: sudo apt install python3-pyqt6",
+}
+
+
+def fail(message, gui=True):
+    """Report an error (the menu is started from a file manager, so stderr alone is invisible)."""
+    sys.stderr.write(message + "\n")
+    if gui:
+        for cmd in (["kdialog", "--error", message],
+                    ["notify-send", "-u", "critical", "Media Tools", message]):
+            if shutil.which(cmd[0]):
+                subprocess.run(cmd, check=False)
+                break
+    sys.exit(2)
+
+
+def load_qt():
+    try:
+        from PyQt6 import QtCore, QtGui, QtWidgets
+    except ImportError:
+        try:
+            from PySide6 import QtCore, QtGui, QtWidgets
+        except ImportError:
+            return None
+    return QtCore, QtGui, QtWidgets
+
+
+def fmt_float(value):
+    """20.0 -> '20', 8.50 -> '8.5' (always with a dot, whatever the UI locale is)."""
+    text = "{:.4f}".format(value).rstrip("0").rstrip(".")
+    return text or "0"
+
+
+# ------------------------------------------------------------------ media info
+
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def probe_file(path):
+    """Resolution, frame rate and bitrates of one file via ffprobe (None if unreadable)."""
+    try:
+        run = subprocess.run(
+            ["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path],
+            capture_output=True, timeout=30, check=False)
+        data = json.loads(run.stdout.decode("utf-8", "replace") or "{}")
+    except Exception:
+        return None
+
+    streams = data.get("streams") or []
+    video = next((s for s in streams if s.get("codec_type") == "video"
+                  and not (s.get("disposition") or {}).get("attached_pic")), None)
+    if video is None:
+        return None
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    fmt = data.get("format") or {}
+
+    width, height = int(video.get("width") or 0), int(video.get("height") or 0)
+    if not width or not height:
+        return None
+
+    # Phone videos are often stored sideways and rotated by metadata: show the picture as played
+    rotation = 0
+    for side in video.get("side_data_list") or []:
+        if "rotation" in side:
+            rotation = int(round(_num(side["rotation"]) or 0))
+    if not rotation:
+        rotation = int(_num((video.get("tags") or {}).get("rotate")) or 0)
+    if abs(rotation) % 180 == 90:
+        width, height = height, width
+
+    fps = None
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        try:
+            num, den = str(video.get(key, "0/0")).split("/")
+            if float(den) > 0 and float(num) > 0:
+                fps = float(num) / float(den)
+                break
+        except ValueError:
+            pass
+
+    duration = _num(fmt.get("duration")) or _num(video.get("duration"))
+    size = _num(fmt.get("size"))
+    audio_bps = _num(audio.get("bit_rate")) if audio else None
+    video_bps = _num(video.get("bit_rate"))
+    estimated = False
+    if video_bps is None and duration and size:
+        # MKV/WebM do not store per-stream bitrates: derive it from the file size
+        video_bps = max(0.0, size * 8 / duration - (audio_bps or 0))
+        estimated = True
+
+    return {"name": os.path.basename(path), "width": width, "height": height, "fps": fps,
+            "duration": duration, "video_bps": video_bps, "estimated": estimated,
+            "audio_bps": audio_bps}
+
+
+def fmt_rate(bps):
+    if bps >= 1e6:
+        return "{:.1f} Mbit/s".format(bps / 1e6)
+    return "{:.0f} kbit/s".format(bps / 1e3)
+
+
+def fmt_time(seconds):
+    seconds = int(round(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return "{}:{:02d}:{:02d}".format(hours, minutes, secs)
+    return "{}:{:02d}".format(minutes, secs)
+
+
+def short_name(name, limit=44):
+    if len(name) <= limit:
+        return name
+    keep = (limit - 1) // 2
+    return name[:keep] + "…" + name[-(limit - 1 - keep):]
+
+
+def describe(src, texts):
+    """Two lines of rich text: file name and its video / audio properties."""
+    parts = ["{}×{}".format(src["width"], src["height"])]
+    if src["fps"]:
+        parts.append("{:g} fps".format(round(src["fps"], 2)))
+    if src["video_bps"] is not None:
+        parts.append(("~" if src["estimated"] else "") + fmt_rate(src["video_bps"]))
+    if src["audio_bps"]:
+        parts.append("{} {}".format(texts.get("audio", "audio"), fmt_rate(src["audio_bps"])))
+    if src["duration"]:
+        parts.append(fmt_time(src["duration"]))
+    return "<p style='margin:0 0 6px 0'><b>{}</b><br>{}</p>".format(
+        html.escape(short_name(src["name"])), html.escape(" · ".join(parts)))
+
+
+# ------------------------------------------------------------ resolution input
+
+def parse_scale(text):
+    """Typed resolution -> ('s', factor) or ('h', shorter side in px); None if not understood."""
+    t = text.strip().lower().replace(",", ".").replace(" ", "").replace("×", "x")
+    if not t:
+        return None
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)%", t)
+    if m:
+        v = float(m.group(1))
+        return ("s", v / 100) if 5 <= v <= 100 else None
+    m = re.fullmatch(r"[x*](\d*\.?\d+)", t) or re.fullmatch(r"(\d*\.?\d+)[x*]", t)
+    if m:
+        v = float(m.group(1))
+        return ("s", v) if 0.05 <= v <= 1 else None
+    m = re.fullmatch(r"(\d+)p", t)
+    if m:
+        v = int(m.group(1))
+        return ("h", v) if 64 <= v <= 4320 else None
+    if re.fullmatch(r"\d+|\d*\.\d+", t):
+        v = float(t)
+        if v <= 1:
+            return ("s", v) if v >= 0.05 else None
+        if t.isdigit() and 64 <= int(t) <= 4320:
+            return ("h", int(t))
+    return None
+
+
+def encode_scale(kind, number):
+    return "h{}".format(int(number)) if kind == "h" else "s{}".format(fmt_float(number))
+
+
+def decode_scale(value):
+    if value in ("orig", "auto"):
+        return value, None
+    try:
+        return (value[0], float(value[1:])) if value[0] in "hs" else None
+    except (ValueError, IndexError):
+        return None
+
+
+def target_size(src, kind, number):
+    """Size after scaling (None = unchanged). Same rule as the encoding script:
+    one factor for both sides, rounded to even numbers, never larger than the source."""
+    short = min(src["width"], src["height"])
+    factor = number if kind == "s" else number / short
+    if factor >= 0.999:
+        return None
+
+    def even(v):
+        return max(2, 2 * int(v / 2 + 0.5))
+
+    return even(src["width"] * factor), even(src["height"] * factor)
+
+
+# ---------------------------------------------------------------------- dialog
+
+def build_dialog(spec, QtCore, QtGui, QtWidgets, media=None):
+    """Create the dialog. Returns (app, dialog, collect) - collect() gives the output lines."""
+    Qt = QtCore.Qt
+    media = media or {"sources": [], "total": 0}
+    sources = media["sources"]
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv[:1])
+
+    # Translate Qt's own button captions (OK / Cancel) if the translations are installed
+    try:
+        translator = QtCore.QTranslator(app)
+        tr_path = QtCore.QLibraryInfo.path(QtCore.QLibraryInfo.LibraryPath.TranslationsPath)
+        if translator.load(QtCore.QLocale(), "qtbase", "_", tr_path):
+            app.installTranslator(translator)
+            app._mmt_translator = translator  # keep a reference
+    except Exception:
+        pass
+
+    dlg = QtWidgets.QDialog()
+    dlg.setWindowTitle(spec.get("title", ""))
+    dlg.setMinimumWidth(int(spec.get("min_width", 460)))
+    root = QtWidgets.QVBoxLayout(dlg)
+
+    if spec.get("text"):
+        intro = QtWidgets.QLabel(spec["text"])
+        intro.setWordWrap(True)
+        root.addWidget(intro)
+
+    if sources:
+        texts = dict(spec.get("probe_texts", {}))
+        for tab in spec.get("tabs") or []:
+            texts.update(tab.get("probe_texts", {}))
+        parts = [describe(s, texts) for s in sources]
+        extra = media["total"] - len(sources)
+        if extra > 0:
+            parts.append("<p style='margin:0'>+{} {}</p>".format(extra, html.escape(texts.get("more", "more"))))
+        info = QtWidgets.QLabel("".join(parts))
+        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setWordWrap(True)
+        root.addWidget(info)
+        line = QtWidgets.QFrame()
+        line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        root.addWidget(line)
+
+    tabs_spec = spec.get("tabs") or []
+    pages = []          # one per tab (just one page when the form has no tabs)
+    page_widgets = []   # container of every tab page (empty without tabs)
+    cells = []          # container widgets of all form rows
+    tabbar = None
+
+    group_role = Qt.ItemDataRole.UserRole + 1  # text shown while the list is closed
+
+    class GroupedCombo(QtWidgets.QComboBox):
+        """Closed: "H.264 — GPU · AMD". Open: just "H.264" under the group header."""
+
+        def paintEvent(self, event):
+            painter = QtWidgets.QStylePainter(self)
+            option = QtWidgets.QStyleOptionComboBox()
+            self.initStyleOption(option)
+            full = self.itemData(self.currentIndex(), group_role)
+            if full:
+                option.currentText = full
+            painter.drawComplexControl(QtWidgets.QStyle.ComplexControl.CC_ComboBox, option)
+            painter.drawControl(QtWidgets.QStyle.ControlElement.CE_ComboBoxLabel, option)
+
+    def fill_combo(widget, field):
+        """Fill a combo box from "items"; returns {row: lock} for items that lock other fields."""
+        model = QtGui.QStandardItemModel(widget)
+        widget.setModel(model)
+        locks, default_row, first_row = {}, None, None
+        group = None
+        for row, entry in enumerate(field["items"]):
+            item = QtGui.QStandardItem()
+            if "header" in entry:
+                group = None if entry.get("no_suffix") else entry["header"]
+                # Category header: visible, bold, but cannot be chosen
+                item.setText(entry["header"])
+                item.setFlags(Qt.ItemFlag.NoItemFlags)
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+            else:
+                item.setText(entry["text"])
+                item.setData(entry["value"], Qt.ItemDataRole.UserRole)
+                if field.get("show_group") and group:
+                    item.setData("{} — {}".format(entry["text"], group), group_role)
+                if first_row is None:
+                    first_row = row
+                if entry["value"] == field.get("default"):
+                    default_row = row
+                if entry.get("lock"):
+                    locks[row] = entry["lock"]
+            model.appendRow(item)
+        widget.setCurrentIndex(default_row if default_row is not None else (first_row or 0))
+        return locks
+
+    def build_page(fields, layout):
+        """Create the inputs of one page as a form inside `layout`.
+
+        Returns the state of the page. Every page keeps its own widgets, locks and
+        previews, so two tabs can use the same field id (e.g. "codec")."""
+        page = {"fields": fields,
+                "widgets": {},        # field id -> widget
+                "combo_locks": {},    # combo id -> {row: {field id: value}}
+                "locked_by": {},      # field id -> combo id that currently locks it
+                "scale_fields": {},   # field id -> field description
+                "previews": {}}       # field id -> label with the live result of a scale field
+        widgets, combo_locks = page["widgets"], page["combo_locks"]
+        scale_fields, previews = page["scale_fields"], page["previews"]
+
+        form = QtWidgets.QFormLayout()
+        form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        layout.addLayout(form)
+
+        for field in fields:
+            fid, kind = field["id"], field["type"]
+
+            if kind == "combo":
+                widget = GroupedCombo() if field.get("show_group") else QtWidgets.QComboBox()
+                combo_locks[fid] = fill_combo(widget, field)
+            elif kind == "scale":
+                widget = QtWidgets.QComboBox()
+                widget.setEditable(True)
+                widget.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+                widget.setCompleter(None)  # no surprising auto-completion while typing "540p"
+                fill_combo(widget, field)
+                scale_fields[fid] = field
+            elif kind == "int":
+                widget = QtWidgets.QSpinBox()
+                widget.setRange(int(field["min"]), int(field["max"]))
+                widget.setValue(int(field["default"]))
+                if field.get("suffix"):
+                    widget.setSuffix(field["suffix"])
+            elif kind == "float":
+                widget = QtWidgets.QDoubleSpinBox()
+                widget.setDecimals(int(field.get("decimals", 2)))
+                widget.setRange(float(field["min"]), float(field["max"]))
+                widget.setSingleStep(float(field.get("step", 1)))
+                widget.setValue(float(field["default"]))
+                if field.get("suffix"):
+                    widget.setSuffix(field["suffix"])
+            elif kind == "check":
+                widget = QtWidgets.QCheckBox(field.get("label", ""))
+                widget.setChecked(bool(field.get("default", False)))
+            else:
+                fail("mmt-dialog: unknown field type: {}".format(kind), gui=False)
+
+            widgets[fid] = widget
+            # All inputs fill the whole field column, so the form looks even
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+
+            # Input + optional hint live in a container widget (nested layouts inside
+            # a QFormLayout do not stretch or wrap reliably)
+            cell = QtWidgets.QWidget()
+            cell.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Preferred)
+            cells.append(cell)
+            cell_layout = QtWidgets.QVBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(2)
+            cell_layout.addWidget(widget)
+            if field.get("hint"):
+                hint = QtWidgets.QLabel(field["hint"])
+                hint.setWordWrap(True)
+                hint.setEnabled(False)  # greyed out, secondary text
+                cell_layout.addWidget(hint)
+            if kind == "scale":
+                preview = QtWidgets.QLabel()
+                preview.setTextFormat(Qt.TextFormat.PlainText)
+                preview.setWordWrap(True)
+                preview.hide()
+                cell_layout.addWidget(preview)
+                previews[fid] = preview
+            # A check box carries its own caption, the label column stays empty
+            form.addRow("" if kind == "check" else field.get("label", ""), cell)
+
+        return page
+
+    # --- the pages: a tab bar + one page per tab, or just the form
+    if tabs_spec:
+        tabbar = QtWidgets.QTabBar()
+        tabbar.setDocumentMode(True)   # flat strip instead of a framed pane
+        tabbar.setExpanding(True)      # the tabs share the whole width
+        tabbar.setDrawBase(True)
+        root.addWidget(tabbar)
+        for number, tab in enumerate(tabs_spec):
+            tabbar.addTab(tab.get("title", ""))
+            holder = QtWidgets.QWidget()
+            holder_layout = QtWidgets.QVBoxLayout(holder)
+            holder_layout.setContentsMargins(0, 6, 0, 0)
+            if tab.get("text"):
+                lead = QtWidgets.QLabel(tab["text"])
+                lead.setWordWrap(True)
+                lead.setEnabled(False)  # greyed out, secondary text
+                holder_layout.addWidget(lead)
+            page = build_page(tab["fields"], holder_layout)
+            page["id"] = str(tab.get("id", number))
+            pages.append(page)
+            page_widgets.append(holder)
+            root.addWidget(holder)
+    else:
+        pages.append(build_page(spec["fields"], root))
+
+    def current_page():
+        return pages[tabbar.currentIndex()] if tabbar is not None else pages[0]
+
+    def apply_locks(page, combo_id):
+        combo = page["widgets"][combo_id]
+        widgets, locked_by = page["widgets"], page["locked_by"]
+        for fid in [f for f, owner in locked_by.items() if owner == combo_id]:
+            widgets[fid].setEnabled(True)
+            del locked_by[fid]
+        for fid, value in page["combo_locks"][combo_id].get(combo.currentIndex(), {}).items():
+            if fid in widgets:
+                widgets[fid].setValue(value)
+                widgets[fid].setEnabled(False)
+                locked_by[fid] = combo_id
+
+    for page in pages:
+        for cid, locks in page["combo_locks"].items():
+            if locks:
+                page["widgets"][cid].currentIndexChanged.connect(
+                    lambda _i, p=page, c=cid: apply_locks(p, c))
+                apply_locks(page, cid)
+
+    def resolve_scale(page, fid):
+        """Text of a scale field -> canonical value (orig / auto / h720 / s0.5), None if invalid."""
+        typed = page["widgets"][fid].currentText().strip()
+        for entry in page["scale_fields"][fid]["items"]:
+            if "value" in entry and entry["text"].strip().lower() == typed.lower():
+                return entry["value"]
+        parsed = parse_scale(typed)
+        return None if parsed is None else encode_scale(*parsed)
+
+    def relayout():
+        """Re-measure the word-wrapped labels and fit the window to them (grow or shrink)."""
+        for cell in cells:
+            cell.updateGeometry()
+        root.invalidate()
+        root.activate()
+        width = dlg.width()
+        dlg.resize(width, max(dlg.minimumSizeHint().height(), root.totalHeightForWidth(width)))
+
+    def update_scale(page, fid):
+        texts = page["scale_fields"][fid].get("texts", {})
+        value = resolve_scale(page, fid)
+        invalid = value is None
+        if invalid:
+            message = texts.get("invalid", "?")
+        else:
+            kind, number = decode_scale(value)
+            if kind == "orig" or not sources:
+                message = ""
+            elif kind == "auto":
+                message = texts.get("auto", "")
+            else:
+                rows = []
+                for src in sources:
+                    size = target_size(src, kind, number)
+                    result = "{}×{}".format(*size) if size else texts.get("unchanged", "=")
+                    rows.append("→ {}".format(result) if len(sources) == 1 and media["total"] == 1
+                                else "{}  →  {}".format(short_name(src["name"], 30), result))
+                message = "\n".join(rows)
+        preview = page["previews"][fid]
+        preview.setStyleSheet("color: #d9534f;" if invalid else "")
+        preview.setText(message)
+        preview.setVisible(bool(message))
+        relayout()
+
+    for page in pages:
+        for fid in page["scale_fields"]:
+            page["widgets"][fid].editTextChanged.connect(lambda _t, p=page, f=fid: update_scale(p, f))
+            page["widgets"][fid].currentIndexChanged.connect(lambda _i, p=page, f=fid: update_scale(p, f))
+
+    def show_page(index):
+        """Only the page of the selected tab takes part in the layout; the window fits it."""
+        for number, holder in enumerate(page_widgets):
+            holder.setVisible(number == index)
+        relayout()
+
+    if tabbar is not None:
+        tabbar.currentChanged.connect(show_page)
+        # Ctrl+Tab / Ctrl+Shift+Tab (and Ctrl+PgDown / Ctrl+PgUp) switch the tab from any field
+        def step(delta):
+            tabbar.setCurrentIndex((tabbar.currentIndex() + delta) % tabbar.count())
+        for keys, delta in (("Ctrl+Tab", 1), ("Ctrl+PgDown", 1), ("Ctrl+Shift+Tab", -1), ("Ctrl+PgUp", -1)):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(keys), dlg)
+            shortcut.activated.connect(lambda d=delta: step(d))
+
+    buttons = QtWidgets.QDialogButtonBox(
+        QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+
+    def try_accept():
+        # A typed resolution that cannot be understood keeps the dialog open
+        page = current_page()
+        for fid in page["scale_fields"]:
+            if resolve_scale(page, fid) is None:
+                update_scale(page, fid)
+                page["widgets"][fid].setFocus()
+                return
+        dlg.accept()
+
+    buttons.accepted.connect(try_accept)
+    buttons.rejected.connect(dlg.reject)
+    root.addWidget(buttons)
+
+    for page in pages:
+        for fid in page["scale_fields"]:
+            update_scale(page, fid)
+
+    # The first tab is shown at the start; the keyboard focus goes to its first input
+    # (not to the tab bar), so Enter / typing work immediately
+    for holder in page_widgets[1:]:
+        holder.hide()
+    first = next(iter(pages[0]["widgets"].values()), None)
+    if first is not None:
+        first.setFocus()
+
+    # Word-wrapped hints need a height that matches the real width, otherwise
+    # their last line gets cut off when the dialog opens.
+    dlg.resize(dlg.minimumWidth(), dlg.sizeHint().height())
+    relayout()
+
+    def collect():
+        page = current_page()
+        lines = ["mode={}".format(page["id"])] if tabbar is not None else []
+        for field in page["fields"]:
+            widget = page["widgets"][field["id"]]
+            if field["type"] == "combo":
+                data = widget.currentData()
+                # A category header can never be chosen by the user, but never print "None"
+                value = str(data if data is not None else field.get("default", ""))
+            elif field["type"] == "scale":
+                value = resolve_scale(page, field["id"]) or field.get("default", "orig")
+            elif field["type"] == "check":
+                value = "1" if widget.isChecked() else "0"
+            elif field["type"] == "int":
+                value = str(widget.value())
+            else:
+                value = fmt_float(widget.value())
+            lines.append("{}={}".format(field["id"], value))
+        return lines
+
+    return app, dlg, collect
+
+
+def main():
+    try:
+        spec = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        tabs = spec.get("tabs")
+        if tabs is not None:
+            if not isinstance(tabs, list) or not tabs or not all(
+                    isinstance(t, dict) and isinstance(t.get("fields"), list) and t["fields"] for t in tabs):
+                raise ValueError('"tabs" must be a non-empty list of tabs with a non-empty "fields" list')
+        elif not isinstance(spec.get("fields"), list) or not spec["fields"]:
+            raise ValueError('"fields" (or "tabs") must be a non-empty list')
+    except Exception as exc:  # malformed spec = programming error in the calling script
+        fail("mmt-dialog: invalid form description: {}".format(exc), gui=False)
+
+    media = {"sources": [], "total": 0}
+    args = sys.argv[1:]
+    if args and args[0] == "--probe":
+        files = args[1:]
+        media["total"] = len(files)
+        for path in files[:MAX_PROBE]:
+            info = probe_file(path)
+            if info:
+                media["sources"].append(info)
+
+    qt = load_qt()
+    if qt is None:
+        fail(MSG_NO_QT[_language()])
+
+    app, dlg, collect = build_dialog(spec, *qt, media=media)
+
+    # A dialog started from a file manager may open behind other windows
+    qt[0].QTimer.singleShot(0, lambda: (dlg.raise_(), dlg.activateWindow()))
+
+    if not dlg.exec():
+        sys.exit(1)
+
+    sys.stdout.write("\n".join(collect()) + "\n")
+    sys.stdout.flush()
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
