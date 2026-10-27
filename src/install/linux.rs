@@ -112,7 +112,7 @@ const ICON: &[u8] = include_bytes!("../../assets/mmt.png");
 /// The entry of the application menu that opens the Settings window
 pub fn launcher_desktop(exe: &str) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Media Tools\nComment=Settings of the Media Tools context menu\nExec={} settings\nIcon=mmt\nTerminal=false\nCategories=AudioVideo;Settings;\n",
+        "[Desktop Entry]\nType=Application\nName=Media Tools\nComment=Settings of the Media Tools context menu\nExec={} settings\nIcon=mmt\nTerminal=false\nCategories=AudioVideo;Video;\n",
         desktop_quote(exe)
     )
 }
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn launcher_entry_opens_the_settings() {
         let d = launcher_desktop("/home/u/.local/bin/mmt");
-        assert!(d.contains("Exec=/home/u/.local/bin/mmt settings") && d.contains("Categories=AudioVideo;Settings;"));
+        assert!(d.contains("Exec=/home/u/.local/bin/mmt settings") && d.contains("Categories=AudioVideo;Video;"));
         assert!(d.contains("Icon=mmt\n"));
         assert!(ICON.starts_with(b"\x89PNG"));
     }

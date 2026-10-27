@@ -6,8 +6,14 @@
 #   ./build.sh linux-aarch64 windows-x86_64     build the named targets
 #   ./build.sh --list           list the targets and what each one needs
 #   ./build.sh --debug ...      debug instead of release build
+#   ./build.sh --no-appimage    Linux: only the plain binary, no AppImage
 #
-# The finished files are put into ./dist (mmt-linux-x86_64, mmt-windows-x86_64.exe, ...).
+# The finished files are put into ./dist: mmt-linux-x86_64.AppImage (the main Linux download),
+# the plain binary mmt-linux-x86_64, mmt-windows-x86_64.exe, ...
+#
+# AppImage: the binary, its .desktop file and icon packed with appimagetool. ffmpeg is not
+# inside: the AppImage uses the ffmpeg of the system (or ffmpeg / ffprobe next to the .AppImage).
+# appimagetool is taken from APPIMAGETOOL=..., from PATH, or downloaded once into target/tools/.
 #
 # Targets (a full Rust target triple works as well):
 #   linux-x86_64     x86_64-unknown-linux-gnu        PCs
@@ -35,6 +41,7 @@ OUT="dist"
 GLIBC="${GLIBC:-2.28}"
 PROFILE=release
 VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)"
+APPIMAGE=1
 
 ALL_TARGETS="linux-x86_64 linux-aarch64 linux-armv7 windows-x86_64 windows-aarch64"
 
@@ -90,6 +97,60 @@ list_targets() {
     done
 }
 
+appimage_arch() {  # triple -> the architecture name of appimagetool
+    case "$1" in
+        x86_64-*-linux-*)  echo x86_64 ;;
+        aarch64-*-linux-*) echo aarch64 ;;
+        armv7-*-linux-*)   echo armhf ;;
+        *)                 echo "" ;;
+    esac
+}
+
+find_appimagetool() {
+    if [ -n "${APPIMAGETOOL:-}" ]; then echo "$APPIMAGETOOL"; return 0; fi
+    if have appimagetool; then command -v appimagetool; return 0; fi
+    local arch tool
+    arch="$(uname -m)"
+    tool="target/tools/appimagetool-$arch.AppImage"
+    if [ ! -x "$tool" ]; then
+        have curl || return 1
+        mkdir -p target/tools
+        echo "    downloading appimagetool ($arch)" >&2
+        curl -fsSL -o "$tool.part" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage" \
+            || { rm -f "$tool.part"; return 1; }
+        chmod +x "$tool.part" && mv "$tool.part" "$tool"
+    fi
+    echo "$tool"
+}
+
+checksum() { if have sha256sum; then (cd "$OUT" && sha256sum "$1" > "$1.sha256"); fi; }
+
+make_appimage() {  # binary, triple, friendly name
+    local bin="$1" tr="$2" name="$3" arch tool dir icons out
+    arch="$(appimage_arch "$tr")"
+    [ -n "$arch" ] || return 0
+    tool="$(find_appimagetool)" || { echo "    no AppImage: appimagetool not found and not downloadable (set APPIMAGETOOL=...)" >&2; return 1; }
+    dir="target/appdir-$name"
+    icons="$dir/usr/share/icons/hicolor/256x256/apps"
+    rm -rf "$dir"
+    mkdir -p "$dir/usr/bin" "$dir/usr/share/applications" "$icons"
+    cp "$bin" "$dir/usr/bin/mmt"
+    ln -s usr/bin/mmt "$dir/AppRun"
+    cp assets/mmt.desktop "$dir/mmt.desktop"
+    cp assets/mmt.desktop "$dir/usr/share/applications/mmt.desktop"
+    cp assets/mmt.png "$dir/mmt.png"
+    cp assets/mmt.png "$icons/mmt.png"
+    ln -s mmt.png "$dir/.DirIcon"
+    out="mmt-$name.AppImage"
+    # extract-and-run: appimagetool is an AppImage itself and must work without FUSE (containers, CI)
+    if ! ARCH="$arch" VERSION="$VERSION" APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$dir" "$OUT/$out" > "target/appimagetool-$name.log" 2>&1; then
+        echo "    FAILED: AppImage (see target/appimagetool-$name.log)" >&2
+        return 1
+    fi
+    checksum "$out"
+    echo "    -> dist/$out ($(du -h "$OUT/$out" | cut -f1))"
+}
+
 build_one() {
     local t="$1" tr name ext="" host cc var
     tr="$(triple_of "$t")" || { echo "build.sh: unknown target \"$t\" (see --list)" >&2; return 1; }
@@ -124,14 +185,14 @@ build_one() {
     echo "    ${cmd[*]}"
     "${cmd[@]}" || { echo "    FAILED: $name" >&2; return 1; }
 
-    local dir="$tr"; [ "$tr" = "$host" ] && [ -f "target/$PROFILE/mmt$ext" ] && dir=""
-    local built="target/${dir:+$dir/}$PROFILE/mmt$ext"
-    [ -f "$built" ] || built="target/$tr/$PROFILE/mmt$ext"
+    # always built with --target, so never take a (possibly stale) target/release/mmt
+    local built="target/$tr/$PROFILE/mmt$ext"
     [ -f "$built" ] || { echo "    the binary was not found: $built" >&2; return 1; }
     mkdir -p "$OUT"
     cp "$built" "$OUT/mmt-$name$ext"
-    if have sha256sum; then (cd "$OUT" && sha256sum "mmt-$name$ext" > "mmt-$name$ext.sha256"); fi
+    checksum "mmt-$name$ext"
     echo "    -> dist/mmt-$name$ext ($(du -h "$OUT/mmt-$name$ext" | cut -f1))"
+    if [ "$APPIMAGE" = 1 ]; then make_appimage "$built" "$tr" "$name" || return 1; fi
 }
 
 # ---------------------------------------------------------------- arguments
@@ -142,6 +203,7 @@ while [ $# -gt 0 ]; do
         --list)     list_targets; exit 0 ;;
         --all)      for t in $ALL_TARGETS; do TARGETS+=("$t"); done ;;
         --debug)    PROFILE=debug ;;
+        --no-appimage) APPIMAGE=0 ;;
         --out)      shift; OUT="${1:?--out needs a directory}" ;;
         -*)         echo "build.sh: unknown option $1" >&2; usage >&2; exit 2 ;;
         *)          TARGETS+=("$1") ;;

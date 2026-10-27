@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Media Tools
+Comment=Settings of the Media Tools context menu
+Exec=mmt settings
+Icon=mmt
+Terminal=false
+Categories=AudioVideo;Video;
