@@ -4,26 +4,42 @@ One small program that adds the Media Tools items (compress, convert, extract au
 context menu of your file manager. It works on **Windows, KDE (Dolphin), GNOME (Files), XFCE (Thunar)
 and Raspberry Pi OS (PCManFM)**, on x86 and ARM.
 
-* **No dependencies except ffmpeg and ffprobe.** `mmt` is a single file (about 8 MB). The windows are drawn by
-  the program itself, no Qt / GTK / Python has to be installed.
+* **No dependencies except ffmpeg and ffprobe.** On Linux `mmt` is one AppImage (about 4 MB), on Windows one `.exe`.
+  The windows are drawn by the program itself, no Qt / GTK / Python has to be installed.
 * **Every command is yours to edit.** The complete ffmpeg command of each function is a line of a text file,
   `presets.toml` (see below). Own menu items with any command can be added in the Settings window.
 * **Nothing is overwritten.** If `clip_compressed.mp4` exists, the result is `clip_compressed (1).mp4`.
 
 ## Install
 
-1. Get `ffmpeg` and `ffprobe` (package manager; on Windows put `ffmpeg.exe` and `ffprobe.exe` next to
-   `mmt.exe` or into a folder in `PATH`).
-2. Run `mmt`: double-click it and the **Settings** window opens (*General → Install*), or from a terminal:
+### Linux: the AppImage
+
+1. Install `ffmpeg` with the package manager (it brings `ffprobe`). The AppImage does not contain ffmpeg: it uses the one
+   of the system, or `ffmpeg` / `ffprobe` placed next to the AppImage file.
+2. Download the AppImage of your computer: `mmt-linux-x86_64.AppImage` (PCs), `mmt-linux-aarch64.AppImage`
+   (64-bit ARM, Raspberry Pi with a 64-bit OS) or `mmt-linux-armv7.AppImage` (32-bit Raspberry Pi OS).
+3. Make it executable and start it: double-click it (most file managers ask to allow running it) and the **Settings**
+   window opens; press **Install**. Or in a terminal:
 
    ```
-   mmt install          # detects KDE / GNOME / XFCE / PCManFM (Windows: the Explorer menu)
-   mmt install --kde    # or choose: --kde  --gnome  --xfce  --pcmanfm  --windows
-   mmt uninstall
+   chmod +x mmt-linux-x86_64.AppImage
+   ./mmt-linux-x86_64.AppImage install          # detects KDE / GNOME / XFCE / PCManFM
+   ./mmt-linux-x86_64.AppImage install --kde    # or choose: --kde  --gnome  --xfce  --pcmanfm
+   mmt uninstall                                # later: removes the menu items again
    ```
 
-`install` does four things: it copies the program to `~/.local/bin/mmt` (Windows: `%LOCALAPPDATA%\mmt\mmt.exe`) so the
-downloaded file can be deleted; it writes the menu items; it **adds that folder to `PATH`** (Linux: a marked block in
+AppImages are mounted with FUSE (the `fuse3` or `fuse` package, present on nearly every desktop). Without it, set
+`APPIMAGE_EXTRACT_AND_RUN=1`. The plain binary `mmt-linux-x86_64` is also available; it works the same way.
+
+### Windows
+
+Put `ffmpeg.exe` and `ffprobe.exe` next to `mmt.exe` or into a folder in `PATH`, double-click `mmt.exe` and press
+**Install** (or run `mmt install`).
+
+### What install does
+
+`install` does four things: it copies the program (on Linux the AppImage itself) to `~/.local/bin/mmt`
+(Windows: `%LOCALAPPDATA%\mmt\mmt.exe`), so the downloaded file can be deleted; it writes the menu items; it **adds that folder to `PATH`** (Linux: a marked block in
 `~/.profile`, `~/.bashrc`, `~/.zshenv` and a fish `conf.d` file; Windows: the user `PATH`) so `mmt` works in a terminal after
 the next login; and it adds **Media Tools** to the application menu / Start menu, which opens the Settings. `--no-copy` uses the
 program where it is, `--no-path` leaves `PATH` alone. `uninstall` removes all of it.
@@ -60,7 +76,8 @@ finished without problems closes itself after a few seconds.
   on Wayland; elsewhere the window is opaque), interface scale. Changes are previewed at once.
 * **Menu**: switch off the standard items you do not need; add **own items**: a name, the kind of files, any ffmpeg command
   and the name of the result. *Save and update menu* rewrites the menu of your file manager.
-* **General**: language, auto-close, paths of ffmpeg / ffprobe, buttons to open `presets.toml`, install / remove.
+* **General**: auto-close, paths of ffmpeg / ffprobe (empty = next to the program, then `PATH`), buttons to open `presets.toml`.
+  *Install* / *Remove* are at the top of the window.
 
 The settings are stored in `~/.config/mmt/settings.toml` (Windows: `%APPDATA%\mmt\`); you can edit that file by hand, too.
 
@@ -120,7 +137,7 @@ output = "{base}_telegram.mp4"
 
 ## Raspberry Pi
 
-* **Which build:** `linux-aarch64` for a 64-bit Raspberry Pi OS (Pi 3 / 4 / 5), `linux-armv7` for the 32-bit one (`./build.sh linux-aarch64`).
+* **Which build:** `mmt-linux-aarch64.AppImage` for a 64-bit Raspberry Pi OS (Pi 3 / 4 / 5), `mmt-linux-armv7.AppImage` for the 32-bit one (`./build.sh linux-aarch64`).
 * **Menu:** Raspberry Pi OS uses PCManFM: `mmt install` finds it (or `mmt install --pcmanfm`).
 * **Encoding:** the CPU codecs work everywhere. A Pi 3 / 4 also has a hardware **H.264** encoder (listed as *GPU · Raspberry Pi*; it has no
   quality mode, so the levels are bitrates, see `compress.h264_pi`). A Pi 5 has no hardware video encoder.
@@ -135,7 +152,7 @@ mmt convert-audio --yes --format mp3 song.wav
 mmt run gif video.mp4                                                  # an own item of the Settings
 ```
 
-`--cli` `--yes` `--format` `--level` `--codec` `--limit` `--scale` `--twopass` … (`mmt help`). `MMT_LANG=ru|uk|en` forces the language, `MMT_THEME=light|dark` the theme.
+`--cli` `--yes` `--format` `--level` `--codec` `--limit` `--scale` `--twopass` … (`mmt help`).
 On Windows the program has no console: `help`, `install` and similar show their text in a window, and `--cli` is for Linux terminals.
 
 ## Build
@@ -147,17 +164,19 @@ On Windows the program has no console: `help`, `install` and similar show their 
 ./build.sh --list          # what each target needs
 ```
 
-The result is in `dist/`. Needs Rust (`rustup`). Cross builds need `cargo-zigbuild` + `zig` (one tool for every target; it also aims at an
+The result is in `dist/`: for Linux the AppImage (`mmt-linux-<arch>.AppImage`) and the plain binary, for Windows the `.exe`.
+The AppImage is packed with `appimagetool` (from `APPIMAGETOOL=…`, from `PATH`, or downloaded once into `target/tools/`);
+`--no-appimage` skips it. Needs Rust (`rustup`). Cross builds need `cargo-zigbuild` + `zig` (one tool for every target; it also aims at an
 old glibc, so the binaries run on old distributions) or a GNU cross compiler per target: `./build.sh --list` tells which. A native build needs a
 glibc at least as new as the one of the target computer: build on the oldest system you want to support (or use zigbuild).
 The fonts (JetBrains Mono, SIL Open Font License) are in `assets/fonts/`.
 
 ## What was tested
 
-On Linux x86_64: all 50 unit tests, every action with a real ffmpeg, the size limit mode against the old shell scripts the program replaces
+On Linux x86_64: all unit tests (63), the x86_64 AppImage (build, start, install from it in a scratch `$HOME`), every action with a real ffmpeg, the size limit mode against the old shell scripts the program replaces
 (the output files were byte-identical), all windows (rendered under Xvfb), edited commands, own items, install / uninstall in a scratch `$HOME`;
 KDE, GNOME and XFCE were then tried by hand on real systems.
 **Not tested:** Windows (build, Explorer menu, `PATH`, Start menu, acrylic blur), the blur on KDE Wayland (the code is written against the
 protocol and cannot show anything without a real compositor), PCManFM / Raspberry Pi, the hardware encoder of the Pi, AMD / Intel encoding
-(VAAPI, AMF, QSV), ARM builds. The generated menu files and scripts are covered by unit tests; the AMF / QSV / Raspberry Pi command lines in
+(VAAPI, AMF, QSV), ARM builds and ARM AppImages. The generated menu files and scripts are covered by unit tests; the AMF / QSV / Raspberry Pi command lines in
 `presets.toml` are sensible defaults: adjust them there if your hardware needs something else.
