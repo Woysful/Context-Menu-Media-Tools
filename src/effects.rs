@@ -6,14 +6,14 @@
 //!  * everywhere else: no blur. A transparent window is only used where a compositor is
 //!    certain (Wayland, Windows); on X11 it has to be switched on by hand.
 
-use crate::config::Settings;
+use crate::settings::Settings;
 
 fn env_is(var: &str, value: &str) -> bool {
-    std::env::var(var).map_or(false, |v| v.eq_ignore_ascii_case(value))
+    std::env::var(var).is_ok_and(|v| v.eq_ignore_ascii_case(value))
 }
 
 pub fn is_wayland() -> bool {
-    env_is("XDG_SESSION_TYPE", "wayland") || std::env::var_os("WAYLAND_DISPLAY").map_or(false, |v| !v.is_empty())
+    env_is("XDG_SESSION_TYPE", "wayland") || std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
 fn is_kde() -> bool {
@@ -89,7 +89,8 @@ mod wl {
 
     pub struct State;
     impl Dispatch<WlRegistry, GlobalListContents> for State {
-        fn event(_: &mut Self, _: &WlRegistry, _: wayland_client::protocol::wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+        fn event(_: &mut Self, _: &WlRegistry, _: wayland_client::protocol::wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {
+        }
     }
     impl Dispatch<OrgKdeKwinBlurManager, ()> for State {
         fn event(_: &mut Self, _: &OrgKdeKwinBlurManager, _: <OrgKdeKwinBlurManager as Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}

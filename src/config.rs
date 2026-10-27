@@ -2,8 +2,11 @@
 //! Every ffmpeg command line of the program lives in this file, so the user can change
 //! them without rebuilding anything.
 
+use crate::media::Kind;
+use crate::paths;
+use crate::settings::Settings;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use toml::{Table, Value};
 
@@ -20,6 +23,26 @@ pub struct Format {
     /// name of the result, e.g. "{base}.{ext}"
     pub output: String,
     pub default: bool,
+}
+
+impl Format {
+    /// What a list shows for the format with the key `key`
+    pub fn label<'a>(&'a self, key: &'a str) -> &'a str {
+        if self.text.is_empty() {
+            key
+        } else {
+            &self.text
+        }
+    }
+
+    /// The extension of the result: `ext`, else the key itself
+    pub fn extension<'a>(&'a self, key: &'a str) -> &'a str {
+        if self.ext.is_empty() {
+            key
+        } else {
+            &self.ext
+        }
+    }
 }
 
 /// A video codec entry, used by both Compress Video tabs
@@ -45,6 +68,28 @@ pub struct Codec {
     pub limit: f64,
 }
 
+impl Codec {
+    /// Value of the `q` / `p` list for the compression level (0 = low, 1 = medium, 2 = high)
+    pub fn pick(list: &[Value], level: usize) -> String {
+        match list.get(level).or_else(|| list.last()) {
+            Some(Value::Integer(i)) => i.to_string(),
+            Some(Value::Float(f)) => format!("{f}"),
+            Some(Value::String(s)) => s.clone(),
+            _ => "0".into(),
+        }
+    }
+
+    /// The size limit of a preset ("Discord — 20 MB"); None = the user types it
+    pub fn fixed_limit(&self) -> Option<f64> {
+        (self.preset && self.limit > 0.0).then_some(self.limit)
+    }
+
+    /// Two-pass encoding is possible (and not replaced by the chunked mode)
+    pub fn supports_twopass(&self) -> bool {
+        !self.twopass.is_empty() && !self.chunked
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct DeleteSound {
@@ -63,182 +108,56 @@ pub struct WebpAnim {
     pub output: String,
 }
 
-/// The items of the menu that the user switched off
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(default)]
-pub struct MenuSettings {
-    pub disabled: Vec<String>,
+/// The actions that only pick an output format; each one has its own list in presets.toml
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConvertKind {
+    Video,
+    /// re-encode the audio tracks of a video
+    VideoAudio,
+    Extract,
+    Frames,
+    AudioFile,
+    Image,
 }
 
-/// An own menu item: any ffmpeg command for the files of one kind
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct Custom {
-    pub id: String,
-    pub name: String,
-    /// video | audio | image
-    pub kind: String,
-    pub command: String,
-    pub output: String,
-}
+impl ConvertKind {
+    pub const ALL: [ConvertKind; 6] =
+        [ConvertKind::Video, ConvertKind::VideoAudio, ConvertKind::Extract, ConvertKind::Frames, ConvertKind::AudioFile, ConvertKind::Image];
 
-impl Default for Custom {
-    fn default() -> Self {
-        Custom {
-            id: String::new(),
-            name: String::new(),
-            kind: "video".into(),
-            command: "ffmpeg -n -i {input} -c:v copy {output}".into(),
-            output: "{base}_custom.{srcext}".into(),
-        }
-    }
-}
-
-impl Custom {
-    pub fn media_kind(&self) -> crate::media::Kind {
-        match self.kind.as_str() {
-            "audio" => crate::media::Kind::Audio,
-            "image" => crate::media::Kind::Image,
-            _ => crate::media::Kind::Video,
-        }
-    }
-}
-
-/// The file of the export / import of own items: just a list of [[custom]] tables
-#[derive(Serialize, Deserialize, Default)]
-struct Bundle {
-    custom: Vec<Custom>,
-}
-
-/// Write the own items to a file (a copy of the [[custom]] part of settings.toml)
-pub fn export_custom(items: &[Custom], path: &Path) -> Result<usize, String> {
-    let text = toml::to_string_pretty(&Bundle { custom: items.to_vec() }).map_err(|e| e.to_string())?;
-    let header = "# Own menu items of mmt (Settings > Menu > Import reads this file)\n\n";
-    if let Some(dir) = path.parent() {
-        if !dir.as_os_str().is_empty() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-    }
-    std::fs::write(path, format!("{header}{text}")).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(items.len())
-}
-
-/// Read own items from such a file; their ids are cleared, so they never clash with existing ones
-pub fn import_custom(path: &Path) -> Result<Vec<Custom>, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let bundle: Bundle = toml::from_str(&text).map_err(|e| format!("{}: {}", path.display(), e.message()))?;
-    Ok(bundle
-        .custom
-        .into_iter()
-        .filter(|c| !c.name.is_empty())
-        .map(|mut c| {
-            c.id.clear();
-            c
-        })
-        .collect())
-}
-
-/// "My GIF maker!" -> "my_gif_maker"
-pub fn slug(name: &str) -> String {
-    let mut out = String::new();
-    for c in name.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-        } else if !out.ends_with('_') && !out.is_empty() {
-            out.push('_');
-        }
-    }
-    let out = out.trim_end_matches('_').to_string();
-    if out.is_empty() {
-        "item".into()
-    } else {
-        out
-    }
-}
-
-/// Settings of the program itself (the Settings window writes them to settings.toml).
-/// The order of the fields matters: values first, tables last.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct Settings {
-    /// auto | dark | light
-    pub theme: String,
-    /// take the colours of the system (KDE, GNOME, Windows) where they can be read
-    pub system_palette: bool,
-    /// "#rrggbb"; empty = the default accent
-    pub accent: String,
-    /// auto | on | off
-    pub transparency: String,
-    pub opacity: f64,
-    pub ui_scale: f64,
-    /// seconds until the window of a successful job closes (0 = stays open)
-    pub auto_close: f64,
-    pub show_all_gpus: bool,
-    /// GNOME: "01 Compress Video" ... instead of plain names (Files sorts scripts by name)
-    pub numbered_scripts: bool,
-    pub ffmpeg: String,
-    pub ffprobe: String,
-    pub menu: MenuSettings,
-    pub custom: Vec<Custom>,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Settings {
-            theme: "auto".into(),
-            system_palette: false,
-            accent: String::new(),
-            transparency: "auto".into(),
-            opacity: 0.90,
-            ui_scale: 1.0,
-            auto_close: 4.0,
-            show_all_gpus: false,
-            numbered_scripts: false,
-            ffmpeg: String::new(),
-            ffprobe: String::new(),
-            menu: MenuSettings::default(),
-            custom: Vec::new(),
-        }
-    }
-}
-
-impl Settings {
-    /// (settings, problem found in the file)
-    pub fn load() -> (Settings, Option<String>) {
-        let path = settings_file();
-        match std::fs::read_to_string(&path) {
-            Ok(text) => match toml::from_str::<Settings>(&text) {
-                Ok(s) => (s, None),
-                Err(e) => (Settings::default(), Some(format!("{}: {}", path.display(), e.message()))),
-            },
-            Err(_) => (Settings::default(), None),
+    /// The table of presets.toml
+    pub fn section(self) -> &'static str {
+        match self {
+            ConvertKind::Video => "video_convert",
+            ConvertKind::VideoAudio => "video_audio",
+            ConvertKind::Extract => "extract",
+            ConvertKind::Frames => "frames",
+            ConvertKind::AudioFile => "audio_file",
+            ConvertKind::Image => "image",
         }
     }
 
-    pub fn save(&self) -> Result<(), String> {
-        let path = settings_file();
-        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
-        let body = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
-        let text = format!("# Settings of mmt. The Settings window (run `mmt settings`) writes this file; you can edit it, too.\n\n{body}");
-        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+    /// The files it works on
+    pub fn input_kind(self) -> Kind {
+        match self {
+            ConvertKind::AudioFile => Kind::Audio,
+            ConvertKind::Image => Kind::Image,
+            _ => Kind::Video,
+        }
     }
 
-    pub fn enabled(&self, action: &str) -> bool {
-        !self.menu.disabled.iter().any(|d| d == action)
+    fn index(self) -> usize {
+        self as usize
     }
 }
+
+pub type Formats = Vec<(String, Format)>;
 
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     pub settings: Settings,
     pub compress: Vec<(String, Codec)>,
     pub limit: Vec<(String, Codec)>,
-    pub video_convert: Vec<(String, Format)>,
-    pub video_audio: Vec<(String, Format)>,
-    pub extract: Vec<(String, Format)>,
-    pub frames: Vec<(String, Format)>,
-    pub audio_file: Vec<(String, Format)>,
-    pub image: Vec<(String, Format)>,
+    formats: [Formats; 6],
     pub delete_sound: DeleteSound,
     pub webp: WebpAnim,
     /// Problems found in the user's files (shown in the window; a broken file is ignored)
@@ -255,44 +174,14 @@ pub fn current_os() -> &'static str {
     }
 }
 
-/// Directory of the user's settings (created on demand)
-pub fn config_dir() -> PathBuf {
-    if cfg!(windows) {
-        if let Some(appdata) = std::env::var_os("APPDATA") {
-            return PathBuf::from(appdata).join("mmt");
-        }
-    }
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-        if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("mmt");
-        }
-    }
-    home_dir().join(".config").join("mmt")
-}
-
-pub fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-pub fn user_file() -> PathBuf {
-    config_dir().join("presets.toml")
-}
-
 /// Write the complete built-in commands to the user's presets.toml (when it does not exist yet)
 pub fn init_presets() -> Result<PathBuf, String> {
-    let path = user_file();
+    let path = paths::presets_file();
     if !path.exists() {
-        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(paths::config_dir()).map_err(|e| e.to_string())?;
         std::fs::write(&path, DEFAULT_PRESETS).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     Ok(path)
-}
-
-pub fn settings_file() -> PathBuf {
-    config_dir().join("settings.toml")
 }
 
 /// Merge `over` into `base`: tables are merged key by key, everything else is replaced
@@ -331,31 +220,23 @@ fn apply_os_overrides(section: &mut Table) {
 fn apply_inherit(section: &mut Table) {
     let keys: Vec<String> = section.keys().cloned().collect();
     for key in keys {
-        let parent = match section.get(&key) {
-            Some(Value::Table(t)) => t.get("inherit").and_then(|v| v.as_str()).map(str::to_string),
-            _ => None,
-        };
-        if let Some(parent) = parent {
-            if let Some(Value::Table(base)) = section.get(&parent).cloned() {
-                let mut merged = base;
-                if let Some(Value::Table(own)) = section.get(&key) {
-                    merge(&mut merged, own);
-                }
-                merged.remove("inherit");
-                section.insert(key, Value::Table(merged));
-            }
+        let Some(Value::Table(own)) = section.get(&key).cloned() else { continue };
+        let Some(parent) = own.get("inherit").and_then(|v| v.as_str()) else { continue };
+        if let Some(Value::Table(mut merged)) = section.get(parent).cloned() {
+            merge(&mut merged, &own);
+            merged.remove("inherit");
+            section.insert(key, Value::Table(merged));
         }
     }
 }
 
 fn section<T: DeserializeOwned>(root: &Table, name: &str, warnings: &mut Vec<String>) -> Vec<(String, T)> {
+    let Some(Value::Table(t)) = root.get(name) else { return Vec::new() };
     let mut out = Vec::new();
-    if let Some(Value::Table(t)) = root.get(name) {
-        for (key, value) in t {
-            match value.clone().try_into::<T>() {
-                Ok(v) => out.push((key.clone(), v)),
-                Err(e) => warnings.push(format!("[{name}.{key}]: {e}")),
-            }
+    for (key, value) in t {
+        match value.clone().try_into::<T>() {
+            Ok(v) => out.push((key.clone(), v)),
+            Err(e) => warnings.push(format!("[{name}.{key}]: {e}")),
         }
     }
     out
@@ -387,16 +268,16 @@ fn check_command(what: &str, command: &str, warnings: &mut Vec<String>) {
 
 impl Config {
     /// Built-in defaults only
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn defaults() -> Config {
         Config::from_sources(DEFAULT_PRESETS, None, Settings::default())
     }
 
     pub fn load() -> Config {
         let (settings, problem) = Settings::load();
-        let path = user_file();
-        let user = std::fs::read_to_string(&path).ok().map(|text| (path, text));
-        let mut cfg = Config::from_sources(DEFAULT_PRESETS, user.as_ref().map(|(p, t)| (p.as_path(), t.as_str())), settings);
+        let path = paths::presets_file();
+        let user = std::fs::read_to_string(&path).ok();
+        let mut cfg = Config::from_sources(DEFAULT_PRESETS, user.as_deref().map(|t| (path.as_path(), t)), settings);
         cfg.warnings.extend(problem);
         cfg
     }
@@ -406,11 +287,7 @@ impl Config {
         let mut root: Table = defaults.parse().expect("the built-in presets.toml is valid");
         if let Some((path, text)) = user {
             match text.parse::<Table>() {
-                Ok(over) => {
-                    let mut candidate = root.clone();
-                    merge(&mut candidate, &over);
-                    root = candidate;
-                }
+                Ok(over) => merge(&mut root, &over),
                 Err(e) => warnings.push(format!("{}: {}", path.display(), e.message())),
             }
         }
@@ -424,12 +301,7 @@ impl Config {
             settings,
             compress: section(&root, "compress", &mut warnings),
             limit: section(&root, "limit", &mut warnings),
-            video_convert: section(&root, "video_convert", &mut warnings),
-            video_audio: section(&root, "video_audio", &mut warnings),
-            extract: section(&root, "extract", &mut warnings),
-            frames: section(&root, "frames", &mut warnings),
-            audio_file: section(&root, "audio_file", &mut warnings),
-            image: section(&root, "image", &mut warnings),
+            formats: ConvertKind::ALL.map(|k| section(&root, k.section(), &mut warnings)),
             delete_sound: single(&root, "delete_sound", &mut warnings),
             webp: single(&root, "webp_anim", &mut warnings),
             warnings,
@@ -439,31 +311,41 @@ impl Config {
             let mut fallback = Config::from_sources(defaults, None, cfg.settings.clone());
             fallback.warnings = cfg.warnings;
             fallback.warnings.push("the codec lists are empty, built-in presets are used".into());
-            cfg = fallback;
+            return fallback;
         }
+        cfg.check_commands();
+        cfg
+    }
+
+    fn check_commands(&mut self) {
         let mut w = Vec::new();
-        for (k, c) in &cfg.compress {
-            check_command(&format!("[compress.{k}]"), &c.command, &mut w);
-        }
-        for (k, c) in &cfg.limit {
-            check_command(&format!("[limit.{k}]"), &c.command, &mut w);
-        }
-        for (sec, list) in [
-            ("video_convert", &cfg.video_convert),
-            ("video_audio", &cfg.video_audio),
-            ("extract", &cfg.extract),
-            ("frames", &cfg.frames),
-            ("audio_file", &cfg.audio_file),
-            ("image", &cfg.image),
-        ] {
-            for (k, f) in list {
-                check_command(&format!("[{sec}.{k}]"), &f.command, &mut w);
+        for (sec, list) in [("compress", &self.compress), ("limit", &self.limit)] {
+            for (k, c) in list {
+                check_command(&format!("[{sec}.{k}]"), &c.command, &mut w);
             }
         }
-        check_command("[delete_sound]", &cfg.delete_sound.command, &mut w);
-        check_command("[webp_anim]", &cfg.webp.command, &mut w);
-        cfg.warnings.extend(w);
-        cfg
+        for kind in ConvertKind::ALL {
+            for (k, f) in self.formats(kind) {
+                check_command(&format!("[{}.{k}]", kind.section()), &f.command, &mut w);
+            }
+        }
+        check_command("[delete_sound]", &self.delete_sound.command, &mut w);
+        check_command("[webp_anim]", &self.webp.command, &mut w);
+        self.warnings.extend(w);
+    }
+
+    pub fn formats(&self, kind: ConvertKind) -> &[(String, Format)] {
+        &self.formats[kind.index()]
+    }
+
+    pub fn format(&self, kind: ConvertKind, key: &str) -> Option<&Format> {
+        self.formats(kind).iter().find(|(k, _)| k == key).map(|(_, f)| f)
+    }
+
+    /// The format marked `default = true`, else the first one
+    pub fn default_format(&self, kind: ConvertKind) -> Option<&str> {
+        let list = self.formats(kind);
+        list.iter().find(|(_, f)| f.default).or_else(|| list.first()).map(|(k, _)| k.as_str())
     }
 
     pub fn compress_codec(&self, key: &str) -> Option<&Codec> {
@@ -473,47 +355,6 @@ impl Config {
     pub fn limit_codec(&self, key: &str) -> Option<&Codec> {
         self.limit.iter().find(|(k, _)| k == key).map(|(_, c)| c)
     }
-}
-
-impl Codec {
-    /// Value of the `q` / `p` list for the compression level (0 = low, 1 = medium, 2 = high)
-    pub fn pick(list: &[Value], level: usize) -> String {
-        let v = list.get(level).or_else(|| list.last());
-        match v {
-            Some(Value::Integer(i)) => i.to_string(),
-            Some(Value::Float(f)) => format!("{f}"),
-            Some(Value::String(s)) => s.clone(),
-            _ => "0".into(),
-        }
-    }
-}
-
-/// ffmpeg / ffprobe: the configured path, then next to the program, then PATH
-pub fn find_tool(name: &str, configured: &str) -> Option<PathBuf> {
-    let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
-    if !configured.is_empty() {
-        let p = PathBuf::from(configured);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let p = dir.join(&file);
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            let p = dir.join(&file);
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -530,11 +371,12 @@ mod tests {
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
         assert_eq!(c.compress.len(), 14);
         assert_eq!(c.limit.len(), 14);
-        assert_eq!(c.video_convert.len(), 6);
-        assert_eq!(c.audio_file.len(), 8);
-        assert_eq!(c.image.len(), 7);
+        assert_eq!(c.formats(ConvertKind::Video).len(), 6);
+        assert_eq!(c.formats(ConvertKind::AudioFile).len(), 8);
+        assert_eq!(c.formats(ConvertKind::Image).len(), 7);
         assert_eq!(c.webp.size, 720);
         assert_eq!(c.compress[0].0, "h264_cpu");
+        assert_eq!(c.default_format(ConvertKind::Video), Some("mp4"));
     }
 
     #[test]
@@ -544,8 +386,10 @@ mod tests {
             assert!(e.command.starts_with("ffmpeg "), "{k}");
             assert!(!e.output.is_empty(), "{k} has no output");
         }
-        for (k, f) in c.video_convert.iter().chain(&c.video_audio).chain(&c.extract).chain(&c.frames).chain(&c.audio_file).chain(&c.image) {
-            assert!(f.command.starts_with("ffmpeg ") && !f.output.is_empty() && !f.ext.is_empty(), "{k}");
+        for kind in ConvertKind::ALL {
+            for (k, f) in c.formats(kind) {
+                assert!(f.command.starts_with("ffmpeg ") && !f.output.is_empty() && !f.ext.is_empty(), "{k}");
+            }
         }
     }
 
@@ -554,7 +398,7 @@ mod tests {
         let c = defaults();
         let d = c.limit_codec("discord").unwrap();
         assert!(d.preset);
-        assert_eq!(d.limit, 20.0);
+        assert_eq!(d.fixed_limit(), Some(20.0));
         assert!(d.command.contains("libx265"));
         assert_eq!(d.output, "{base}_discord.mp4");
         assert_eq!(d.twopass, "x265");
@@ -589,7 +433,7 @@ mod tests {
         let h = c.compress_codec("h264_cpu").unwrap();
         assert_eq!(Codec::pick(&h.q, 1), "24");
         assert!(h.command.contains("libx264"));
-        assert_eq!(c.video_convert.last().unwrap().0, "gif");
+        assert_eq!(c.formats(ConvertKind::Video).last().unwrap().0, "gif");
     }
 
     #[test]
@@ -604,48 +448,6 @@ mod tests {
         let user = "[compress.h264_cpu]\ncommand = \"ffmpeg -n -i {input} -c:v libx264\"\n";
         let c = Config::from_sources(DEFAULT_PRESETS, Some((Path::new("u.toml"), user)), Settings::default());
         assert!(c.warnings.iter().any(|w| w.contains("compress.h264_cpu") && w.contains("{output}")), "{:?}", c.warnings);
-    }
-
-    #[test]
-    fn settings_roundtrip_through_toml() {
-        let mut s = Settings::default();
-        s.theme = "dark".into();
-        s.menu.disabled = vec!["delete-sound".into()];
-        s.custom.push(Custom { id: "gif".into(), name: "GIF".into(), ..Default::default() });
-        let text = toml::to_string_pretty(&s).unwrap();
-        let back: Settings = toml::from_str(&text).unwrap();
-        assert_eq!(s, back);
-        assert!(!back.enabled("delete-sound") && back.enabled("compress"));
-        // an old / partial file is fine
-        let partial: Settings = toml::from_str("theme = \"light\"\n").unwrap();
-        assert_eq!(partial.theme, "light");
-        assert_eq!(partial.opacity, 0.90);
-    }
-
-    #[test]
-    fn own_items_export_and_import() {
-        let dir = std::env::temp_dir().join(format!("mmt-export-{}", std::process::id()));
-        let file = dir.join("items.toml");
-        let items = vec![
-            Custom { id: "a".into(), name: "Make GIF".into(), command: "ffmpeg -n -i {input} {output}".into(), ..Default::default() },
-            Custom { id: "b".into(), name: "Quiet".into(), kind: "audio".into(), ..Default::default() },
-        ];
-        assert_eq!(export_custom(&items, &file).unwrap(), 2);
-        let back = import_custom(&file).unwrap();
-        assert_eq!(back.len(), 2);
-        assert!(back.iter().all(|c| c.id.is_empty()));
-        assert_eq!(back[0].name, "Make GIF");
-        assert_eq!(back[1].kind, "audio");
-        assert!(import_custom(&dir.join("missing.toml")).is_err());
-        std::fs::write(&file, "custom = 5").unwrap();
-        assert!(import_custom(&file).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn slugs() {
-        assert_eq!(slug("My GIF maker!"), "my_gif_maker");
-        assert_eq!(slug("Сжать"), "item");
     }
 
     #[test]

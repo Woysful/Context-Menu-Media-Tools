@@ -1,7 +1,8 @@
 //! The colours of the system, where they can be read: KDE (kdeglobals), GNOME (gsettings),
 //! Windows (registry). Elsewhere (XFCE, ...) there is no palette and None is returned.
 
-use crate::config;
+use crate::paths;
+use crate::proc::output_of as run;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
@@ -97,14 +98,6 @@ pub fn windows_palette(personalize: &str, dwm: &str) -> Option<Palette> {
     })
 }
 
-fn run(program: &str, args: &[&str]) -> Option<String> {
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args);
-    crate::engine::hide_console(&mut cmd);
-    let out = cmd.output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).to_string())
-}
-
 fn desktop() -> String {
     std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase()
 }
@@ -118,12 +111,7 @@ pub fn detect() -> Option<Palette> {
     }
     let desk = desktop();
     if desk.contains("kde") {
-        let path = std::env::var_os("XDG_CONFIG_HOME")
-            .filter(|v| !v.is_empty())
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| config::home_dir().join(".config"))
-            .join("kdeglobals");
-        return parse_kdeglobals(&std::fs::read_to_string(path).ok()?);
+        return parse_kdeglobals(&std::fs::read_to_string(paths::xdg_config().join("kdeglobals")).ok()?);
     }
     if desk.contains("gnome") || desk.contains("unity") {
         let scheme = run("gsettings", &["get", "org.gnome.desktop.interface", "color-scheme"])?;

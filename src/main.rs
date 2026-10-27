@@ -12,14 +12,19 @@ mod i18n;
 mod i18n_settings;
 mod install;
 mod media;
+mod paths;
+mod proc;
 mod scale;
+mod settings;
 mod syspal;
 mod theme;
 mod ui;
+mod units;
 
 use action::Action;
 use config::Config;
-use engine::{ConvertKind, Request};
+use engine::Request;
+use media::Kind;
 use scale::ScaleMode;
 use std::collections::HashMap;
 use std::io::IsTerminal;
@@ -62,34 +67,34 @@ struct Cli {
 
 impl Cli {
     fn parse(args: Vec<String>) -> Cli {
+        const WITH_VALUE: &[&str] = &["format", "level", "codec", "limit", "scale", "size", "fps", "quality", "compression"];
         let mut it = args.into_iter();
-        let action = it.next().unwrap_or_default();
-        let mut cli = Cli { action, files: vec![], opts: HashMap::new(), flags: vec![] };
-        const WITH_VALUE: &[&str] =
-            &["format", "level", "codec", "limit", "scale", "size", "fps", "quality", "compression"];
-        let rest: Vec<String> = it.collect();
-        let mut i = 0;
-        while i < rest.len() {
-            let a = &rest[i];
-            if let Some(name) = a.strip_prefix("--") {
-                if let Some((k, v)) = name.split_once('=') {
-                    cli.opts.insert(k.to_string(), v.to_string());
-                } else if WITH_VALUE.contains(&name) && i + 1 < rest.len() {
-                    cli.opts.insert(name.to_string(), rest[i + 1].clone());
-                    i += 1;
-                } else {
-                    cli.flags.push(name.to_string());
-                }
-            } else {
+        let mut cli = Cli { action: it.next().unwrap_or_default(), files: vec![], opts: HashMap::new(), flags: vec![] };
+        while let Some(a) = it.next() {
+            let Some(name) = a.strip_prefix("--") else {
                 cli.files.push(PathBuf::from(a));
+                continue;
+            };
+            if let Some((k, v)) = name.split_once('=') {
+                cli.opts.insert(k.to_string(), v.to_string());
+            } else if WITH_VALUE.contains(&name) {
+                match it.next() {
+                    Some(v) => cli.opts.insert(name.to_string(), v),
+                    None => None,
+                };
+            } else {
+                cli.flags.push(name.to_string());
             }
-            i += 1;
         }
         cli
     }
 
     fn flag(&self, name: &str) -> bool {
         self.flags.iter().any(|f| f == name)
+    }
+
+    fn opt(&self, name: &str) -> Option<&str> {
+        self.opts.get(name).map(String::as_str)
     }
 }
 
@@ -106,53 +111,34 @@ fn files_from_env() -> Vec<PathBuf> {
     Vec::new()
 }
 
-fn absolute(p: PathBuf) -> PathBuf {
-    std::path::absolute(&p).unwrap_or(p)
-}
-
-fn default_format(list: &[(String, config::Format)]) -> Option<String> {
-    list.iter().find(|(_, f)| f.default).or_else(|| list.first()).map(|(k, _)| k.clone())
-}
-
-fn parse_scale(text: &str) -> Option<ScaleMode> {
-    ScaleMode::from_code(text).or_else(|| scale::parse_typed(text))
-}
-
 /// The request for `--yes` / `--cli`, built from the options (defaults for what is missing)
-fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<media::Kind>) -> Result<Request, String> {
-    let opt = |k: &str| cli.opts.get(k).cloned();
-    let num = |k: &str, d: u32| opt(k).and_then(|v| v.parse().ok()).unwrap_or(d);
-    let format_of = |list: &[(String, config::Format)]| opt("format").or_else(|| default_format(list)).ok_or("no formats".to_string());
-    let scale = match opt("scale") {
-        Some(s) => parse_scale(&s).ok_or_else(|| format!("bad --scale: {s}"))?,
+fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind>) -> Result<Request, String> {
+    let num = |k: &str, d: u32| cli.opt(k).and_then(|v| v.parse().ok()).unwrap_or(d);
+    let codec = cli.opt("codec").unwrap_or("h264_cpu").to_string();
+    let scale = match cli.opt("scale") {
+        Some(s) => ScaleMode::from_code(s).or_else(|| scale::parse_typed(s)).ok_or_else(|| format!("bad --scale: {s}"))?,
         None => ScaleMode::Orig,
     };
+    if let Some(what) = action.convert_kind(first_kind) {
+        let format = cli.opt("format").or_else(|| cfg.default_format(what)).ok_or("no formats")?;
+        return Ok(Request::Convert { what, format: format.to_string() });
+    }
     Ok(match action {
-        Action::Compress => {
-            if let Some(l) = opt("limit") {
-                let mb: f64 = l.parse().map_err(|_| format!("bad --limit: {l}"))?;
-                Request::CompressLimit { mb, codec: opt("codec").unwrap_or_else(|| "h264_cpu".into()), scale, twopass: cli.flag("twopass") }
-            } else {
-                let level = match opt("level").as_deref().unwrap_or("medium") {
+        Action::Compress => match cli.opt("limit") {
+            Some(l) => {
+                let mb = units::parse_decimal(l).filter(|v| *v > 0.0).ok_or_else(|| format!("bad --limit: {l}"))?;
+                Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass") }
+            }
+            None => {
+                let level = match cli.opt("level").unwrap_or("medium") {
                     "low" => 0,
                     "medium" => 1,
                     "high" => 2,
                     other => return Err(format!("bad --level: {other}")),
                 };
-                Request::CompressPreset { level, codec: opt("codec").unwrap_or_else(|| "h264_cpu".into()), scale }
+                Request::CompressPreset { level, codec, scale }
             }
-        }
-        Action::ConvertVideo => Request::Convert { what: ConvertKind::Video, format: format_of(&cfg.video_convert)? },
-        Action::ExtractAudio => Request::Convert { what: ConvertKind::Extract, format: format_of(&cfg.extract)? },
-        Action::Frames => Request::Convert { what: ConvertKind::Frames, format: format_of(&cfg.frames)? },
-        Action::ConvertImage => Request::Convert { what: ConvertKind::Image, format: format_of(&cfg.image)? },
-        Action::ConvertAudio => {
-            if first_kind == Some(media::Kind::Video) {
-                Request::Convert { what: ConvertKind::VideoAudio, format: format_of(&cfg.video_audio)? }
-            } else {
-                Request::Convert { what: ConvertKind::AudioFile, format: format_of(&cfg.audio_file)? }
-            }
-        }
+        },
         Action::DeleteSound => Request::DeleteSound,
         Action::Webp => Request::Webp {
             size: num("size", cfg.webp.size),
@@ -160,7 +146,7 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<medi
             quality: num("quality", cfg.webp.quality),
             compression: num("compression", cfg.webp.compression),
         },
-        Action::Stats => return Err("stats has no request".into()),
+        _ => return Err(format!("{} has no options", action.cli_name())),
     })
 }
 
@@ -168,18 +154,8 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<medi
 /// shows it in a window instead of printing it.
 fn emit(title: &str, lines: Vec<String>, code: i32) -> i32 {
     if cfg!(windows) {
-        let launch = ui::Launch {
-            start: ui::Start::Message { title: title.to_string(), lines, ok: code == 0 },
-            action: Action::Stats,
-            custom_id: None,
-            files: vec![],
-            cfg: Arc::new(Config::defaults()),
-            ffmpeg: None,
-            ffprobe: None,
-            request: None,
-            first_kind: None,
-        };
-        let _ = ui::run(launch);
+        let start = ui::Start::Message { title: title.to_string(), lines, ok: code == 0 };
+        let _ = ui::run(ui::Launch::plain(start, Arc::new(Config::load())));
     } else {
         for (i, l) in lines.iter().enumerate() {
             if code == 0 {
@@ -194,19 +170,7 @@ fn emit(title: &str, lines: Vec<String>, code: i32) -> i32 {
     code
 }
 
-fn settings_window() -> i32 {
-    let cfg = Arc::new(Config::load());
-    let launch = ui::Launch {
-        start: ui::Start::Settings,
-        action: Action::Stats,
-        custom_id: None,
-        files: vec![],
-        cfg,
-        ffmpeg: None,
-        ffprobe: None,
-        request: None,
-        first_kind: None,
-    };
+fn show(launch: ui::Launch) -> i32 {
     match ui::run(launch) {
         Ok(()) => 0,
         Err(e) => {
@@ -216,42 +180,46 @@ fn settings_window() -> i32 {
     }
 }
 
+fn settings_window() -> i32 {
+    show(ui::Launch::plain(ui::Start::Settings, Arc::new(Config::load())))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Started without arguments from a file manager or the application menu (no terminal): the Settings window
     if args.is_empty() && !std::io::stdout().is_terminal() {
         std::process::exit(settings_window());
     }
-    let cli = Cli::parse(args);
+    let mut cli = Cli::parse(args);
     let code = match cli.action.as_str() {
         "" | "help" | "--help" | "-h" => emit("mmt", HELP.lines().map(str::to_string).collect(), 0),
         "version" | "--version" | "-V" => emit("mmt", vec![format!("mmt {}", env!("CARGO_PKG_VERSION"))], 0),
         "settings" => settings_window(),
-        "install" | "uninstall" => {
-            let (code, lines) = install::run(&cli.action, &cli.flags);
-            emit(if cli.action == "install" { "Install" } else { "Uninstall" }, lines, code)
+        "install" => {
+            let (code, lines) = install::install(&install::Options::from_flags(&cli.flags));
+            emit("Install", lines, code)
+        }
+        "uninstall" => {
+            let (code, lines) = install::uninstall(&install::Options::from_flags(&cli.flags));
+            emit("Uninstall", lines, code)
         }
         "config" => config_command(&cli),
+        // mmt run <id> [files...]: the first word is the id of an own item
+        "run" if cli.files.is_empty() => emit("mmt", vec!["run: the id of the item is missing".into()], 2),
         "run" => {
-            // mmt run <id> [files...]: the first word is the id of an own item
-            let mut cli = cli;
-            if cli.files.is_empty() {
-                emit("mmt", vec!["run: the id of the item is missing".into()], 2)
-            } else {
-                let id = cli.files.remove(0).to_string_lossy().to_string();
-                run_action(Action::Stats, Some(id), cli)
-            }
+            let id = cli.files.remove(0).to_string_lossy().to_string();
+            run_action(Action::Stats, Some(id), cli)
         }
         name => match Action::from_cli(name) {
             Some(action) => run_action(action, None, cli),
-            None => emit("mmt", vec![format!("unknown action \"{name}\""), String::new()].into_iter().chain(HELP.lines().map(str::to_string)).collect(), 2),
+            None => emit("mmt", [format!("unknown action \"{name}\""), String::new()].into_iter().chain(HELP.lines().map(str::to_string)).collect(), 2),
         },
     };
     std::process::exit(code);
 }
 
 fn config_command(cli: &Cli) -> i32 {
-    let path = config::user_file();
+    let path = paths::presets_file();
     if cli.flag("defaults") {
         return emit("presets.toml", config::DEFAULT_PRESETS.lines().map(str::to_string).collect(), 0);
     }
@@ -260,7 +228,9 @@ fn config_command(cli: &Cli) -> i32 {
             return emit("presets.toml", vec![format!("{} already exists", path.display())], 0);
         }
         return match config::init_presets() {
-            Ok(p) => emit("presets.toml", vec![format!("created {}", p.display()), "it holds every ffmpeg command of the program: edit what you need".into()], 0),
+            Ok(p) => {
+                emit("presets.toml", vec![format!("created {}", p.display()), "it holds every ffmpeg command of the program: edit what you need".into()], 0)
+            }
             Err(e) => emit("presets.toml", vec![e], 1),
         };
     }
@@ -271,7 +241,7 @@ fn run_action(action: Action, custom: Option<String>, cli: Cli) -> i32 {
     let cfg = Arc::new(Config::load());
     let t = i18n::t();
     if let Some(id) = &custom {
-        if !cfg.settings.custom.iter().any(|c| &c.id == id) {
+        if cfg.settings.custom(id).is_none() {
             return emit("mmt", vec![format!("no own item \"{id}\" in settings.toml")], 2);
         }
     }
@@ -280,7 +250,7 @@ fn run_action(action: Action, custom: Option<String>, cli: Cli) -> i32 {
     if files.is_empty() {
         files = files_from_env();
     }
-    let files: Vec<PathBuf> = files.into_iter().map(absolute).collect();
+    let files: Vec<PathBuf> = files.into_iter().map(|p| std::path::absolute(&p).unwrap_or(p)).collect();
     let files = if cli.flag("batch") {
         match batch::gather(action.cli_name(), &files) {
             Some(all) => all,
@@ -294,69 +264,60 @@ fn run_action(action: Action, custom: Option<String>, cli: Cli) -> i32 {
         return 1;
     }
 
-    let ffmpeg = config::find_tool("ffmpeg", &cfg.settings.ffmpeg);
-    let ffprobe = config::find_tool("ffprobe", &cfg.settings.ffprobe);
-    let first_kind = files.iter().find_map(|f| media::kind_of(f));
-    let custom_request = custom.as_ref().map(|id| Request::Custom { id: id.clone() });
-
+    let tools = match (paths::find_tool("ffmpeg", &cfg.settings.ffmpeg), paths::find_tool("ffprobe", &cfg.settings.ffprobe)) {
+        (Some(ffmpeg), Some(ffprobe)) => Some(ui::Tools { ffmpeg, ffprobe }),
+        _ => None,
+    };
+    let first_kind = files.iter().find_map(|f| Kind::of(f));
     let headless = cli.flag("cli");
-    let preset = if custom_request.is_some() {
-        if headless || cli.flag("yes") { custom_request.clone() } else { None }
-    } else if headless || cli.flag("yes") {
-        request_from(action, &cli, &cfg, first_kind).ok()
-    } else {
+    let request = if !headless && !cli.flag("yes") {
         None
+    } else if let Some(id) = &custom {
+        Some(Ok(Request::Custom { id: id.clone() }))
+    } else if action == Action::Stats {
+        None
+    } else {
+        Some(request_from(action, &cli, &cfg, first_kind))
     };
     if headless {
-        return run_console(action, custom_request, &cli, &cfg, ffmpeg, ffprobe, files, first_kind);
+        return run_console(action, request, &cfg, tools, &files);
     }
-    let launch = ui::Launch { start: ui::Start::Normal, action, custom_id: custom, files, cfg, ffmpeg, ffprobe, request: preset, first_kind };
-    match ui::run(launch) {
-        Ok(()) => 0,
-        Err(e) => {
-            eprintln!("mmt: {e}");
-            1
-        }
-    }
+    let request = match request.transpose() {
+        Ok(r) => r,
+        Err(e) => return emit("mmt", vec![e], 2),
+    };
+    show(ui::Launch { start: ui::Start::Normal, action, custom_id: custom, files, cfg, tools, request, first_kind })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_console(
-    action: Action,
-    custom: Option<Request>,
-    cli: &Cli,
-    cfg: &Arc<Config>,
-    ffmpeg: Option<PathBuf>,
-    ffprobe: Option<PathBuf>,
-    files: Vec<PathBuf>,
-    first_kind: Option<media::Kind>,
-) -> i32 {
+/// `--cli`: the job without a window. `request` is None only for Stats.
+fn run_console(action: Action, request: Option<Result<Request, String>>, cfg: &Arc<Config>, tools: Option<ui::Tools>, files: &[PathBuf]) -> i32 {
     let t = i18n::t();
-    let (Some(ffmpeg), Some(ffprobe)) = (ffmpeg, ffprobe) else {
+    let Some(tools) = tools else {
         eprintln!("{}", t.ffmpeg_missing);
         return 1;
     };
-    if action == Action::Stats && custom.is_none() {
-        for f in &files {
-            println!("== {}\n{}\n", f.display(), engine::stats_text(&ffprobe, f));
+    let req = match request {
+        None if action == Action::Stats => {
+            for f in files {
+                println!("== {}\n{}\n", f.display(), engine::stats_text(&tools.ffprobe, f));
+            }
+            return 0;
         }
-        return 0;
-    }
-    let req = match custom.map(Ok).unwrap_or_else(|| request_from(action, cli, cfg, first_kind)) {
-        Ok(r) => r,
-        Err(e) => {
+        None => return 2,
+        Some(Err(e)) => {
             eprintln!("mmt: {e}");
             return 2;
         }
+        Some(Ok(r)) => r,
     };
     for w in &cfg.warnings {
         eprintln!("{} {w}", t.config_warning);
     }
     let prog = engine::Progress::new(Box::new(|| {}), true);
-    let job = engine::Job { cfg: cfg.clone(), ffmpeg, ffprobe, prog: prog.clone() };
-    engine::run(&job, &req, &files);
+    let job = engine::Job { cfg: cfg.clone(), ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe, prog: prog.clone() };
+    engine::run(&job, &req, files);
     println!();
-    let st = prog.state.lock().unwrap();
+    let st = prog.snapshot();
     if st.errors > 0 || st.cancelled {
         1
     } else {

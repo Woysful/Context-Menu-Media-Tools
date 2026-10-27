@@ -13,17 +13,7 @@ pub enum ScaleMode {
 }
 
 impl ScaleMode {
-    /// Canonical text of the mode (the same codes the shell scripts used: orig, auto, h720, s0.5)
-    #[allow(dead_code)]
-    pub fn code(&self) -> String {
-        match self {
-            ScaleMode::Orig => "orig".into(),
-            ScaleMode::Auto => "auto".into(),
-            ScaleMode::Height(h) => format!("h{h}"),
-            ScaleMode::Factor(f) => format!("s{}", trim_float(*f)),
-        }
-    }
-
+    /// The codes of `--scale` (the same the shell scripts used): orig, auto, h720, s0.5
     pub fn from_code(code: &str) -> Option<ScaleMode> {
         match code {
             "orig" => Some(ScaleMode::Orig),
@@ -40,22 +30,9 @@ impl ScaleMode {
     }
 }
 
-#[allow(dead_code)]
-fn trim_float(v: f64) -> String {
-    let s = format!("{:.4}", v);
-    s.trim_end_matches('0').trim_end_matches('.').to_string()
-}
-
 /// What the user typed into the resolution field: "50%", "x0.5", "0.5x", "540p", "540", "0.5".
 pub fn parse_typed(text: &str) -> Option<ScaleMode> {
-    let t: String = text
-        .trim()
-        .to_lowercase()
-        .replace(',', ".")
-        .replace('×', "x")
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
+    let t: String = text.trim().to_lowercase().replace(',', ".").replace('×', "x").chars().filter(|c| !c.is_whitespace()).collect();
     if t.is_empty() {
         return None;
     }
@@ -69,11 +46,8 @@ pub fn parse_typed(text: &str) -> Option<ScaleMode> {
         let v = num(p)?;
         return (5.0..=100.0).contains(&v).then(|| ScaleMode::Factor(v / 100.0));
     }
-    for rest in [t.strip_prefix('x'), t.strip_prefix('*')].into_iter().flatten() {
-        let v = num(rest)?;
-        return (0.05..=1.0).contains(&v).then_some(ScaleMode::Factor(v));
-    }
-    for rest in [t.strip_suffix('x'), t.strip_suffix('*')].into_iter().flatten() {
+    let factor = t.strip_prefix(['x', '*']).or_else(|| t.strip_suffix(['x', '*']));
+    if let Some(rest) = factor {
         let v = num(rest)?;
         return (0.05..=1.0).contains(&v).then_some(ScaleMode::Factor(v));
     }
@@ -152,11 +126,7 @@ pub fn choose(mode: ScaleMode, w: u32, h: u32, fps: f64, video_bps: f64, bpp_min
     if f > 1.0 || f >= 0.999 {
         f = 1.0;
     }
-    Choice {
-        factor: f,
-        short_px: (2.0 * (short * f / 2.0 + 0.5).floor()) as u32,
-        bpp: video_bps / (wf * hf * f * f * fe),
-    }
+    Choice { factor: f, short_px: (2.0 * (short * f / 2.0 + 0.5).floor()) as u32, bpp: video_bps / (wf * hf * f * f * fe) }
 }
 
 /// The ffmpeg filter for a factor below 1
@@ -184,11 +154,12 @@ mod tests {
     }
 
     #[test]
-    fn codes_roundtrip() {
-        for m in [ScaleMode::Orig, ScaleMode::Auto, ScaleMode::Height(720), ScaleMode::Factor(0.5)] {
-            assert_eq!(ScaleMode::from_code(&m.code()), Some(m));
-        }
-        assert_eq!(ScaleMode::Factor(0.33).code(), "s0.33");
+    fn codes() {
+        assert_eq!(ScaleMode::from_code("orig"), Some(ScaleMode::Orig));
+        assert_eq!(ScaleMode::from_code("auto"), Some(ScaleMode::Auto));
+        assert_eq!(ScaleMode::from_code("h720"), Some(ScaleMode::Height(720)));
+        assert_eq!(ScaleMode::from_code("s0.33"), Some(ScaleMode::Factor(0.33)));
+        assert_eq!(ScaleMode::from_code("q1"), None);
     }
 
     #[test]

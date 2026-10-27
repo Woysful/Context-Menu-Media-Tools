@@ -1,7 +1,7 @@
 //! Look of the windows: JetBrains Mono, a strict flat style, colours from the settings
 //! (dark / light / the system palette) and one accent colour.
 
-use crate::config::Settings;
+use crate::settings::Settings;
 use crate::syspal::Palette;
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, FontId, RichText, Rounding, Stroke, TextStyle, Vec2};
 use std::sync::RwLock;
@@ -140,7 +140,7 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
     let k = colors;
     let mut v = if k.dark { egui::Visuals::dark() } else { egui::Visuals::light() };
     let r = Rounding::same(3.0);
-    let stroke = |c: Color32| Stroke::new(1.0, c);
+    let stroke = |c: Color32| Stroke::new(1.0_f32, c);
     v.panel_fill = Color32::from_rgba_unmultiplied(k.bg.r(), k.bg.g(), k.bg.b(), (alpha.clamp(0.0, 1.0) * 255.0) as u8);
     v.window_fill = k.surface;
     v.extreme_bg_color = k.surface;
@@ -220,7 +220,7 @@ mod tests {
         let c = compute(&s, None, Some(pal));
         assert!(c.dark && c.accent == Color32::from_rgb(9, 9, 9));
         assert!(!compute(&s, None, None).dark); // button unavailable -> own theme
-        // a custom accent
+                                                // a custom accent
         s.system_palette = false;
         s.accent = "#ff0000".into();
         assert_eq!(compute(&s, None, None).accent, Color32::from_rgb(255, 0, 0));

@@ -39,11 +39,8 @@ pub fn gather_in(dir: &Path, files: &[PathBuf], quiet: Duration) -> Option<Vec<P
     // 2. try to become the leader
     let mut got = OpenOptions::new().write(true).create_new(true).open(&lock).is_ok();
     if !got {
-        let stale = fs::metadata(&lock)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| SystemTime::now().duration_since(t).ok())
-            .map_or(false, |age| age > STALE_LOCK);
+        let stale =
+            fs::metadata(&lock).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|age| age > STALE_LOCK);
         if stale {
             let _ = fs::remove_file(&lock);
             got = OpenOptions::new().write(true).create_new(true).open(&lock).is_ok();
