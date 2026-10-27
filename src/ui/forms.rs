@@ -3,8 +3,8 @@
 use super::dropdown::{build_groups, codec_combo, need_id, Group};
 use super::scale_field::ScaleField;
 use super::widgets::{
-    button_row, card, chars_fitting, choice, field, file_name, hint, muted, number_field, primary_button, secondary_button, short, slider_row, tabs,
-    text_width, title, window, MARGIN,
+    button_row, card, chars_fitting, choice, field, file_name, form_row, hint, line_edit, muted, number_field, one_line, primary_button, secondary_button,
+    segmented, short, slider_row, text_width, title, window, MARGIN,
 };
 use super::Env;
 use crate::action::Action;
@@ -13,9 +13,9 @@ use crate::engine::{self, Request};
 use crate::i18n::T;
 use crate::media;
 use crate::scale::ScaleMode;
-use crate::theme::{self, bold, c};
+use crate::theme::{self, bold, c, CONTROL_H};
 use crate::units;
-use eframe::egui::{self, pos2, vec2, FontId, Rect, RichText};
+use eframe::egui::{self, pos2, vec2, Align, FontId, Layout, Rect, RichText};
 
 pub struct CompressForm {
     tab: usize,
@@ -131,54 +131,85 @@ impl Form {
 }
 
 impl CompressForm {
+    /// Both modes have the same rows (a control with a line under it, the codec, the resolution,
+    /// the result), so the window fits either of them without empty space
     fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
         let t = env.t;
-        tabs(ui, &[t.tab_presets, t.tab_limit], &mut self.tab);
-        if self.tab == 0 {
-            hint(ui, t.tab_presets_text);
-            ui.add_space(8.0);
-            field(ui, t.level, |ui| {
-                let mut sel = self.level.to_string();
-                choice(ui, &mut sel, &[("0", t.level_low), ("1", t.level_medium), ("2", t.level_high)]);
-                self.level = sel.parse().unwrap_or(1);
-            });
-            field(ui, t.codec, |ui| codec_combo(ui, "p_codec", &self.p_groups, &mut self.p_codec, t));
-            field(ui, t.resolution, |ui| self.p_scale.ui(ui, t, false, &env.infos));
-            if self.p_scale.invalid {
-                return None;
-            }
-            Some(Request::CompressPreset { level: self.level, codec: self.p_codec.clone(), scale: self.p_scale.mode })
-        } else {
-            hint(ui, t.tab_limit_text);
-            ui.add_space(8.0);
-            let entry = env.cfg.limit_codec(&self.l_codec);
-            let fixed_limit = entry.and_then(Codec::fixed_limit);
-            let twopass_ok = entry.is_some_and(Codec::supports_twopass);
-            if let Some(l) = fixed_limit {
-                self.mb_text = units::fmt_float(l);
-            }
-            let mb = units::parse_decimal(&self.mb_text).filter(|v| *v > 0.0);
-            ui.columns(2, |cols| {
-                field(&mut cols[0], t.codec, |ui| codec_combo(ui, "l_codec", &self.l_groups, &mut self.l_codec, t));
-                field(&mut cols[1], t.limit, |ui| {
-                    ui.add_enabled_ui(fixed_limit.is_none(), |ui| number_field(ui, &mut self.mb_text, mb.is_some(), "MB"));
-                });
-            });
-            field(ui, t.resolution, |ui| self.l_scale.ui(ui, t, true, &env.infos));
-            if twopass_ok {
-                ui.checkbox(&mut self.twopass, t.two_pass);
-            } else {
-                ui.add_enabled(false, egui::Checkbox::new(&mut false, t.two_pass));
-            }
-            hint(ui, t.two_pass_hint);
-            if self.l_scale.invalid {
-                return None;
-            }
-            Some(Request::CompressLimit { mb: mb?, codec: self.l_codec.clone(), scale: self.l_scale.mode, twopass: self.twopass && twopass_ok })
+        segmented(ui, &[t.tab_presets, t.tab_limit], &mut self.tab);
+        ui.add_space(2.0);
+        one_line(ui, if self.tab == 0 { t.tab_presets_text } else { t.tab_limit_text }, muted());
+        ui.add_space(14.0);
+        let req = if self.tab == 0 { self.quality_rows(ui, env) } else { self.limit_rows(ui, env) };
+        result_row(ui, env, req.as_ref());
+        req
+    }
+
+    fn quality_rows(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
+        let t = env.t;
+        form_row(ui, t.level, |ui| {
+            segmented(ui, &[t.level_low, t.level_medium, t.level_high], &mut self.level);
+            one_line(ui, [t.level_low_hint, t.level_medium_hint, t.level_high_hint][self.level.min(2)], muted());
+        });
+        form_row(ui, t.codec, |ui| codec_combo(ui, "p_codec", &self.p_groups, &mut self.p_codec, t));
+        form_row(ui, t.resolution, |ui| self.p_scale.ui(ui, "p_scale", t, false, &env.infos));
+        (!self.p_scale.invalid).then(|| Request::CompressPreset { level: self.level, codec: self.p_codec.clone(), scale: self.p_scale.mode })
+    }
+
+    fn limit_rows(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
+        let t = env.t;
+        let entry = env.cfg.limit_codec(&self.l_codec);
+        let fixed_limit = entry.and_then(Codec::fixed_limit);
+        let twopass_ok = entry.is_some_and(Codec::supports_twopass);
+        if let Some(l) = fixed_limit {
+            self.mb_text = units::fmt_float(l);
         }
+        let mb = units::parse_decimal(&self.mb_text).filter(|v| *v > 0.0);
+        form_row(ui, t.limit, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(fixed_limit.is_none(), |ui| {
+                    ui.add(line_edit(&mut self.mb_text, 84.0, mb.is_some()));
+                    ui.label(RichText::new("MB").color(muted()));
+                });
+                ui.add_space(18.0);
+                if twopass_ok {
+                    ui.checkbox(&mut self.twopass, t.two_pass);
+                } else {
+                    ui.add_enabled(false, egui::Checkbox::new(&mut false, t.two_pass));
+                }
+            });
+            let note = if fixed_limit.is_some() {
+                t.limit_fixed
+            } else if twopass_ok {
+                t.two_pass_hint
+            } else {
+                t.two_pass_na
+            };
+            one_line(ui, note, muted());
+        });
+        form_row(ui, t.codec, |ui| codec_combo(ui, "l_codec", &self.l_groups, &mut self.l_codec, t));
+        form_row(ui, t.resolution, |ui| self.l_scale.ui(ui, "l_scale", t, true, &env.infos));
+        if self.l_scale.invalid {
+            return None;
+        }
+        Some(Request::CompressLimit { mb: mb?, codec: self.l_codec.clone(), scale: self.l_scale.mode, twopass: self.twopass && twopass_ok })
     }
 }
 
+/// The name of the result in one row of the form (of the first file; the others are counted)
+fn result_row(ui: &mut egui::Ui, env: &Env, req: Option<&Request>) {
+    let first = req.and_then(|r| env.files.first().and_then(|f| engine::result_name(&env.cfg, r, f)));
+    let more = env.files.len().saturating_sub(1);
+    form_row(ui, env.t.result, |ui| {
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTROL_H), Layout::left_to_right(Align::Center), |ui| {
+            let text = match first {
+                Some(n) if more > 0 => format!("{n}  (+{more})"),
+                Some(n) => n,
+                None => "—".into(),
+            };
+            ui.add(egui::Label::new(RichText::new(text).color(c().text)).truncate());
+        });
+    });
+}
 /// The title of the window and the files it works on
 fn header(ui: &mut egui::Ui, env: &Env) {
     title(ui, &env.title, c().text);
@@ -231,7 +262,8 @@ fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
     }
     ui.add_space(14.0);
     let req = form.ui(ui, env);
-    if let Some(r) = &req {
+    // Compress Video has the result as a row of its own
+    if let (Some(r), false) = (&req, matches!(form, Form::Compress(_))) {
         results(ui, env, r);
     }
     req
@@ -292,7 +324,7 @@ pub fn measure(env: &Env) -> (f32, f32) {
         let _ = ctx.run(egui::RawInput::default(), |_| {}); // the fonts take effect
     }
     let min_w = match (env.action, env.custom_id.is_some()) {
-        (Action::Compress, false) => 640.0,
+        (Action::Compress, false) => 560.0,
         (Action::Webp, false) => 480.0,
         _ => 440.0,
     };

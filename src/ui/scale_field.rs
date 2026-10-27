@@ -1,12 +1,18 @@
-//! The resolution field of Compress Video.
+//! The resolution field of Compress Video: a drop-down list of the usual sizes and a field
+//! for an own value, with a line that tells what the size becomes.
 
 use crate::i18n::T;
 use crate::media::Info;
 use crate::scale::{self, ScaleMode};
-use crate::theme::c;
-use eframe::egui::{self, vec2, Align2, FontId, RichText, Sense};
+use crate::theme::{c, CONTROL_H};
+use eframe::egui::{self, vec2, Align, Layout};
 
-use super::widgets::{chip, hint, short};
+use super::dropdown::{dropdown, Col};
+use super::widgets::{line_edit, muted, one_line};
+
+const OWN_W: f32 = 118.0;
+const HEIGHTS: [u32; 7] = [2160, 1440, 1080, 720, 540, 480, 360];
+const PERCENTS: [u32; 4] = [75, 50, 33, 25];
 
 #[derive(Clone)]
 pub struct ScaleField {
@@ -15,15 +21,28 @@ pub struct ScaleField {
     pub invalid: bool,
 }
 
+/// The key of a mode in the list: the codes of `--scale`
+fn key_of(mode: ScaleMode) -> String {
+    match mode {
+        ScaleMode::Orig => "orig".into(),
+        ScaleMode::Auto => "auto".into(),
+        ScaleMode::Height(h) => format!("h{h}"),
+        ScaleMode::Factor(f) => format!("s{f}"),
+    }
+}
+
+fn label_of(mode: ScaleMode, t: &T) -> String {
+    match mode {
+        ScaleMode::Orig => t.res_original.into(),
+        ScaleMode::Auto => t.res_auto.into(),
+        ScaleMode::Height(h) => format!("{h}p"),
+        ScaleMode::Factor(f) => format!("{}%", (f * 100.0).round()),
+    }
+}
+
 impl ScaleField {
     pub fn new() -> Self {
         ScaleField { mode: ScaleMode::Orig, custom: String::new(), invalid: false }
-    }
-
-    fn pick(&mut self, mode: ScaleMode) {
-        self.mode = mode;
-        self.custom.clear();
-        self.invalid = false;
     }
 
     fn typed(&mut self) {
@@ -38,61 +57,59 @@ impl ScaleField {
         }
     }
 
-    /// Three groups: original (+ auto) and an own value; sizes by the shorter side; scale in percent.
-    /// A group that does not fit into a line continues in the next one, under its own chips.
-    pub fn ui(&mut self, ui: &mut egui::Ui, t: &T, with_auto: bool, infos: &[Info]) {
-        let k = c();
-        ui.spacing_mut().item_spacing = vec2(5.0, 5.0);
-        ui.spacing_mut().button_padding = vec2(9.0, 3.0);
-        ui.spacing_mut().interact_size.y = 24.0;
+    fn columns(t: &T, with_auto: bool) -> Vec<Col> {
+        let item = |m: ScaleMode| (key_of(m), label_of(m, t));
+        let mut main = vec![item(ScaleMode::Orig)];
+        if with_auto {
+            main.push(item(ScaleMode::Auto));
+        }
+        let heights: Vec<(String, String)> = HEIGHTS.iter().map(|h| item(ScaleMode::Height(*h))).collect();
+        let (tall, short) = heights.split_at(4);
+        vec![
+            Col { title: Some(t.res_group_main.into()), items: main },
+            Col { title: Some(t.res_group_size.into()), items: tall.to_vec() },
+            // continues the column before it: an empty title keeps the rows level
+            Col { title: Some(String::new()), items: short.to_vec() },
+            Col { title: Some(t.res_group_scale.into()), items: PERCENTS.iter().map(|p| item(ScaleMode::Factor(*p as f64 / 100.0))).collect() },
+        ]
+    }
 
-        ui.horizontal_wrapped(|ui| {
-            if chip(ui, t.res_original, !self.invalid && self.mode == ScaleMode::Orig) {
-                self.pick(ScaleMode::Orig);
-            }
-            if with_auto && chip(ui, t.res_auto, !self.invalid && self.mode == ScaleMode::Auto) {
-                self.pick(ScaleMode::Auto);
-            }
-            ui.add_space(8.0);
-            let edit = egui::TextEdit::singleline(&mut self.custom).desired_width(118.0).hint_text(t.res_custom);
-            if ui.add(edit).changed() {
+    /// What comes out of the choice, in one line
+    fn note(&self, t: &T, infos: &[Info]) -> String {
+        if self.mode == ScaleMode::Auto {
+            return t.res_auto_text.into();
+        }
+        let Some(i) = infos.iter().find(|i| i.width > 0) else { return t.res_hint.into() };
+        match (self.mode, scale::target_size(i.width, i.height, self.mode)) {
+            (ScaleMode::Orig, _) => t.res_hint.into(),
+            (_, Some((w, h))) => format!("{}×{}  →  {w}×{h}", i.width, i.height),
+            (_, None) => format!("{}×{}  →  {}", i.width, i.height, t.res_unchanged),
+        }
+    }
+
+    /// The list and the own value side by side, the note under them
+    pub fn ui(&mut self, ui: &mut egui::Ui, id: &str, t: &T, with_auto: bool, infos: &[Info]) {
+        ui.horizontal(|ui| {
+            let list_w = (ui.available_width() - OWN_W - ui.spacing().item_spacing.x).max(120.0);
+            ui.allocate_ui_with_layout(vec2(list_w, CONTROL_H), Layout::left_to_right(Align::Center), |ui| {
+                let shown = if self.invalid { "—".to_string() } else { label_of(self.mode, t) };
+                let mut key = key_of(self.mode);
+                if dropdown(ui, id, &shown, &Self::columns(t, with_auto), &mut key) {
+                    if let Some(m) = ScaleMode::from_code(&key) {
+                        self.mode = m;
+                        self.custom.clear();
+                        self.invalid = false;
+                    }
+                }
+            });
+            if ui.add(line_edit(&mut self.custom, OWN_W, !self.invalid).hint_text(t.res_custom)).changed() {
                 self.typed();
             }
         });
-
-        let mut group = |ui: &mut egui::Ui, caption: &str, chips: Vec<(String, ScaleMode)>| {
-            ui.horizontal_top(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(126.0, 24.0), Sense::hover());
-                ui.painter().text(r.left_center(), Align2::LEFT_CENTER, caption.to_uppercase(), FontId::proportional(10.5), k.muted);
-                ui.vertical(|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for (label, mode) in chips {
-                            if chip(ui, &label, !self.invalid && self.mode == mode) {
-                                self.pick(mode);
-                            }
-                        }
-                    });
-                });
-            });
-        };
-        group(ui, t.res_group_size, [2160u32, 1440, 1080, 720, 540, 480, 360].iter().map(|h| (format!("{h}p"), ScaleMode::Height(*h))).collect());
-        group(ui, t.res_group_scale, [75u32, 50, 33, 25].iter().map(|p| (format!("{p}%"), ScaleMode::Factor(*p as f64 / 100.0))).collect());
-
-        // what comes out of it
         if self.invalid {
-            ui.label(RichText::new(t.res_invalid).small().color(k.err));
-        } else if self.mode == ScaleMode::Auto {
-            hint(ui, t.res_auto_text);
-        } else if matches!(self.mode, ScaleMode::Height(_) | ScaleMode::Factor(_)) {
-            for i in infos.iter().filter(|i| i.width > 0) {
-                let result = match scale::target_size(i.width, i.height, self.mode) {
-                    Some((w, h)) => format!("{w}×{h}"),
-                    None => t.res_unchanged.to_string(),
-                };
-                hint(ui, &format!("{}  →  {}", short(&i.name, 30), result));
-            }
+            one_line(ui, t.res_invalid, c().err);
         } else {
-            hint(ui, t.res_hint);
+            one_line(ui, &self.note(t, infos), muted());
         }
     }
 }

@@ -66,14 +66,15 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
         })
         .collect();
     let col_h: Vec<f32> = cols.iter().map(|col| col.title.as_ref().map_or(0.0, |_| TITLE_H) + col.items.len() as f32 * ITEM_H).collect();
-    // columns are packed into rows no wider than the window
+    // columns are packed into rows no wider than the window, from the last one: the first columns
+    // (a wide one of presets) get a row of their own instead of leaving one column alone at the end
     let mut rows: Vec<Vec<usize>> = Vec::new();
     let mut cur_w = 0.0;
-    for (i, w) in natural.iter().enumerate() {
+    for (i, w) in natural.iter().enumerate().rev() {
         let joined = cur_w + COL_GAP + w;
         match rows.last_mut() {
             Some(row) if joined + 2.0 * POP_PAD <= max_w => {
-                row.push(i);
+                row.insert(0, i);
                 cur_w = joined;
             }
             _ => {
@@ -82,21 +83,25 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
             }
         }
     }
+    rows.reverse();
     let row_w = |row: &Vec<usize>| row.iter().map(|&i| natural[i]).sum::<f32>() + COL_GAP * (row.len().saturating_sub(1)) as f32;
     let inner_w = rows.iter().map(row_w).fold(0.0, f32::max).max(width - 2.0 * POP_PAD).min(max_w - 2.0 * POP_PAD);
     let popup_w = inner_w + 2.0 * POP_PAD;
     let popup_h =
         rows.iter().map(|r| r.iter().map(|&i| col_h[i]).fold(0.0, f32::max)).sum::<f32>() + COL_GAP * rows.len().saturating_sub(1) as f32 + 2.0 * POP_PAD + 2.0;
-    ctx.data_mut(|d| {
-        let cur = d.get_temp::<f32>(need_id()).unwrap_or(0.0);
-        d.insert_temp(need_id(), cur.max(rect.bottom() + 4.0 + popup_h + 8.0));
-    });
+    // a list that fits above its button opens there in a shorter window, so it needs no room below
+    let fits_above = rect.top() - 4.0 - popup_h >= screen.top() + 8.0;
+    if !fits_above {
+        ctx.data_mut(|d| {
+            let cur = d.get_temp::<f32>(need_id()).unwrap_or(0.0);
+            d.insert_temp(need_id(), cur.max(rect.bottom() + 4.0 + popup_h + 8.0));
+        });
+    }
 
     let mut chosen = false;
     if open {
-        let below = screen.bottom() - rect.bottom() - 4.0;
-        let above = rect.top() - 4.0 - screen.top();
-        let y = if popup_h <= below || popup_h > above { rect.bottom() + 4.0 } else { rect.top() - 4.0 - popup_h };
+        let below = screen.bottom() - rect.bottom() - 12.0;
+        let y = if popup_h <= below || !fits_above { rect.bottom() + 4.0 } else { rect.top() - 4.0 - popup_h };
         let x = rect.left().min(screen.right() - popup_w - 8.0).max(8.0);
         let area = egui::Area::new(id.with("list")).order(egui::Order::Foreground).fixed_pos(pos2(x, y)).constrain(false).show(&ctx, |ui| {
             egui::Frame::popup(ui.style()).inner_margin(Margin::same(POP_PAD)).show(ui, |ui| {

@@ -1,7 +1,7 @@
 //! The building blocks every window is made of.
 
-use crate::theme::{bold, c, CONTROL_H};
-use eframe::egui::{self, pos2, vec2, Align, Color32, FontId, Layout, Margin, RichText, Stroke, Vec2};
+use crate::theme::{bold, bold_family, c, CONTROL_H};
+use eframe::egui::{self, pos2, vec2, Align, Align2, Color32, FontId, Layout, Margin, Rect, RichText, Sense, Stroke, Vec2};
 
 /// The space between the edges of a window and its content
 pub const MARGIN: f32 = 20.0;
@@ -89,27 +89,70 @@ pub fn secondary_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(text.to_string()).min_size(vec2(96.0, CONTROL_H))
 }
 
-/// Tabs with an underline under the selected one
-pub fn tabs(ui: &mut egui::Ui, labels: &[&str], current: &mut usize) {
+/// One of several values as one control split into equal parts (the window width or the
+/// width of a form row); returns true when another part was chosen
+pub fn segmented(ui: &mut egui::Ui, labels: &[&str], current: &mut usize) -> bool {
     let k = c();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 22.0;
-        for (i, label) in labels.iter().enumerate() {
-            let selected = *current == i;
-            let text = if selected { bold(*label, 13.5).color(k.text) } else { RichText::new(*label).color(k.muted) };
-            let resp = ui.add(egui::Button::new(text).frame(false));
-            if selected {
-                let r = resp.rect;
-                ui.painter().line_segment([pos2(r.left(), r.bottom() + 3.0), pos2(r.right(), r.bottom() + 3.0)], Stroke::new(2.0_f32, k.accent));
-            }
-            if resp.clicked() {
-                *current = i;
-            }
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), CONTROL_H), Sense::hover());
+    let painter = ui.painter().clone();
+    painter.rect(rect, 4.0, k.surface, Stroke::new(1.0_f32, k.border));
+    let seg_w = rect.width() / labels.len().max(1) as f32;
+    let mut changed = false;
+    for (i, label) in labels.iter().enumerate() {
+        let r = Rect::from_min_size(pos2(rect.left() + seg_w * i as f32, rect.top()), vec2(seg_w, CONTROL_H));
+        let part = ui.interact(r, resp.id.with(i), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let selected = *current == i;
+        if selected {
+            painter.rect_filled(r.shrink(3.0), 3.0, k.accent);
+        } else if part.hovered() {
+            painter.rect_filled(r.shrink(3.0), 3.0, k.hover);
         }
-    });
-    ui.add_space(2.0);
-    ui.separator();
-    ui.add_space(4.0);
+        // a thin line between two parts that are both not selected
+        if i > 0 && !selected && *current != i - 1 {
+            painter.line_segment([pos2(r.left(), r.top() + 8.0), pos2(r.left(), r.bottom() - 8.0)], Stroke::new(1.0_f32, k.border));
+        }
+        let (font, color) = if selected { (FontId::new(13.0, bold_family()), k.on_accent) } else { (FontId::proportional(13.0), k.text) };
+        painter.text(r.center(), Align2::CENTER_CENTER, *label, font, color);
+        if part.clicked() && !selected {
+            *current = i;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// The width of the names in front of the controls of a form
+pub const LABEL_W: f32 = 104.0;
+
+/// A row of a form: the name at the left, the control (and a line about it) at the right
+pub fn form_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let inner = ui
+        .horizontal_top(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(LABEL_W, CONTROL_H), Sense::hover());
+            ui.painter().text(r.left_center(), Align2::LEFT_CENTER, label, FontId::proportional(13.0), muted());
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                add(ui)
+            })
+            .inner
+        })
+        .inner;
+    ui.add_space(8.0);
+    inner
+}
+
+/// A line of small text that is cut at the edge instead of wrapping (keeps the height of a form fixed)
+pub fn one_line(ui: &mut egui::Ui, text: &str, color: Color32) {
+    ui.add(egui::Label::new(RichText::new(text).small().color(color)).truncate());
+}
+
+/// A one-line text field as high as the buttons and drop-down lists
+pub fn line_edit<'a>(text: &'a mut String, width: f32, valid: bool) -> egui::TextEdit<'a> {
+    let mut edit = egui::TextEdit::singleline(text).desired_width(width).min_size(vec2(width, CONTROL_H)).vertical_align(Align::Center);
+    if !valid {
+        edit = edit.text_color(c().err);
+    }
+    edit
 }
 
 /// One of several values, as a row of flat buttons: (value, label)
@@ -129,17 +172,6 @@ pub fn choice(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &str)])
             }
         }
     });
-}
-
-/// A small flat button; the selected one is filled with the accent colour
-pub fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
-    let k = c();
-    let text = if selected { bold(label, 12.5).color(k.on_accent) } else { RichText::new(label).size(12.5) };
-    let mut b = egui::Button::new(text);
-    if selected {
-        b = b.fill(k.accent).stroke(Stroke::NONE);
-    }
-    ui.add(b).clicked()
 }
 
 /// A text field for a number: left aligned like every other field, red when it is not valid
