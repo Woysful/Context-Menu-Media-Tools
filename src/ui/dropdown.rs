@@ -66,15 +66,14 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
         })
         .collect();
     let col_h: Vec<f32> = cols.iter().map(|col| col.title.as_ref().map_or(0.0, |_| TITLE_H) + col.items.len() as f32 * ITEM_H).collect();
-    // columns are packed into rows no wider than the window, from the last one: the first columns
-    // (a wide one of presets) get a row of their own instead of leaving one column alone at the end
+    // columns are packed into rows no wider than the window
     let mut rows: Vec<Vec<usize>> = Vec::new();
     let mut cur_w = 0.0;
-    for (i, w) in natural.iter().enumerate().rev() {
+    for (i, w) in natural.iter().enumerate() {
         let joined = cur_w + COL_GAP + w;
         match rows.last_mut() {
             Some(row) if joined + 2.0 * POP_PAD <= max_w => {
-                row.insert(0, i);
+                row.push(i);
                 cur_w = joined;
             }
             _ => {
@@ -83,7 +82,6 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
             }
         }
     }
-    rows.reverse();
     let row_w = |row: &Vec<usize>| row.iter().map(|&i| natural[i]).sum::<f32>() + COL_GAP * (row.len().saturating_sub(1)) as f32;
     let inner_w = rows.iter().map(row_w).fold(0.0, f32::max).max(width - 2.0 * POP_PAD).min(max_w - 2.0 * POP_PAD);
     let popup_w = inner_w + 2.0 * POP_PAD;
@@ -172,7 +170,7 @@ fn group_label(t: &T, group: &str) -> String {
     }
 }
 
-/// Presets first (size limit tab), then the codecs grouped by hardware. Groups of GPUs that
+/// The codecs grouped by hardware, then the presets (size limit tab). Groups of GPUs that
 /// are not in this computer are left out (unless `show_all_gpus` is set or nothing is known).
 pub fn build_groups(list: &[(String, Codec)], t: &T, cfg: &Config) -> Vec<Group> {
     let show_all = cfg.settings.show_all_gpus;
@@ -186,9 +184,6 @@ pub fn build_groups(list: &[(String, Codec)], t: &T, cfg: &Config) -> Vec<Group>
             None => groups.push(Group { label: name, items: vec![(key.to_string(), label)] }),
         }
     };
-    for (key, c) in list.iter().filter(|(_, c)| c.preset) {
-        add("preset", key, c.label.clone());
-    }
     for (key, c) in list.iter().filter(|(_, c)| !c.preset) {
         if c.group == "pi" && !pi {
             continue;
@@ -199,6 +194,9 @@ pub fn build_groups(list: &[(String, Codec)], t: &T, cfg: &Config) -> Vec<Group>
             }
         }
         add(&c.group, key, c.label.clone());
+    }
+    for (key, c) in list.iter().filter(|(_, c)| c.preset) {
+        add("preset", key, c.label.clone());
     }
     groups
 }

@@ -117,8 +117,24 @@ pub fn launcher_desktop(exe: &str) -> String {
     )
 }
 
+/// The entry of the application menu that an AppImage integration tool (Gear Lever,
+/// AppImageLauncher) made for `image`: a desktop file in `dir` that starts this very file
+pub fn integrated_entry(dir: &Path, image: &Path) -> Option<PathBuf> {
+    let ours = launcher_file();
+    let image = image.to_string_lossy();
+    fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).find(|p| {
+        p.extension().is_some_and(|x| x == "desktop")
+            && *p != ours
+            && fs::read_to_string(p).is_ok_and(|text| text.lines().any(|l| l.starts_with("Exec=") && l.contains(&*image)))
+    })
+}
+
+pub fn applications_dir() -> PathBuf {
+    paths::xdg_data().join("applications")
+}
+
 fn launcher_file() -> PathBuf {
-    paths::xdg_data().join("applications/mmt.desktop")
+    applications_dir().join("mmt.desktop")
 }
 
 fn icon_file() -> PathBuf {
@@ -172,5 +188,18 @@ mod tests {
         assert!(d.contains("Exec=/home/u/.local/bin/mmt settings") && d.contains("Categories=AudioVideo;Video;"));
         assert!(d.contains("Icon=mmt\n"));
         assert!(ICON.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn an_integrated_appimage_is_found_by_its_exec_line() {
+        let dir = std::env::temp_dir().join(format!("mmt-apps-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let image = Path::new("/home/u/AppImages/media-tools.appimage");
+        fs::write(dir.join("other.desktop"), "[Desktop Entry]\nExec=/usr/bin/vlc %U\n").unwrap();
+        assert_eq!(integrated_entry(&dir, image), None);
+        let entry = dir.join("gearlever_media-tools.desktop");
+        fs::write(&entry, "[Desktop Entry]\nName=Media Tools\nExec=\"/home/u/AppImages/media-tools.appimage\" settings\n").unwrap();
+        assert_eq!(integrated_entry(&dir, image), Some(entry));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

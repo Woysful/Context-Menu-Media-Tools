@@ -167,7 +167,7 @@ impl CompressForm {
         form_row(ui, t.limit, |ui| {
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(fixed_limit.is_none(), |ui| {
-                    ui.add(line_edit(&mut self.mb_text, 84.0, mb.is_some()));
+                    ui.add(line_edit(&mut self.mb_text, 48.0, mb.is_some()));
                     ui.label(RichText::new("MB").color(muted()));
                 });
                 ui.add_space(18.0);
@@ -324,7 +324,7 @@ pub fn measure(env: &Env) -> (f32, f32) {
         let _ = ctx.run(egui::RawInput::default(), |_| {}); // the fonts take effect
     }
     let min_w = match (env.action, env.custom_id.is_some()) {
-        (Action::Compress, false) => 560.0,
+        (Action::Compress, false) => 480.0,
         (Action::Webp, false) => 480.0,
         _ => 440.0,
     };

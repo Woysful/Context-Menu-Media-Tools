@@ -27,6 +27,8 @@ pub struct SettingsState {
     ffprobe_info: String,
     transfer_path: String,
     auto_close_text: String,
+    /// the interface scale while its slider is dragged
+    scale_draft: Option<f64>,
 }
 
 impl SettingsState {
@@ -42,6 +44,7 @@ impl SettingsState {
             ffmpeg_info: String::new(),
             ffprobe_info: String::new(),
             transfer_path: paths::home_dir().join("mmt-commands.toml").display().to_string(),
+            scale_draft: None,
         };
         st.refresh_tools();
         st
@@ -336,17 +339,28 @@ fn look_page(ui: &mut egui::Ui, st: &mut SettingsState) {
     setting_row(ui, ts.transparency, ts.transparency_hint, |ui| {
         choice(ui, &mut st.s.transparency, &[("auto", ts.tr_auto), ("on", ts.tr_on), ("off", ts.tr_off)]);
     });
-    let slider = |ui: &mut egui::Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>| {
+    let slider = |ui: &mut egui::Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>, step: f64| {
         ui.horizontal(|ui| {
             ui.spacing_mut().slider_width = (ui.available_width() - 52.0).max(80.0);
-            ui.add(egui::Slider::new(value, range).show_value(false));
+            let r = ui.add(egui::Slider::new(value, range).step_by(step).show_value(false));
             ui.label(RichText::new(format!("{value:.2}")).monospace());
-        });
+            r
+        })
+        .inner
     };
     setting_row(ui, ts.opacity, ts.opacity_hint, |ui| {
-        ui.add_enabled_ui(st.s.transparency != "off", |ui| slider(ui, &mut st.s.opacity, 0.5..=1.0));
+        ui.add_enabled_ui(st.s.transparency != "off", |ui| slider(ui, &mut st.s.opacity, 0.5..=1.0, 0.01));
     });
-    setting_row(ui, ts.scale, ts.scale_hint, |ui| slider(ui, &mut st.s.ui_scale, 0.8..=1.6));
+    setting_row(ui, ts.scale, ts.scale_hint, |ui| {
+        // the scale resizes the slider under the pointer, so it takes effect when the slider is let go
+        let mut v = st.scale_draft.unwrap_or(st.s.ui_scale);
+        if slider(ui, &mut v, 0.8..=1.6, 0.05).dragged() {
+            st.scale_draft = Some(v);
+        } else {
+            st.scale_draft = None;
+            st.s.ui_scale = v;
+        }
+    });
 }
 
 fn menu_page(ui: &mut egui::Ui, st: &mut SettingsState, t: &T) {

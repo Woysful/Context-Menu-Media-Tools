@@ -72,15 +72,16 @@ impl Target {
 pub struct Options {
     /// empty = the file managers found on this computer
     pub targets: Vec<Target>,
-    /// copy the program to ~/.local/bin (Windows: %LOCALAPPDATA%\mmt) so the download can be deleted
+    /// copy the program to ~/.local/bin (Windows: %LOCALAPPDATA%\mmt) so the download can be deleted.
+    /// An AppImage is never copied.
     pub copy: bool,
-    /// add that folder to PATH
+    /// add the folder of the program to PATH (`mmt` in a terminal); the menu items do not need it
     pub path: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { targets: Vec::new(), copy: true, path: true }
+        Options { targets: Vec::new(), copy: true, path: false }
     }
 }
 
@@ -88,7 +89,7 @@ impl Options {
     /// From the options of the command line (`--kde`, `--no-copy`, ...)
     pub fn from_flags(flags: &[String]) -> Options {
         let has = |f: &str| flags.iter().any(|x| x == f);
-        Options { targets: Target::ALL.into_iter().filter(|t| has(t.flag())).collect(), copy: !has("no-copy"), path: !has("no-path") }
+        Options { targets: Target::ALL.into_iter().filter(|t| has(t.flag())).collect(), copy: !has("no-copy"), path: has("path") }
     }
 
     fn targets(&self) -> Vec<Target> {
@@ -155,11 +156,12 @@ fn local_bin() -> PathBuf {
     }
 }
 
-/// Copy the program (the AppImage, when it runs from one) to a permanent place, so the
-/// downloaded file can be deleted. The menu entries point at the result.
+/// Copy the program to a permanent place, so the downloaded file can be deleted. The menu
+/// entries point at the result. An AppImage stays where it is: tools like Gear Lever keep it in
+/// their folder and update it there, a copy would get stale.
 fn place_program(copy: bool) -> Result<PathBuf, String> {
     let me = paths::program().ok_or("the program cannot find its own file")?;
-    if !copy {
+    if !copy || paths::appimage().is_some() {
         return Ok(me);
     }
     let target = local_bin();
@@ -174,6 +176,30 @@ fn place_program(copy: bool) -> Result<PathBuf, String> {
         fs::rename(&tmp, &target).map_err(|e| format!("{}: {e}", target.display()))?;
     }
     Ok(target)
+}
+
+/// `--path`: `mmt` in the terminal. An AppImage gets a link named mmt in ~/.local/bin, whose
+/// folder goes to PATH; a plain program has its own folder added.
+#[cfg(unix)]
+fn terminal_command(exe: &Path) -> Vec<String> {
+    if paths::appimage().is_none() {
+        return linux::path_install(exe.parent().unwrap_or(Path::new("")));
+    }
+    let link = local_bin();
+    let dir = link.parent().expect("a folder");
+    let _ = fs::create_dir_all(dir);
+    let _ = fs::remove_file(&link);
+    if let Err(e) = std::os::unix::fs::symlink(exe, &link) {
+        return vec![format!("PATH: {}: {e}", link.display())];
+    }
+    let mut out = vec![format!("terminal: {} → {}", link.display(), exe.display())];
+    out.extend(linux::path_install(dir));
+    out
+}
+
+#[cfg(not(unix))]
+fn terminal_command(_: &Path) -> Vec<String> {
+    Vec::new()
 }
 
 /// Returns (exit code, lines to show). A program without a console (Windows) shows them in a window.
@@ -216,9 +242,16 @@ pub fn install(opts: &Options) -> (i32, Vec<String>) {
         }
     } else {
         if opts.path {
-            out.extend(linux::path_install(&bin_dir));
+            out.extend(terminal_command(&exe));
         }
-        out.extend(linux::launcher_install(&exe));
+        // an integrated AppImage has its menu entry already: a second one would show twice in the launcher
+        match paths::appimage().and_then(|image| linux::integrated_entry(&linux::applications_dir(), &image)) {
+            Some(entry) => {
+                linux::launcher_uninstall();
+                out.push(format!("application menu: the AppImage has its entry already ({})", entry.display()));
+            }
+            None => out.extend(linux::launcher_install(&exe)),
+        }
     }
     if paths::find_tool("ffmpeg", &cfg.settings.ffmpeg).is_none() || paths::find_tool("ffprobe", &cfg.settings.ffprobe).is_none() {
         out.push("warning: ffmpeg / ffprobe not found; install ffmpeg (or put ffmpeg and ffprobe next to mmt)".into());
@@ -235,6 +268,11 @@ pub fn uninstall(opts: &Options) -> (i32, Vec<String>) {
     } else {
         out.extend(linux::launcher_uninstall());
         out.extend(linux::path_uninstall());
+        // the link of `--path` to an AppImage (a copied program is left in place)
+        let link = local_bin();
+        if link.is_symlink() && fs::remove_file(&link).is_ok() {
+            out.push(format!("removed {}", link.display()));
+        }
     }
     out.push(format!("done (the program itself and {} were left in place)", paths::config_dir().display()));
     (0, out)
@@ -253,10 +291,10 @@ pub(crate) mod tests {
 
     #[test]
     fn options_from_the_command_line() {
-        let o = Options::from_flags(&["kde".into(), "no-path".into()]);
+        let o = Options::from_flags(&["kde".into(), "path".into()]);
         assert_eq!(o.targets, [Target::Kde]);
-        assert!(o.copy && !o.path);
+        assert!(o.copy && o.path);
         let d = Options::from_flags(&[]);
-        assert!(d.targets.is_empty() && d.copy && d.path);
+        assert!(d.targets.is_empty() && d.copy && !d.path);
     }
 }

@@ -41,7 +41,7 @@ Actions:
   frames  webp  convert-image  stats
   settings                                               the Settings window (also: run mmt without arguments)
   run <id> [files...]                                    an own menu item of the Settings window
-  install [--kde|--gnome|--xfce|--pcmanfm|--windows] [--no-copy] [--no-path]   add the menu items
+  install [--kde|--gnome|--xfce|--pcmanfm|--windows] [--no-copy] [--path]   add the menu items
   uninstall                                              remove them
   config [--init|--path|--defaults]                      presets.toml: every ffmpeg command, editable
 

@@ -182,11 +182,11 @@ q = ["8M", "4M", "2M"]
 #   twopass          "x264" | "x265" = the entry supports the two-pass option ({pass})
 #   chunked          true = hardware encoders: encoded in chunks with feedback so the size is exact
 #                    (the same command is run once per chunk, with {seek} and {overwrite} filled in)
-# Presets (preset = true) are listed above the codecs; `inherit` copies another entry.
+# Presets (preset = true) are listed after the codecs; `inherit` copies another entry.
 
 [limit.discord]
 preset = true
-label = "Discord — 20 MB, HEVC (CPU)"
+label = "Discord · HEVC CPU"
 inherit = "h265_cpu"
 limit = 20
 output = "{base}_discord.mp4"

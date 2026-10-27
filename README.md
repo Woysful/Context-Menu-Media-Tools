@@ -25,7 +25,7 @@ and Raspberry Pi OS (PCManFM)**, on x86 and ARM.
    chmod +x mmt-linux-x86_64.AppImage
    ./mmt-linux-x86_64.AppImage install          # detects KDE / GNOME / XFCE / PCManFM
    ./mmt-linux-x86_64.AppImage install --kde    # or choose: --kde  --gnome  --xfce  --pcmanfm
-   mmt uninstall                                # later: removes the menu items again
+   ./mmt-linux-x86_64.AppImage uninstall        # later: removes the menu items again
    ```
 
 AppImages are mounted with FUSE (the `fuse3` or `fuse` package, present on nearly every desktop). Without it, set
@@ -38,11 +38,19 @@ Put `ffmpeg.exe` and `ffprobe.exe` next to `mmt.exe` or into a folder in `PATH`,
 
 ### What install does
 
-`install` does four things: it copies the program (on Linux the AppImage itself) to `~/.local/bin/mmt`
-(Windows: `%LOCALAPPDATA%\mmt\mmt.exe`), so the downloaded file can be deleted; it writes the menu items; it **adds that folder to `PATH`** (Linux: a marked block in
-`~/.profile`, `~/.bashrc`, `~/.zshenv` and a fish `conf.d` file; Windows: the user `PATH`) so `mmt` works in a terminal after
-the next login; and it adds **Media Tools** to the application menu / Start menu, which opens the Settings. `--no-copy` uses the
-program where it is, `--no-path` leaves `PATH` alone. `uninstall` removes all of it.
+`install` writes the menu items and adds **Media Tools** (it opens the Settings) to the application menu / Start menu.
+The menu items call the program by its full path:
+
+* **AppImage**: it stays where it is and the menu items point at it, so an AppImage kept up to date by Gear Lever or
+  AppImageLauncher keeps working. If such a tool already made an application menu entry for this AppImage, `install`
+  does not add a second one (and removes its own from an earlier install). Install from the AppImage at its final place:
+  after moving it, press **Install** again.
+* **Plain binary**: it is copied to `~/.local/bin/mmt` (Windows: `%LOCALAPPDATA%\mmt\mmt.exe`), so the downloaded file can
+  be deleted. `--no-copy` uses it where it is.
+
+`PATH` is not touched unless you ask for it: `install --path` makes `mmt` work in a terminal (an AppImage gets a link
+`~/.local/bin/mmt`; Linux: a marked block in `~/.profile`, `~/.bashrc`, `~/.zshenv` and a fish `conf.d` file; Windows: the
+user `PATH`). `uninstall` removes all of it, the `PATH` blocks of earlier versions included.
 
 | System | What is written | Notes |
 |---|---|---|
@@ -144,6 +152,8 @@ output = "{base}_telegram.mp4"
 * The window needs OpenGL (ES) 2: the default Mesa driver of Raspberry Pi OS provides it.
 
 ## Command line
+
+`mmt` in a terminal needs `install --path` (or call the AppImage / binary by its path).
 
 ```
 mmt compress --cli --limit 20 --codec h265_cpu --twopass video.mp4     # no window, progress in the terminal

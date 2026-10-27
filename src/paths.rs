@@ -44,8 +44,12 @@ pub fn settings_file() -> PathBuf {
 /// lives in a temporary mount that disappears when the program exits, so nothing (menu
 /// entries, the copy made by `install`) may point at it.
 pub fn program() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    Some(appimage_of(&exe, std::env::var_os("APPIMAGE"), std::env::var_os("APPDIR")).unwrap_or(exe))
+    appimage().or_else(|| std::env::current_exe().ok())
+}
+
+/// The AppImage the program runs from (None = a plain binary)
+pub fn appimage() -> Option<PathBuf> {
+    appimage_of(&std::env::current_exe().ok()?, std::env::var_os("APPIMAGE"), std::env::var_os("APPDIR"))
 }
 
 /// The AppImage that holds `exe`. `APPIMAGE` alone is not trusted: a program started from
