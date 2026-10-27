@@ -14,6 +14,7 @@ mod install;
 mod media;
 mod paths;
 mod proc;
+mod report;
 mod scale;
 mod settings;
 mod syspal;

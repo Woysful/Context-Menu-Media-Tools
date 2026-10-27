@@ -148,7 +148,8 @@ pub fn one_line(ui: &mut egui::Ui, text: &str, color: Color32) {
 
 /// A one-line text field as high as the buttons and drop-down lists
 pub fn line_edit<'a>(text: &'a mut String, width: f32, valid: bool) -> egui::TextEdit<'a> {
-    let mut edit = egui::TextEdit::singleline(text).desired_width(width).min_size(vec2(width, CONTROL_H)).vertical_align(Align::Center);
+    let mut edit =
+        egui::TextEdit::singleline(text).desired_width(width).min_size(vec2(width, CONTROL_H)).vertical_align(Align::Center).horizontal_align(Align::Center);
     if !valid {
         edit = edit.text_color(c().err);
     }
@@ -174,11 +175,48 @@ pub fn choice(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &str)])
     });
 }
 
-/// A text field for a number: left aligned like every other field, red when it is not valid
+/// One of several values as a grid of equal cells, two in a row: the name and a few words
+/// about it, the words of all cells starting at the same place. Options: (value, name, hint)
+pub fn option_grid(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &str, &str)]) {
+    const COLS: usize = 2;
+    const GAP: f32 = 6.0;
+    let k = c();
+    let name_font = FontId::new(13.0, bold_family());
+    let hint_font = FontId::proportional(11.5);
+    let width = ui.available_width();
+    let cell_w = (width - GAP * (COLS - 1) as f32) / COLS as f32;
+    let name_w = options.iter().map(|(_, n, _)| text_width(ui.ctx(), n, name_font.clone())).fold(0.0, f32::max);
+    let rows = options.len().div_ceil(COLS);
+    let (area, _) = ui.allocate_exact_size(vec2(width, rows as f32 * (CONTROL_H + GAP) - GAP), Sense::hover());
+    let painter = ui.painter().clone();
+    for (i, (value, name, hint)) in options.iter().enumerate() {
+        let at = vec2((i % COLS) as f32 * (cell_w + GAP), (i / COLS) as f32 * (CONTROL_H + GAP));
+        let r = Rect::from_min_size(area.min + at, vec2(cell_w, CONTROL_H));
+        let resp = ui.interact(r, ui.id().with(("option", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        let selected = current == value;
+        let (fill, stroke, text_c, hint_c) = if selected {
+            (k.accent, Stroke::NONE, k.on_accent, k.on_accent.gamma_multiply(0.8))
+        } else {
+            (if resp.hovered() { k.hover } else { k.surface }, Stroke::new(1.0_f32, k.border), k.text, k.muted)
+        };
+        painter.rect(r, 4.0, fill, stroke);
+        painter.text(pos2(r.left() + 12.0, r.center().y), Align2::LEFT_CENTER, *name, name_font.clone(), text_c);
+        if !hint.is_empty() {
+            let x = r.left() + 12.0 + name_w + 12.0;
+            let clip = Rect::from_min_max(pos2(x, r.top()), pos2(r.right() - 8.0, r.bottom()));
+            painter.with_clip_rect(clip).text(pos2(x, r.center().y), Align2::LEFT_CENTER, *hint, hint_font.clone(), hint_c);
+        }
+        if resp.clicked() {
+            *current = value.to_string();
+        }
+    }
+}
+
+/// A text field for a number, red when it is not valid
 pub fn number_field(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &str) {
     ui.horizontal(|ui| {
         let w = (ui.available_width() - if suffix.is_empty() { 0.0 } else { 36.0 }).max(40.0);
-        let mut edit = egui::TextEdit::singleline(text).desired_width(w);
+        let mut edit = egui::TextEdit::singleline(text).desired_width(w).horizontal_align(Align::Center);
         if !valid {
             edit = edit.text_color(c().err);
         }

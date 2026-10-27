@@ -4,7 +4,7 @@ use crate::config::{Codec, Config};
 use crate::gpu;
 use crate::i18n::T;
 use crate::theme::{self, c, CONTROL_H};
-use eframe::egui::{self, pos2, vec2, Align, Align2, FontId, Layout, Margin, Rect, Sense, Stroke};
+use eframe::egui::{self, pos2, vec2, Align, Align2, FontId, Layout, Margin, Sense, Stroke};
 
 use super::widgets::text_width;
 
@@ -40,8 +40,9 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
     let stroke = if open || resp.hovered() { Stroke::new(1.0_f32, k.accent) } else { Stroke::new(1.0_f32, k.border) };
     let painter = ui.painter();
     painter.rect(rect, 3.0, k.surface, stroke);
-    let clip = Rect::from_min_max(rect.min, pos2(rect.right() - 28.0, rect.max.y));
-    painter.with_clip_rect(clip).text(pos2(rect.left() + 10.0, rect.center().y), Align2::LEFT_CENTER, shown, FontId::proportional(13.5), k.text);
+    // centred between two margins as wide as the arrow, so it stays clear of it
+    let clip = rect.shrink2(vec2(28.0, 0.0));
+    painter.with_clip_rect(clip).text(rect.center(), Align2::CENTER_CENTER, shown, FontId::proportional(13.5), k.text);
     let m = pos2(rect.right() - 15.0, rect.center().y);
     let tri = if open {
         vec![pos2(m.x - 4.0, m.y + 2.0), pos2(m.x + 4.0, m.y + 2.0), pos2(m.x, m.y - 3.0)]

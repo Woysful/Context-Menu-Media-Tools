@@ -3,7 +3,7 @@
 use super::dropdown::{build_groups, codec_combo, need_id, Group};
 use super::scale_field::ScaleField;
 use super::widgets::{
-    button_row, card, chars_fitting, choice, field, file_name, form_row, hint, line_edit, muted, number_field, one_line, primary_button, secondary_button,
+    button_row, card, chars_fitting, field, file_name, form_row, hint, line_edit, muted, number_field, one_line, option_grid, primary_button, secondary_button,
     segmented, short, slider_row, text_width, title, window, MARGIN,
 };
 use super::Env;
@@ -92,8 +92,8 @@ impl Form {
         match self {
             Form::Compress(f) => f.ui(ui, env),
             Form::Format(f) => {
-                let options: Vec<(&str, &str)> = env.cfg.formats(f.what).iter().map(|(k, fmt)| (k.as_str(), fmt.label(k))).collect();
-                field(ui, t.format, |ui| choice(ui, &mut f.selected, &options));
+                let options: Vec<(&str, &str, &str)> = env.cfg.formats(f.what).iter().map(|(k, fmt)| (k.as_str(), fmt.label(k), fmt.hint.as_str())).collect();
+                field(ui, t.format, |ui| option_grid(ui, &mut f.selected, &options));
                 Some(Request::Convert { what: f.what, format: f.selected.clone() })
             }
             Form::Webp(f) => {

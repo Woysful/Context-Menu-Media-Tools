@@ -17,6 +17,8 @@ pub const DEFAULT_PRESETS: &str = include_str!("../presets.toml");
 #[serde(default)]
 pub struct Format {
     pub text: String,
+    /// a few words about the format, next to its name
+    pub hint: String,
     pub ext: String,
     /// the complete ffmpeg command with placeholders
     pub command: String,

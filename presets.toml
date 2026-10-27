@@ -372,10 +372,12 @@ chunked = true
 
 
 # ------------------------------------------------------------------ Convert Video
-# One entry per output format: `text` is what the drop-down shows, `default = true` preselects it.
+# One entry per output format: `text` is the name the window shows, `hint` a few words next to it,
+# `default = true` preselects it.
 
 [video_convert.mp4]
 text = "MP4"
+hint = "plays anywhere"
 ext = "mp4"
 default = true
 command = 'ffmpeg -n -i {input} -c:v copy -c:a aac {output}'
@@ -383,30 +385,35 @@ output = "{base}.{ext}"
 
 [video_convert.avi]
 text = "AVI"
+hint = "older players"
 ext = "avi"
 command = 'ffmpeg -n -i {input} -c:v mpeg4 -q:v 2 {output}'
 output = "{base}.{ext}"
 
 [video_convert.mov]
 text = "MOV"
+hint = "Apple, editing"
 ext = "mov"
 command = 'ffmpeg -n -i {input} -c:v copy {output}'
 output = "{base}.{ext}"
 
 [video_convert.mkv]
 text = "MKV"
+hint = "no re-encoding"
 ext = "mkv"
 command = 'ffmpeg -n -i {input} -c:v copy -c:a copy {output}'
 output = "{base}.{ext}"
 
 [video_convert.m4v]
 text = "M4V"
+hint = "Apple devices"
 ext = "m4v"
 command = 'ffmpeg -n -i {input} -c:v copy -c:a aac {output}'
 output = "{base}.{ext}"
 
 [video_convert.webm]
 text = "WebM"
+hint = "for the web, slow"
 ext = "webm"
 command = 'ffmpeg -n -i {input} -c:v libvpx-vp9 -c:a libopus {output}'
 output = "{base}.{ext}"
@@ -417,12 +424,14 @@ output = "{base}.{ext}"
 
 [video_audio.wav]
 text = "WAV"
+hint = "lossless, large"
 ext = "wav"
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a pcm_s16le {output}'
 output = "{base}_audio_{fmt}.{srcext}"
 
 [video_audio.mp3]
 text = "MP3"
+hint = "plays anywhere"
 ext = "mp3"
 default = true
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a mp3 -b:a 192k {output}'
@@ -430,36 +439,42 @@ output = "{base}_audio_{fmt}.{srcext}"
 
 [video_audio.flac]
 text = "FLAC"
+hint = "lossless, smaller"
 ext = "flac"
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a flac {output}'
 output = "{base}_audio_{fmt}.{srcext}"
 
 [video_audio.aac]
 text = "AAC"
+hint = "small, good"
 ext = "aac"
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k {output}'
 output = "{base}_audio_{fmt}.{srcext}"
 
 [video_audio.ogg]
 text = "OGG"
+hint = "open format"
 ext = "ogg"
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a libvorbis -q:a 0 {output}'
 output = "{base}_audio_{fmt}.{srcext}"
 
 [video_audio.wma]
 text = "WMA"
+hint = "Windows"
 ext = "wma"
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a wmav2 -b:a 192k {output}'
 output = "{base}_audio_{fmt}.{srcext}"
 
 [video_audio.m4a]
 text = "M4A"
+hint = "Apple, AAC"
 ext = "m4a"
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k {output}'
 output = "{base}_audio_{fmt}.{srcext}"
 
 [video_audio.opus]
 text = "Opus"
+hint = "best when small"
 ext = "opus"
 command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a libopus -q:a 0 {output}'
 output = "{base}_audio_{fmt}.{srcext}"
@@ -468,6 +483,7 @@ output = "{base}_audio_{fmt}.{srcext}"
 
 [extract.mp3]
 text = "MP3"
+hint = "plays anywhere"
 ext = "mp3"
 default = true
 command = 'ffmpeg -n -i {input} -vn -q:a 0 {output}'
@@ -475,30 +491,35 @@ output = "{base}.{ext}"
 
 [extract.aac]
 text = "AAC"
+hint = "copied as it is"
 ext = "aac"
 command = 'ffmpeg -n -i {input} -vn -c copy {output}'
 output = "{base}.{ext}"
 
 [extract.opus]
 text = "Opus"
+hint = "small, good"
 ext = "opus"
 command = 'ffmpeg -n -i {input} -vn -c:a libopus -q:a 0 -vbr on {output}'
 output = "{base}.{ext}"
 
 [extract.wav]
 text = "WAV"
+hint = "lossless, large"
 ext = "wav"
 command = 'ffmpeg -n -i {input} -vn -q:a 0 {output}'
 output = "{base}.{ext}"
 
 [extract.m4a]
 text = "M4A"
+hint = "Apple, AAC"
 ext = "m4a"
 command = 'ffmpeg -n -i {input} -vn -q:a 0 -map a -map_metadata 0 {output}'
 output = "{base}.{ext}"
 
 [extract.mka]
 text = "MKA"
+hint = "copied as it is"
 ext = "mka"
 command = 'ffmpeg -n -i {input} -vn -c:a copy -map a -map_metadata 0 {output}'
 output = "{base}.{ext}"
@@ -508,6 +529,7 @@ output = "{base}.{ext}"
 
 [frames.png]
 text = "PNG"
+hint = "lossless"
 ext = "png"
 default = true
 command = 'ffmpeg -n -i {input} {output}'
@@ -515,12 +537,14 @@ output = "{base}/frame_%06d.{ext}"
 
 [frames.jpg]
 text = "JPG"
+hint = "small files"
 ext = "jpg"
 command = 'ffmpeg -n -i {input} -q:v 1 {output}'
 output = "{base}/frame_%06d.{ext}"
 
 [frames.webp]
 text = "WebP"
+hint = "small, with alpha"
 ext = "webp"
 command = 'ffmpeg -n -i {input} -c:v libwebp -q:v 95 -pix_fmt yuva420p {output}'
 output = "{base}/frame_%06d.{ext}"
@@ -529,12 +553,14 @@ output = "{base}/frame_%06d.{ext}"
 
 [audio_file.wav]
 text = "WAV"
+hint = "lossless, large"
 ext = "wav"
 command = 'ffmpeg -n -i {input} -c:a pcm_s16le {output}'
 output = "{base}.{ext}"
 
 [audio_file.mp3]
 text = "MP3"
+hint = "plays anywhere"
 ext = "mp3"
 default = true
 command = 'ffmpeg -n -i {input} -ab 192k -map_metadata 0 -id3v2_version 3 {output}'
@@ -542,36 +568,42 @@ output = "{base}.{ext}"
 
 [audio_file.flac]
 text = "FLAC"
+hint = "lossless, smaller"
 ext = "flac"
 command = 'ffmpeg -n -i {input} -c:a flac {output}'
 output = "{base}.{ext}"
 
 [audio_file.aac]
 text = "AAC"
+hint = "small, good"
 ext = "aac"
 command = 'ffmpeg -n -i {input} -c:a aac -b:a 192k {output}'
 output = "{base}.{ext}"
 
 [audio_file.ogg]
 text = "OGG"
+hint = "open format"
 ext = "ogg"
 command = 'ffmpeg -n -i {input} -c:a libvorbis -q:a 0 {output}'
 output = "{base}.{ext}"
 
 [audio_file.wma]
 text = "WMA"
+hint = "Windows"
 ext = "wma"
 command = 'ffmpeg -n -i {input} -c:a wmav2 -b:a 192k {output}'
 output = "{base}.{ext}"
 
 [audio_file.m4a]
 text = "M4A"
+hint = "Apple, AAC"
 ext = "m4a"
 command = 'ffmpeg -n -i {input} -c:a aac -b:a 192k {output}'
 output = "{base}.{ext}"
 
 [audio_file.opus]
 text = "Opus"
+hint = "best when small"
 ext = "opus"
 command = 'ffmpeg -n -i {input} -q:a 0 -c:a libopus {output}'
 output = "{base}.{ext}"
@@ -580,6 +612,7 @@ output = "{base}.{ext}"
 
 [image.jpg]
 text = "JPG"
+hint = "photos, small"
 ext = "jpg"
 default = true
 command = 'ffmpeg -n -i {input} -q:v 5 {output}'
@@ -587,36 +620,42 @@ output = "{base}.{ext}"
 
 [image.png]
 text = "PNG"
+hint = "lossless, alpha"
 ext = "png"
 command = 'ffmpeg -n -i {input} {output}'
 output = "{base}.{ext}"
 
 [image.bmp]
 text = "BMP"
+hint = "uncompressed"
 ext = "bmp"
 command = 'ffmpeg -n -i {input} {output}'
 output = "{base}.{ext}"
 
 [image.tiff]
 text = "TIFF"
+hint = "print, lossless"
 ext = "tiff"
 command = 'ffmpeg -n -i {input} {output}'
 output = "{base}.{ext}"
 
 [image.gif]
 text = "GIF"
+hint = "256 colours"
 ext = "gif"
 command = 'ffmpeg -n -i {input} -f gif {output}'
 output = "{base}.{ext}"
 
 [image.webp]
 text = "WebP"
+hint = "web, small"
 ext = "webp"
 command = 'ffmpeg -n -i {input} -c:v libwebp -q:v 95 {output}'
 output = "{base}.{ext}"
 
 [image.tga]
 text = "TGA"
+hint = "games, textures"
 ext = "tga"
 command = 'ffmpeg -n -i {input} {output}'
 output = "{base}.{ext}"

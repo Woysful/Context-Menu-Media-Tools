@@ -127,10 +127,17 @@ pub fn parse_probe(name: &str, json: &str) -> Option<Info> {
     Some(info)
 }
 
+/// What ffprobe says about the file, as JSON (empty when it cannot be run)
+pub fn probe_json(ffprobe: &Path, file: &Path) -> String {
+    match crate::proc::command(ffprobe).args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"]).arg(file).output() {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).to_string(),
+        Err(_) => String::new(),
+    }
+}
+
 pub fn probe(ffprobe: &Path, file: &Path) -> Option<Info> {
-    let out = crate::proc::command(ffprobe).args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"]).arg(file).output().ok()?;
     let name = file.file_name()?.to_string_lossy().to_string();
-    parse_probe(&name, &String::from_utf8_lossy(&out.stdout))
+    parse_probe(&name, &probe_json(ffprobe, file))
 }
 
 /// "1920×1080 · 30 fps · 6.1 Mbit/s · audio 69 kbit/s · 0:06"

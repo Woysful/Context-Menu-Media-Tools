@@ -75,7 +75,7 @@ user `PATH`). `uninstall` removes all of it, the `PATH` blocks of earlier versio
 | Make frame sequence | PNG / JPG / WebP frames into a new folder next to the video |
 | Convert to WebP anim | size, fps, quality, compression |
 | Convert Image | JPG, PNG, BMP, TIFF, GIF, WebP, TGA |
-| Stats | `ffprobe` output of the files |
+| Stats | duration, size, bitrate, container and every stream of the files; the full `ffprobe` text one click away |
 
 The window shows the progress (speed, time left, the chunk or pass), a log, and the size of the result against the limit. A job that
 finished without problems closes itself after a few seconds.
