@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn unique_names_never_overwrite() {
-        let dir = std::env::temp_dir().join(format!("mmt-unique-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cmmt-unique-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = dir.join("clip.mp4");
         assert_eq!(unique_path(a.clone()), a);

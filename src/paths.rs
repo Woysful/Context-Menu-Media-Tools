@@ -26,10 +26,19 @@ pub fn xdg_data() -> PathBuf {
 pub fn config_dir() -> PathBuf {
     if cfg!(windows) {
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            return PathBuf::from(appdata).join("mmt");
+            return PathBuf::from(appdata).join("cmmt");
         }
     }
-    xdg_config().join("mmt")
+    xdg_config().join("cmmt")
+}
+
+/// The folder of the settings was called mmt before the program became cmmt: it is moved once
+pub fn move_old_config() {
+    let new = config_dir();
+    let old = new.with_file_name("mmt");
+    if !new.exists() && old.is_dir() {
+        let _ = std::fs::rename(&old, &new);
+    }
 }
 
 pub fn presets_file() -> PathBuf {
@@ -85,16 +94,16 @@ mod tests {
 
     #[test]
     fn appimage_is_recognised_only_from_inside_its_mount() {
-        let dir = std::env::temp_dir().join(format!("mmt-appimage-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cmmt-appimage-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let image = dir.join("mmt.AppImage");
+        let image = dir.join("cmmt.AppImage");
         std::fs::write(&image, b"x").unwrap();
-        let mount = PathBuf::from("/tmp/.mount_mmtXYZ");
-        let inside = mount.join("usr/bin/mmt");
+        let mount = PathBuf::from("/tmp/.mount_cmmtXYZ");
+        let inside = mount.join("usr/bin/cmmt");
         let some = |p: &Path| Some(p.as_os_str().to_os_string());
         assert_eq!(appimage_of(&inside, some(&image), some(&mount)), Some(image.clone()));
         // inherited from another AppImage: the binary is not in that mount
-        assert_eq!(appimage_of(Path::new("/usr/bin/mmt"), some(&image), some(&mount)), None);
+        assert_eq!(appimage_of(Path::new("/usr/bin/cmmt"), some(&image), some(&mount)), None);
         assert_eq!(appimage_of(&inside, None, some(&mount)), None);
         assert_eq!(appimage_of(&inside, some(&dir.join("gone.AppImage")), some(&mount)), None);
         let _ = std::fs::remove_dir_all(&dir);

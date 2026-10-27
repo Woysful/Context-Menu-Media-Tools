@@ -1,4 +1,4 @@
-//! Windows: the classic context menu of Explorer, written to `mmt-menu.reg` in %APPDATA%\mmt
+//! Windows: the classic context menu of Explorer, written to `cmmt-menu.reg` in %APPDATA%\cmmt
 //! and imported with `reg import`; PATH and the Start menu shortcut through PowerShell.
 
 use super::menu::{SUBMENUS, VIDEO};
@@ -29,7 +29,7 @@ pub fn reg_text(exe: &str, uninstall: bool, s: &Settings) -> String {
 
     for ext in Kind::Video.extensions() {
         for (i, it) in VIDEO.iter().enumerate() {
-            let key = format!(r"{root}\.{ext}\shell\mmt_{:02}", i + 1);
+            let key = format!(r"{root}\.{ext}\shell\cmmt_{:02}", i + 1);
             if s.enabled(it.action) {
                 verb(&mut body, &key, it.name(), &command(it.action.cli_name()));
             }
@@ -40,7 +40,7 @@ pub fn reg_text(exe: &str, uninstall: bool, s: &Settings) -> String {
         let with_formats = s.enabled(sub.action);
         let with_stats = s.enabled(crate::action::Action::Stats);
         for ext in sub.kind.extensions() {
-            let top = format!(r"{root}\.{ext}\shell\mmt_01");
+            let top = format!(r"{root}\.{ext}\shell\cmmt_01");
             keys.push(top.clone());
             if !with_formats && !with_stats {
                 continue;
@@ -61,7 +61,7 @@ pub fn reg_text(exe: &str, uninstall: bool, s: &Settings) -> String {
     // own items: one verb per extension of their kind
     for c in s.menu_customs() {
         for ext in c.media_kind().extensions() {
-            let key = format!(r"{root}\.{ext}\shell\mmt_c_{}", c.id);
+            let key = format!(r"{root}\.{ext}\shell\cmmt_c_{}", c.id);
             verb(&mut body, &key, &c.name, &command(&format!("run {}", c.id)));
             keys.push(key);
         }
@@ -90,7 +90,7 @@ pub fn reg_bytes(text: &str) -> Vec<u8> {
     bytes
 }
 
-fn reg_import(file: &Path) -> Result<(), String> {
+pub fn reg_import(file: &Path) -> Result<(), String> {
     let out = crate::proc::command("reg").arg("import").arg(file).output().map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(())
@@ -103,8 +103,8 @@ pub fn install(exe: &Path, st: &Settings) -> Result<Vec<String>, String> {
     let dir = paths::config_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let exe_text = exe.to_string_lossy().to_string();
-    let file = dir.join("mmt-menu.reg");
-    let off = dir.join("mmt-menu-uninstall.reg");
+    let file = dir.join("cmmt-menu.reg");
+    let off = dir.join("cmmt-menu-uninstall.reg");
     fs::write(&file, reg_bytes(&reg_text(&exe_text, false, st))).map_err(|e| e.to_string())?;
     fs::write(&off, reg_bytes(&reg_text(&exe_text, true, st))).map_err(|e| e.to_string())?;
     let mut log = vec![format!("written {} (you can read and edit it)", file.display())];
@@ -120,7 +120,7 @@ pub fn install(exe: &Path, st: &Settings) -> Result<Vec<String>, String> {
 }
 
 pub fn uninstall() -> Vec<String> {
-    let file = paths::config_dir().join("mmt-menu-uninstall.reg");
+    let file = paths::config_dir().join("cmmt-menu-uninstall.reg");
     if !cfg!(windows) || !file.exists() {
         return vec![];
     }
@@ -171,17 +171,17 @@ mod tests {
 
     #[test]
     fn reg_file_structure() {
-        let t = reg_text(r"C:\Users\me\AppData\Local\mmt\mmt.exe", false, &Settings::default());
+        let t = reg_text(r"C:\Users\me\AppData\Local\cmmt\cmmt.exe", false, &Settings::default());
         assert!(t.starts_with("Windows Registry Editor Version 5.00\r\n"));
-        assert!(t.contains(r"[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.mp4\shell\mmt_01]"));
+        assert!(t.contains(r"[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.mp4\shell\cmmt_01]"));
         assert!(t.contains("\"MUIVerb\"=\"Compress Video\""));
-        assert!(t.contains(r#"@="\"C:\\Users\\me\\AppData\\Local\\mmt\\mmt.exe\" compress --batch \"%1\"""#));
-        assert!(t.contains(r"SystemFileAssociations\.mp3\shell\mmt_01\shell\02_mp3\command]"));
+        assert!(t.contains(r#"@="\"C:\\Users\\me\\AppData\\Local\\cmmt\\cmmt.exe\" compress --batch \"%1\"""#));
+        assert!(t.contains(r"SystemFileAssociations\.mp3\shell\cmmt_01\shell\02_mp3\command]"));
         assert!(t.contains("convert-audio --yes --format mp3 --batch"));
         assert!(t.contains("\"SubCommands\"=\"\""));
         let off = reg_text("x.exe", true, &Settings::default());
-        assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.mp4\shell\mmt_08]"));
-        assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.png\shell\mmt_01]"));
+        assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.mp4\shell\cmmt_08]"));
+        assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.png\shell\cmmt_01]"));
         assert!(!off.contains("MUIVerb"));
     }
 
@@ -190,13 +190,13 @@ mod tests {
         let mut s = with_custom();
         s.set_enabled(Action::DeleteSound, false);
         let t = reg_text("x.exe", false, &s);
-        assert!(!t.contains(r"\.mp4\shell\mmt_05]")); // numbering stays stable, the item is gone
-        assert!(t.contains(r"\.mp4\shell\mmt_06]"));
-        assert!(t.contains(r"\.mkv\shell\mmt_c_gif]") && t.contains("run gif --batch"));
+        assert!(!t.contains(r"\.mp4\shell\cmmt_05]")); // numbering stays stable, the item is gone
+        assert!(t.contains(r"\.mp4\shell\cmmt_06]"));
+        assert!(t.contains(r"\.mkv\shell\cmmt_c_gif]") && t.contains("run gif --batch"));
         // the uninstall file still knows the switched-off item and the own one
         let off = reg_text("x.exe", true, &s);
-        assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.mp4\shell\mmt_05]"));
-        assert!(off.contains(r"\.mp4\shell\mmt_c_gif]"));
+        assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.mp4\shell\cmmt_05]"));
+        assert!(off.contains(r"\.mp4\shell\cmmt_c_gif]"));
     }
 
     #[test]
@@ -206,10 +206,10 @@ mod tests {
 
     #[test]
     fn powershell_scripts_quote_the_paths() {
-        let add = ps_path_script(r"C:\Users\O'Neil\mmt", true);
-        assert!(add.contains(r"$d='C:\Users\O''Neil\mmt'") && add.contains("SetEnvironmentVariable('Path'"));
-        assert!(ps_path_script("C:\\mmt", false).contains("Where-Object"));
-        assert!(ps_shortcut_script(r"C:\mmt\mmt.exe", true).contains("$s.Arguments='settings'"));
+        let add = ps_path_script(r"C:\Users\O'Neil\cmmt", true);
+        assert!(add.contains(r"$d='C:\Users\O''Neil\cmmt'") && add.contains("SetEnvironmentVariable('Path'"));
+        assert!(ps_path_script("C:\\cmmt", false).contains("Where-Object"));
+        assert!(ps_shortcut_script(r"C:\cmmt\cmmt.exe", true).contains("$s.Arguments='settings'"));
         assert!(ps_shortcut_script("x", false).starts_with("Remove-Item"));
     }
 }

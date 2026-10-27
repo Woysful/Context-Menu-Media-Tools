@@ -176,7 +176,7 @@ static EN: T = T {
     gpu_access: "No access to the GPU device (add your user to the render group):",
     invalid_limit: "Invalid size limit:",
     unknown_codec: "Unknown codec:",
-    ffmpeg_missing: "ffmpeg / ffprobe not found. Install ffmpeg (it must be in PATH or next to mmt), or set its path in Settings → General.",
+    ffmpeg_missing: "ffmpeg / ffprobe not found. Install ffmpeg (it must be in PATH or next to cmmt), or set its path in Settings → General.",
     no_files: "No files to process.",
     pass1: "pass 1 of 2 (analysis)",
     pass2: "pass 2 of 2",

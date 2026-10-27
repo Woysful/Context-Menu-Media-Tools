@@ -118,7 +118,7 @@ impl eframe::App for App {
         let want_blur = self.transparent && look.transparency != "off" && effects::blur_supported();
         if effects::blur_supported() && self.blur_state != Some(want_blur) {
             if let Err(e) = effects::set_blur(frame, want_blur, c().dark) {
-                eprintln!("mmt: blur not changed: {e}");
+                eprintln!("cmmt: blur not changed: {e}");
             }
             self.blur_state = Some(want_blur);
         }

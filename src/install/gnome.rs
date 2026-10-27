@@ -64,22 +64,22 @@ mod tests {
 
     #[test]
     fn scripts_pass_the_selection_and_numbers_are_optional() {
-        let files = files("/opt/my mmt/mmt", &Settings::default());
+        let files = files("/opt/my cmmt/cmmt", &Settings::default());
         assert_eq!(files.len(), 9);
         assert_eq!(files[0].0, "Compress Video"); // plain names by default
         assert_eq!(files[7].0, "Convert Image");
         assert_eq!(files[8].0, "Stats");
-        assert!(files[0].1.contains("exec '/opt/my mmt/mmt' compress \"$@\""));
+        assert!(files[0].1.contains("exec '/opt/my cmmt/cmmt' compress \"$@\""));
         assert!(files[0].1.starts_with("#!/bin/sh\n"));
         let s = Settings { numbered_scripts: true, ..Default::default() };
-        assert_eq!(super::files("/bin/mmt", &s)[0].0, "01 Compress Video");
+        assert_eq!(super::files("/bin/cmmt", &s)[0].0, "01 Compress Video");
     }
 
     #[test]
     fn follow_the_settings() {
         let mut s = with_custom();
         s.set_enabled(Action::DeleteSound, false);
-        let g = files("/bin/mmt", &s);
+        let g = files("/bin/cmmt", &s);
         assert!(g.iter().all(|(n, _)| n != "Delete sound"));
         assert!(g.iter().any(|(n, c)| n == "Make GIF" && c.contains("run 'gif'")));
     }

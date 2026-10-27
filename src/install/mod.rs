@@ -1,11 +1,11 @@
-//! `mmt install` / `mmt uninstall`: put the items into the context menu of the file manager.
+//! `cmmt install` / `cmmt uninstall`: put the items into the context menu of the file manager.
 //!
 //! What is written are plain text files, so they can be read and edited by hand:
-//!   KDE (Dolphin)  ~/.local/share/kio/servicemenus/mmt-*.desktop
+//!   KDE (Dolphin)  ~/.local/share/kio/servicemenus/cmmt-*.desktop
 //!   GNOME (Files)  ~/.local/share/nautilus/scripts/Media Tools/*   (small sh scripts)
-//!   XFCE (Thunar)  <mmt-…> actions inside ~/.config/Thunar/uca.xml
-//!   Raspberry Pi OS / LXDE / LXQt (PCManFM)   ~/.local/share/file-manager/actions/mmt-*.desktop
-//!   Windows        mmt-menu.reg in %APPDATA%\mmt, imported with `reg import`
+//!   XFCE (Thunar)  <cmmt-…> actions inside ~/.config/Thunar/uca.xml
+//!   Raspberry Pi OS / LXDE / LXQt (PCManFM)   ~/.local/share/file-manager/actions/cmmt-*.desktop
+//!   Windows        cmmt-menu.reg in %APPDATA%\cmmt, imported with `reg import`
 //!
 //! The menu follows the Settings window: items that are switched off are left out, own
 //! items (settings.toml) are added.
@@ -14,6 +14,7 @@ mod gnome;
 mod kde;
 mod linux;
 mod menu;
+mod old_name;
 mod pcmanfm;
 mod windows;
 mod xfce;
@@ -72,10 +73,10 @@ impl Target {
 pub struct Options {
     /// empty = the file managers found on this computer
     pub targets: Vec<Target>,
-    /// copy the program to ~/.local/bin (Windows: %LOCALAPPDATA%\mmt) so the download can be deleted.
+    /// copy the program to ~/.local/bin (Windows: %LOCALAPPDATA%\cmmt) so the download can be deleted.
     /// An AppImage is never copied.
     pub copy: bool,
-    /// add the folder of the program to PATH (`mmt` in a terminal); the menu items do not need it
+    /// add the folder of the program to PATH (`cmmt` in a terminal); the menu items do not need it
     pub path: bool,
 }
 
@@ -150,9 +151,9 @@ pub(crate) fn set_executable(path: &Path) {
 /// Where `install` puts the program
 fn local_bin() -> PathBuf {
     if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(paths::config_dir).join("mmt").join("mmt.exe")
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(paths::config_dir).join("cmmt").join("cmmt.exe")
     } else {
-        paths::home_dir().join(".local/bin/mmt")
+        paths::home_dir().join(".local/bin/cmmt")
     }
 }
 
@@ -178,7 +179,7 @@ fn place_program(copy: bool) -> Result<PathBuf, String> {
     Ok(target)
 }
 
-/// `--path`: `mmt` in the terminal. An AppImage gets a link named mmt in ~/.local/bin, whose
+/// `--path`: `cmmt` in the terminal. An AppImage gets a link named cmmt in ~/.local/bin, whose
 /// folder goes to PATH; a plain program has its own folder added.
 #[cfg(unix)]
 fn terminal_command(exe: &Path) -> Vec<String> {
@@ -215,6 +216,7 @@ pub fn install(opts: &Options) -> (i32, Vec<String>) {
         Err(e) => return (1, vec![e]),
     };
     out.push(format!("program: {}", exe.display()));
+    out.extend(old_name::remove());
     let cfg = Config::load();
     let mut ok = true;
     for t in &targets {
@@ -227,7 +229,7 @@ pub fn install(opts: &Options) -> (i32, Vec<String>) {
         }
     }
 
-    // `mmt` in the terminal, and a "Media Tools" entry (the Settings window) in the application menu
+    // `cmmt` in the terminal, and a "Media Tools" entry (the Settings window) in the application menu
     let bin_dir = exe.parent().unwrap_or(Path::new("")).to_path_buf();
     if cfg!(windows) {
         if opts.path {
@@ -254,13 +256,14 @@ pub fn install(opts: &Options) -> (i32, Vec<String>) {
         }
     }
     if paths::find_tool("ffmpeg", &cfg.settings.ffmpeg).is_none() || paths::find_tool("ffprobe", &cfg.settings.ffprobe).is_none() {
-        out.push("warning: ffmpeg / ffprobe not found; install ffmpeg (or put ffmpeg and ffprobe next to mmt)".into());
+        out.push("warning: ffmpeg / ffprobe not found; install ffmpeg (or put ffmpeg and ffprobe next to cmmt)".into());
     }
     (if ok { 0 } else { 1 }, out)
 }
 
 pub fn uninstall(opts: &Options) -> (i32, Vec<String>) {
     let mut out: Vec<String> = opts.targets().into_iter().flat_map(Target::uninstall).collect();
+    out.extend(old_name::remove());
     if cfg!(windows) {
         let exe = local_bin();
         let _ = windows::powershell(&windows::ps_path_script(&exe.parent().unwrap_or(Path::new("")).to_string_lossy(), false));

@@ -7,8 +7,12 @@ use crate::paths;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const BLOCK_START: &str = "# >>> mmt >>>";
-const BLOCK_END: &str = "# <<< mmt <<<";
+const NAME: &str = "cmmt";
+
+/// The first and the last line of the marked block of the program called `name`
+fn marks(name: &str) -> (String, String) {
+    (format!("# >>> {name} >>>"), format!("# <<< {name} <<<"))
+}
 
 /// The text with our marked block added (or replaced when it is there already)
 pub fn with_block(text: &str, block: &str) -> String {
@@ -16,18 +20,24 @@ pub fn with_block(text: &str, block: &str) -> String {
     if !out.is_empty() {
         out.push_str("\n\n");
     }
-    out.push_str(&format!("{BLOCK_START}\n{block}\n{BLOCK_END}\n"));
+    let (start, end) = marks(NAME);
+    out.push_str(&format!("{start}\n{block}\n{end}\n"));
     out
 }
 
 /// The text without our marked block
 pub fn without_block(text: &str) -> String {
-    let (Some(a), Some(b)) = (text.find(BLOCK_START), text.find(BLOCK_END)) else { return text.to_string() };
+    without_named(text, NAME)
+}
+
+fn without_named(text: &str, name: &str) -> String {
+    let (start, end) = marks(name);
+    let (Some(a), Some(b)) = (text.find(&start), text.find(&end)) else { return text.to_string() };
     if b < a {
         return text.to_string();
     }
     let before = text[..a].trim_end_matches('\n');
-    let after = text[b + BLOCK_END.len()..].trim_start_matches('\n');
+    let after = text[b + end.len()..].trim_start_matches('\n');
     match (before.is_empty(), after.is_empty()) {
         (true, true) => String::new(),
         (true, false) => after.to_string(),
@@ -44,8 +54,8 @@ fn home_text(dir: &Path) -> String {
     }
 }
 
-fn fish_file() -> PathBuf {
-    paths::home_dir().join(".config/fish/conf.d/mmt-path.fish")
+fn fish_file(name: &str) -> PathBuf {
+    paths::home_dir().join(format!(".config/fish/conf.d/{name}-path.fish"))
 }
 
 /// Add the folder of the program to PATH for the shells of the user: ~/.profile, ~/.bashrc,
@@ -76,43 +86,48 @@ pub fn path_install(bin_dir: &Path) -> Vec<String> {
     }
     if home.join(".config/fish").exists() || paths::in_path("fish").is_some() {
         let fish = format!("if not contains -- {dir} $PATH\n    set -gx PATH {dir} $PATH\nend\n");
-        touch(fish_file(), true, &|_| fish.clone());
+        touch(fish_file(NAME), true, &|_| fish.clone());
     }
     if in_path {
-        vec![format!("PATH: {} is already in PATH, `mmt` works in the terminal", bin_dir.display())]
+        vec![format!("PATH: {} is already in PATH, `cmmt` works in the terminal", bin_dir.display())]
     } else {
         vec![
             format!("PATH: added {} to {}", bin_dir.display(), done.join(", ")),
-            "PATH: log out and in (or open a new terminal) to use `mmt` in the terminal".into(),
+            "PATH: log out and in (or open a new terminal) to use `cmmt` in the terminal".into(),
         ]
     }
 }
 
 pub fn path_uninstall() -> Vec<String> {
+    remove_path_blocks(NAME)
+}
+
+/// Remove the PATH blocks of the program called `name`
+pub fn remove_path_blocks(name: &str) -> Vec<String> {
     let home = paths::home_dir();
     let mut log = Vec::new();
-    for name in [".profile", ".bashrc", ".zshenv"] {
-        let path = home.join(name);
+    for file in [".profile", ".bashrc", ".zshenv"] {
+        let path = home.join(file);
         let Ok(text) = fs::read_to_string(&path) else { continue };
-        if text.contains(BLOCK_START) {
-            let cleaned = without_block(&text);
+        if text.contains(&marks(name).0) {
+            let cleaned = without_named(&text, name);
             let _ = if cleaned.trim().is_empty() { fs::remove_file(&path) } else { fs::write(&path, cleaned) };
             log.push(format!("PATH: removed from {}", path.display()));
         }
     }
-    let fish = fish_file();
+    let fish = fish_file(name);
     if fish.exists() && fs::remove_file(&fish).is_ok() {
         log.push(format!("PATH: removed {}", fish.display()));
     }
     log
 }
 
-const ICON: &[u8] = include_bytes!("../../assets/mmt.png");
+const ICON: &[u8] = include_bytes!("../../assets/cmmt.png");
 
 /// The entry of the application menu that opens the Settings window
 pub fn launcher_desktop(exe: &str) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Media Tools\nComment=Settings of the Media Tools context menu\nExec={} settings\nIcon=mmt\nTerminal=false\nCategories=AudioVideo;Video;\n",
+        "[Desktop Entry]\nType=Application\nName=Media Tools\nComment=Settings of the Media Tools context menu\nExec={} settings\nIcon=cmmt\nTerminal=false\nCategories=AudioVideo;Video;\n",
         desktop_quote(exe)
     )
 }
@@ -134,11 +149,11 @@ pub fn applications_dir() -> PathBuf {
 }
 
 fn launcher_file() -> PathBuf {
-    applications_dir().join("mmt.desktop")
+    applications_dir().join("cmmt.desktop")
 }
 
 fn icon_file() -> PathBuf {
-    paths::xdg_data().join("icons/hicolor/256x256/apps/mmt.png")
+    paths::xdg_data().join("icons/hicolor/256x256/apps/cmmt.png")
 }
 
 fn write(path: &Path, bytes: &[u8]) -> bool {
@@ -175,7 +190,7 @@ mod tests {
         let block = "export PATH=\"$HOME/.local/bin:$PATH\"";
         let original = "alias ll='ls -l'\n";
         let once = with_block(original, block);
-        assert!(once.starts_with("alias ll='ls -l'\n\n# >>> mmt >>>\n"));
+        assert!(once.starts_with("alias ll='ls -l'\n\n# >>> cmmt >>>\n"));
         assert_eq!(with_block(&once, block), once); // idempotent
         assert_eq!(without_block(&once), original);
         assert_eq!(without_block(&with_block("", block)), "");
@@ -183,16 +198,24 @@ mod tests {
     }
 
     #[test]
+    fn the_block_of_the_old_name_is_removed_alone() {
+        let old = "# >>> mmt >>>\nexport PATH=\"$HOME/.local/bin:$PATH\"\n# <<< mmt <<<\n";
+        let both = with_block(old, "export X=1");
+        assert!(both.contains("# >>> mmt >>>") && both.contains("# >>> cmmt >>>"));
+        assert_eq!(without_named(&both, "mmt"), with_block("", "export X=1"));
+    }
+
+    #[test]
     fn launcher_entry_opens_the_settings() {
-        let d = launcher_desktop("/home/u/.local/bin/mmt");
-        assert!(d.contains("Exec=/home/u/.local/bin/mmt settings") && d.contains("Categories=AudioVideo;Video;"));
-        assert!(d.contains("Icon=mmt\n"));
+        let d = launcher_desktop("/home/u/.local/bin/cmmt");
+        assert!(d.contains("Exec=/home/u/.local/bin/cmmt settings") && d.contains("Categories=AudioVideo;Video;"));
+        assert!(d.contains("Icon=cmmt\n"));
         assert!(ICON.starts_with(b"\x89PNG"));
     }
 
     #[test]
     fn an_integrated_appimage_is_found_by_its_exec_line() {
-        let dir = std::env::temp_dir().join(format!("mmt-apps-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cmmt-apps-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let image = Path::new("/home/u/AppImages/media-tools.appimage");
         fs::write(dir.join("other.desktop"), "[Desktop Entry]\nExec=/usr/bin/vlc %U\n").unwrap();

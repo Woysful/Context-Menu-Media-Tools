@@ -2,7 +2,7 @@
 Type=Application
 Name=Media Tools
 Comment=Settings of the Media Tools context menu
-Exec=mmt settings
-Icon=mmt
+Exec=cmmt settings
+Icon=cmmt
 Terminal=false
 Categories=AudioVideo;Video;

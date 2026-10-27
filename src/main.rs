@@ -32,14 +32,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 const HELP: &str = "\
-mmt - Media Tools: ffmpeg front end for the file manager context menu
+cmmt - Media Tools: ffmpeg front end for the file manager context menu
 
-Usage: mmt <action> [options] [files...]
+Usage: cmmt <action> [options] [files...]
 
 Actions:
   compress  convert-video  convert-audio  extract-audio  delete-sound
   frames  webp  convert-image  stats
-  settings                                               the Settings window (also: run mmt without arguments)
+  settings                                               the Settings window (also: run cmmt without arguments)
   run <id> [files...]                                    an own menu item of the Settings window
   install [--kde|--gnome|--xfce|--pcmanfm|--windows] [--no-copy] [--path]   add the menu items
   uninstall                                              remove them
@@ -161,7 +161,7 @@ fn emit(title: &str, lines: Vec<String>, code: i32) -> i32 {
             if code == 0 {
                 println!("{l}");
             } else if i == 0 {
-                eprintln!("mmt: {l}");
+                eprintln!("cmmt: {l}");
             } else {
                 eprintln!("{l}");
             }
@@ -174,7 +174,7 @@ fn show(launch: ui::Launch) -> i32 {
     match ui::run(launch) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("mmt: {e}");
+            eprintln!("cmmt: {e}");
             1
         }
     }
@@ -186,14 +186,15 @@ fn settings_window() -> i32 {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    paths::move_old_config();
     // Started without arguments from a file manager or the application menu (no terminal): the Settings window
     if args.is_empty() && !std::io::stdout().is_terminal() {
         std::process::exit(settings_window());
     }
     let mut cli = Cli::parse(args);
     let code = match cli.action.as_str() {
-        "" | "help" | "--help" | "-h" => emit("mmt", HELP.lines().map(str::to_string).collect(), 0),
-        "version" | "--version" | "-V" => emit("mmt", vec![format!("mmt {}", env!("CARGO_PKG_VERSION"))], 0),
+        "" | "help" | "--help" | "-h" => emit("cmmt", HELP.lines().map(str::to_string).collect(), 0),
+        "version" | "--version" | "-V" => emit("cmmt", vec![format!("cmmt {}", env!("CARGO_PKG_VERSION"))], 0),
         "settings" => settings_window(),
         "install" => {
             let (code, lines) = install::install(&install::Options::from_flags(&cli.flags));
@@ -204,15 +205,15 @@ fn main() {
             emit("Uninstall", lines, code)
         }
         "config" => config_command(&cli),
-        // mmt run <id> [files...]: the first word is the id of an own item
-        "run" if cli.files.is_empty() => emit("mmt", vec!["run: the id of the item is missing".into()], 2),
+        // cmmt run <id> [files...]: the first word is the id of an own item
+        "run" if cli.files.is_empty() => emit("cmmt", vec!["run: the id of the item is missing".into()], 2),
         "run" => {
             let id = cli.files.remove(0).to_string_lossy().to_string();
             run_action(Action::Stats, Some(id), cli)
         }
         name => match Action::from_cli(name) {
             Some(action) => run_action(action, None, cli),
-            None => emit("mmt", [format!("unknown action \"{name}\""), String::new()].into_iter().chain(HELP.lines().map(str::to_string)).collect(), 2),
+            None => emit("cmmt", [format!("unknown action \"{name}\""), String::new()].into_iter().chain(HELP.lines().map(str::to_string)).collect(), 2),
         },
     };
     std::process::exit(code);
@@ -242,7 +243,7 @@ fn run_action(action: Action, custom: Option<String>, cli: Cli) -> i32 {
     let t = i18n::t();
     if let Some(id) = &custom {
         if cfg.settings.custom(id).is_none() {
-            return emit("mmt", vec![format!("no own item \"{id}\" in settings.toml")], 2);
+            return emit("cmmt", vec![format!("no own item \"{id}\" in settings.toml")], 2);
         }
     }
 
@@ -284,7 +285,7 @@ fn run_action(action: Action, custom: Option<String>, cli: Cli) -> i32 {
     }
     let request = match request.transpose() {
         Ok(r) => r,
-        Err(e) => return emit("mmt", vec![e], 2),
+        Err(e) => return emit("cmmt", vec![e], 2),
     };
     show(ui::Launch { start: ui::Start::Normal, action, custom_id: custom, files, cfg, tools, request, first_kind })
 }
@@ -305,7 +306,7 @@ fn run_console(action: Action, request: Option<Result<Request, String>>, cfg: &A
         }
         None => return 2,
         Some(Err(e)) => {
-            eprintln!("mmt: {e}");
+            eprintln!("cmmt: {e}");
             return 2;
         }
         Some(Ok(r)) => r,

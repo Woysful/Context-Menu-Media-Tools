@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh - builds mmt (the Media Tools program) for Linux and Windows, x86 and ARM.
+# build.sh - builds cmmt (the Media Tools program) for Linux and Windows, x86 and ARM.
 #
 #   ./build.sh                  build for this computer
 #   ./build.sh --all            build every target below that can be built here
@@ -8,8 +8,8 @@
 #   ./build.sh --debug ...      debug instead of release build
 #   ./build.sh --no-appimage    Linux: only the plain binary, no AppImage
 #
-# The finished files are put into ./dist: mmt-linux-x86_64.AppImage (the main Linux download),
-# the plain binary mmt-linux-x86_64, mmt-windows-x86_64.exe, ...
+# The finished files are put into ./dist: cmmt-linux-x86_64.AppImage (the main Linux download),
+# the plain binary cmmt-linux-x86_64, cmmt-windows-x86_64.exe, ...
 #
 # AppImage: the binary, its .desktop file and icon packed with appimagetool. ffmpeg is not
 # inside: the AppImage uses the ffmpeg of the system (or ffmpeg / ffprobe next to the .AppImage).
@@ -134,14 +134,14 @@ make_appimage() {  # binary, triple, friendly name
     icons="$dir/usr/share/icons/hicolor/256x256/apps"
     rm -rf "$dir"
     mkdir -p "$dir/usr/bin" "$dir/usr/share/applications" "$icons"
-    cp "$bin" "$dir/usr/bin/mmt"
-    ln -s usr/bin/mmt "$dir/AppRun"
-    cp assets/mmt.desktop "$dir/mmt.desktop"
-    cp assets/mmt.desktop "$dir/usr/share/applications/mmt.desktop"
-    cp assets/mmt.png "$dir/mmt.png"
-    cp assets/mmt.png "$icons/mmt.png"
-    ln -s mmt.png "$dir/.DirIcon"
-    out="mmt-$name.AppImage"
+    cp "$bin" "$dir/usr/bin/cmmt"
+    ln -s usr/bin/cmmt "$dir/AppRun"
+    cp assets/cmmt.desktop "$dir/cmmt.desktop"
+    cp assets/cmmt.desktop "$dir/usr/share/applications/cmmt.desktop"
+    cp assets/cmmt.png "$dir/cmmt.png"
+    cp assets/cmmt.png "$icons/cmmt.png"
+    ln -s cmmt.png "$dir/.DirIcon"
+    out="cmmt-$name.AppImage"
     # extract-and-run: appimagetool is an AppImage itself and must work without FUSE (containers, CI)
     if ! ARCH="$arch" VERSION="$VERSION" APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$dir" "$OUT/$out" > "target/appimagetool-$name.log" 2>&1; then
         echo "    FAILED: AppImage (see target/appimagetool-$name.log)" >&2
@@ -185,13 +185,13 @@ build_one() {
     echo "    ${cmd[*]}"
     "${cmd[@]}" || { echo "    FAILED: $name" >&2; return 1; }
 
-    # always built with --target, so never take a (possibly stale) target/release/mmt
-    local built="target/$tr/$PROFILE/mmt$ext"
+    # always built with --target, so never take a (possibly stale) target/release/cmmt
+    local built="target/$tr/$PROFILE/cmmt$ext"
     [ -f "$built" ] || { echo "    the binary was not found: $built" >&2; return 1; }
     mkdir -p "$OUT"
-    cp "$built" "$OUT/mmt-$name$ext"
-    checksum "mmt-$name$ext"
-    echo "    -> dist/mmt-$name$ext ($(du -h "$OUT/mmt-$name$ext" | cut -f1))"
+    cp "$built" "$OUT/cmmt-$name$ext"
+    checksum "cmmt-$name$ext"
+    echo "    -> dist/cmmt-$name$ext ($(du -h "$OUT/cmmt-$name$ext" | cut -f1))"
     if [ "$APPIMAGE" = 1 ]; then make_appimage "$built" "$tr" "$name" || return 1; fi
 }
 
@@ -214,7 +214,7 @@ done
 have cargo || { echo "build.sh: cargo is not installed (https://rustup.rs)" >&2; exit 1; }
 [ ${#TARGETS[@]} -gt 0 ] || TARGETS=("$(host_triple)")
 
-echo "mmt $VERSION, $PROFILE build"
+echo "cmmt $VERSION, $PROFILE build"
 ok=0; failed=0
 for t in "${TARGETS[@]}"; do
     if build_one "$t"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi

@@ -22,7 +22,7 @@ const COL_GAP: f32 = 8.0;
 /// While a form is measured, the lowest edge of an open list is kept under this id,
 /// so the window is made tall enough for it
 pub fn need_id() -> egui::Id {
-    egui::Id::new("mmt_dropdown_need")
+    egui::Id::new("cmmt_dropdown_need")
 }
 
 /// A drop-down list. The list is a set of columns (groups side by side), so it is short enough to

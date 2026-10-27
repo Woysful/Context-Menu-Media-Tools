@@ -1,4 +1,4 @@
-//! XFCE (Thunar): `<action>`s with the unique id `mmt-…` inside ~/.config/Thunar/uca.xml
+//! XFCE (Thunar): `<action>`s with the unique id `cmmt-…` inside ~/.config/Thunar/uca.xml
 
 use super::menu::{desktop_quote, flat_entries, thunar_type, xml_escape};
 use crate::paths;
@@ -16,7 +16,7 @@ pub fn actions(exe: &str, s: &Settings) -> String {
         let types: String = types.iter().map(|t| format!("\t<{t}/>\n")).collect();
         let name = xml_escape(&e.name);
         out.push_str(&format!(
-            "<action>\n\t<icon>{}</icon>\n\t<name>{name}</name>\n\t<unique-id>mmt-{}</unique-id>\n\t<command>{exe} {} %F</command>\n\t<description>{name}</description>\n\t<patterns>*</patterns>\n{types}</action>\n",
+            "<action>\n\t<icon>{}</icon>\n\t<name>{name}</name>\n\t<unique-id>cmmt-{}</unique-id>\n\t<command>{exe} {} %F</command>\n\t<description>{name}</description>\n\t<patterns>*</patterns>\n{types}</action>\n",
             e.icon,
             e.thunar_id,
             xml_escape(&e.args),
@@ -36,14 +36,20 @@ pub fn merge(existing: Option<&str>, ours: &str) -> String {
     format!("{}{}{}", &base[..pos], ours, &base[pos..])
 }
 
-/// The text without the actions of mmt
+/// The text without the actions of cmmt
 pub fn strip(text: &str) -> String {
+    strip_named(text, "cmmt")
+}
+
+/// The text without the actions of the program called `name`
+fn strip_named(text: &str, name: &str) -> String {
+    let id = format!("<unique-id>{name}-");
     let mut out = String::new();
     let mut rest = text;
     while let Some(start) = rest.find("<action>") {
         let Some(len) = rest[start..].find("</action>") else { break };
         let end = start + len + "</action>".len();
-        if rest[start..end].contains("<unique-id>mmt-") {
+        if rest[start..end].contains(&id) {
             out.push_str(&rest[..start]);
             // also swallow the line break after the block
             rest = rest[end..].strip_prefix('\n').unwrap_or(&rest[end..]);
@@ -72,10 +78,15 @@ pub fn install(exe: &Path, st: &Settings) -> Result<Vec<String>, String> {
 }
 
 pub fn uninstall() -> Vec<String> {
+    remove_named("cmmt")
+}
+
+/// Remove the actions of the program called `name`
+pub fn remove_named(name: &str) -> Vec<String> {
     let path = file();
     match fs::read_to_string(&path) {
-        Ok(text) if text.contains("<unique-id>mmt-") && fs::write(&path, strip(&text)).is_ok() => {
-            vec![format!("removed the mmt actions from {}", path.display())]
+        Ok(text) if text.contains(&format!("<unique-id>{name}-")) && fs::write(&path, strip_named(&text, name)).is_ok() => {
+            vec![format!("removed the {name} actions from {}", path.display())]
         }
         _ => vec![],
     }
@@ -90,15 +101,15 @@ mod tests {
     #[test]
     fn merge_keeps_foreign_actions_and_is_idempotent() {
         let foreign = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<actions>\n<action>\n\t<name>Open Terminal</name>\n\t<unique-id>123-1</unique-id>\n\t<command>xterm</command>\n</action>\n</actions>\n";
-        let ours = actions("/bin/mmt", &Settings::default());
+        let ours = actions("/bin/cmmt", &Settings::default());
         let once = merge(Some(foreign), &ours);
         let twice = merge(Some(&once), &ours);
         assert_eq!(once, twice);
         assert!(once.contains("<unique-id>123-1</unique-id>"));
-        assert_eq!(once.matches("<unique-id>mmt-").count(), 9);
-        assert!(once.contains("<command>/bin/mmt compress %F</command>"));
+        assert_eq!(once.matches("<unique-id>cmmt-").count(), 9);
+        assert!(once.contains("<command>/bin/cmmt compress %F</command>"));
         assert!(once.contains("<video-files/>"));
-        assert!(once.contains("<unique-id>mmt-convert-audio</unique-id>"));
+        assert!(once.contains("<unique-id>cmmt-convert-audio</unique-id>"));
         assert_eq!(strip(&once), foreign);
         assert!(merge(None, &ours).starts_with("<?xml"));
     }
@@ -107,9 +118,9 @@ mod tests {
     fn follow_the_settings() {
         let mut s = with_custom();
         s.set_enabled(Action::DeleteSound, false);
-        let a = actions("/bin/mmt", &s);
-        assert!(!a.contains("mmt-delete-sound"));
-        assert!(a.contains("<unique-id>mmt-custom-gif</unique-id>") && a.contains("<command>/bin/mmt run gif %F</command>"));
-        assert!(a.contains("<unique-id>mmt-stats</unique-id>\n\t<command>/bin/mmt stats %F</command>\n\t<description>Stats</description>\n\t<patterns>*</patterns>\n\t<audio-files/>\n\t<image-files/>\n\t<video-files/>\n"));
+        let a = actions("/bin/cmmt", &s);
+        assert!(!a.contains("cmmt-delete-sound"));
+        assert!(a.contains("<unique-id>cmmt-custom-gif</unique-id>") && a.contains("<command>/bin/cmmt run gif %F</command>"));
+        assert!(a.contains("<unique-id>cmmt-stats</unique-id>\n\t<command>/bin/cmmt stats %F</command>\n\t<description>Stats</description>\n\t<patterns>*</patterns>\n\t<audio-files/>\n\t<image-files/>\n\t<video-files/>\n"));
     }
 }

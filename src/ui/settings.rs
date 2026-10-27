@@ -43,7 +43,7 @@ impl SettingsState {
             palette: syspal::detect(),
             ffmpeg_info: String::new(),
             ffprobe_info: String::new(),
-            transfer_path: paths::home_dir().join("mmt-commands.toml").display().to_string(),
+            transfer_path: paths::home_dir().join("cmmt-commands.toml").display().to_string(),
             scale_draft: None,
         };
         st.refresh_tools();

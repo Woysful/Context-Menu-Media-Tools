@@ -1,4 +1,4 @@
-//! KDE (Dolphin): service menus in ~/.local/share/kio/servicemenus/mmt-*.desktop
+//! KDE (Dolphin): service menus in ~/.local/share/kio/servicemenus/cmmt-*.desktop
 
 use super::menu::{desktop_quote, Item, STATS, SUBMENUS, VIDEO};
 use super::{remove_matching, set_executable};
@@ -25,7 +25,7 @@ pub fn files(exe: &str, s: &Settings) -> Vec<(String, String)> {
     // video: one file per item, all at the top level of the menu
     for it in VIDEO.iter().filter(|i| s.enabled(i.action)) {
         let body = action(it.id, it.name(), &format!("{exe} {} %F", it.action.cli_name()), it.icon);
-        files.push((format!("mmt-{}.desktop", it.id), head(Kind::Video.mime(), it.id, top) + &body));
+        files.push((format!("cmmt-{}.desktop", it.id), head(Kind::Video.mime(), it.id, top) + &body));
     }
 
     // audio / image: a submenu with one entry per format (no dialog) and Stats
@@ -48,7 +48,7 @@ pub fn files(exe: &str, s: &Settings) -> Vec<(String, String)> {
             body.push_str(&stats_action(&exe, &STATS));
         }
         let content = head(sub.kind.mime(), &ids.join(";"), &format!("X-KDE-Submenu={}\n", sub.name)) + &body;
-        files.push((format!("mmt-{}.desktop", sub.kind.name()), content));
+        files.push((format!("cmmt-{}.desktop", sub.kind.name()), content));
     }
 
     // own items
@@ -56,7 +56,7 @@ pub fn files(exe: &str, s: &Settings) -> Vec<(String, String)> {
         let id = format!("custom_{}", c.id);
         let kind = c.media_kind();
         let body = action(&id, &c.name, &format!("{exe} run {} %F", c.id), kind.icon());
-        files.push((format!("mmt-custom-{}.desktop", c.id), head(kind.mime(), &id, top) + &body));
+        files.push((format!("cmmt-custom-{}.desktop", c.id), head(kind.mime(), &id, top) + &body));
     }
     files
 }
@@ -82,7 +82,7 @@ pub fn install(exe: &Path, st: &Settings) -> Result<Vec<String>, String> {
         log.push(format!("removed the old {}", old_scripts.display()));
     }
     // an earlier install of our own: remove it, so items that were switched off disappear
-    remove_matching(&dir, "mmt-", ".desktop");
+    remove_matching(&dir, "cmmt-", ".desktop");
     for (name, content) in files(&exe.to_string_lossy(), st) {
         let path = dir.join(&name);
         fs::write(&path, content).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -98,7 +98,7 @@ pub fn install(exe: &Path, st: &Settings) -> Result<Vec<String>, String> {
 }
 
 pub fn uninstall() -> Vec<String> {
-    remove_matching(&dir(), "mmt-", ".desktop")
+    remove_matching(&dir(), "cmmt-", ".desktop")
 }
 
 #[cfg(test)]
@@ -109,17 +109,17 @@ mod tests {
 
     #[test]
     fn files_are_complete() {
-        let files = files("/home/u/.local/bin/mmt", &Settings::default());
+        let files = files("/home/u/.local/bin/cmmt", &Settings::default());
         assert_eq!(files.len(), 10); // 8 video items + audio + image submenus
-        let compress = &files.iter().find(|(n, _)| n == "mmt-01_compressVideo.desktop").unwrap().1;
-        assert!(compress.contains("Exec=/home/u/.local/bin/mmt compress %F"));
+        let compress = &files.iter().find(|(n, _)| n == "cmmt-01_compressVideo.desktop").unwrap().1;
+        assert!(compress.contains("Exec=/home/u/.local/bin/cmmt compress %F"));
         assert!(compress.contains("X-KDE-Priority=TopLevel"));
         assert!(compress.contains("Name=Compress Video"));
-        let audio = &files.iter().find(|(n, _)| n == "mmt-audio.desktop").unwrap().1;
+        let audio = &files.iter().find(|(n, _)| n == "cmmt-audio.desktop").unwrap().1;
         assert!(audio.contains("X-KDE-Submenu=Convert Audio"));
-        assert!(audio.contains("Exec=/home/u/.local/bin/mmt convert-audio --yes --format mp3 %F"));
+        assert!(audio.contains("Exec=/home/u/.local/bin/cmmt convert-audio --yes --format mp3 %F"));
         assert!(audio.contains("Actions=convert_wav;convert_mp3;"));
-        assert!(audio.contains("[Desktop Action stats]\nName=Stats\nExec=/home/u/.local/bin/mmt stats %F"));
+        assert!(audio.contains("[Desktop Action stats]\nName=Stats\nExec=/home/u/.local/bin/cmmt stats %F"));
     }
 
     #[test]
@@ -128,15 +128,15 @@ mod tests {
         for a in [Action::DeleteSound, Action::ConvertImage, Action::Stats] {
             s.set_enabled(a, false);
         }
-        let files = files("/bin/mmt", &s);
+        let files = files("/bin/cmmt", &s);
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(!names.contains(&"mmt-05_deleteSound.desktop"));
-        assert!(!names.contains(&"mmt-08_stats.desktop"));
-        assert!(!names.contains(&"mmt-image.desktop")); // no formats and no stats: no submenu at all
-        assert!(names.contains(&"mmt-audio.desktop"));
-        let audio = &files.iter().find(|(n, _)| n == "mmt-audio.desktop").unwrap().1;
+        assert!(!names.contains(&"cmmt-05_deleteSound.desktop"));
+        assert!(!names.contains(&"cmmt-08_stats.desktop"));
+        assert!(!names.contains(&"cmmt-image.desktop")); // no formats and no stats: no submenu at all
+        assert!(names.contains(&"cmmt-audio.desktop"));
+        let audio = &files.iter().find(|(n, _)| n == "cmmt-audio.desktop").unwrap().1;
         assert!(!audio.contains("stats"));
-        let custom = &files.iter().find(|(n, _)| n == "mmt-custom-gif.desktop").unwrap().1;
-        assert!(custom.contains("Exec=/bin/mmt run gif %F") && custom.contains("Name=Make GIF"));
+        let custom = &files.iter().find(|(n, _)| n == "cmmt-custom-gif.desktop").unwrap().1;
+        assert!(custom.contains("Exec=/bin/cmmt run gif %F") && custom.contains("Name=Make GIF"));
     }
 }

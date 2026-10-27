@@ -91,7 +91,7 @@ static EN: S = S {
     gpu_codecs_check: "List them anyway",
     ffmpeg: "ffmpeg",
     ffprobe: "ffprobe",
-    tool_hint: "Empty = next to mmt, then PATH.",
+    tool_hint: "Empty = next to cmmt, then PATH.",
     found: "found",
     not_found: "not found",
     commands: "Commands",

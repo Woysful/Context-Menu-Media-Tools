@@ -20,7 +20,7 @@ fn vendor_id(name: &str) -> Option<&'static str> {
 /// A computer can have several GPUs (e.g. an Intel iGPU plus an Nvidia card), so the
 /// vendor is looked up instead of blindly taking renderD128.
 pub fn render_node(vendor: &str) -> Option<String> {
-    render_node_in(vendor, std::path::Path::new(&std::env::var("MMT_DRM_DIR").unwrap_or_else(|_| "/sys/class/drm".into())))
+    render_node_in(vendor, std::path::Path::new(&std::env::var("CMMT_DRM_DIR").unwrap_or_else(|_| "/sys/class/drm".into())))
 }
 
 pub fn render_node_in(vendor: &str, drm_dir: &std::path::Path) -> Option<String> {
@@ -42,9 +42,9 @@ pub fn render_node_in(vendor: &str, drm_dir: &std::path::Path) -> Option<String>
 }
 
 /// Does this computer have the hardware H.264 encoder of the Raspberry Pi (Pi 3 / 4: /dev/video11)?
-/// A Raspberry Pi 5 has none. `MMT_PI=1|0` forces the answer (for testing).
+/// A Raspberry Pi 5 has none. `CMMT_PI=1|0` forces the answer (for testing).
 pub fn raspberry_pi_encoder() -> bool {
-    if let Ok(v) = std::env::var("MMT_PI") {
+    if let Ok(v) = std::env::var("CMMT_PI") {
         return v == "1";
     }
     if !cfg!(target_os = "linux") {
@@ -60,7 +60,7 @@ pub fn vendors_present() -> Option<HashSet<&'static str>> {
     if !cfg!(target_os = "linux") {
         return None;
     }
-    let dir = std::env::var("MMT_PCI_DIR").unwrap_or_else(|_| "/sys/bus/pci/devices".into());
+    let dir = std::env::var("CMMT_PCI_DIR").unwrap_or_else(|_| "/sys/bus/pci/devices".into());
     let mut found = HashSet::new();
     for dev in std::fs::read_dir(dir).ok()?.flatten() {
         let class = std::fs::read_to_string(dev.path().join("class")).unwrap_or_default();
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn finds_the_node_of_the_right_vendor() {
-        let dir = std::env::temp_dir().join(format!("mmt-drm-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cmmt-drm-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         for (node, vendor) in [("renderD128", "0x8086"), ("renderD129", "0x1002"), ("card0", "0x8086")] {
             fs::create_dir_all(dir.join(node).join("device")).unwrap();

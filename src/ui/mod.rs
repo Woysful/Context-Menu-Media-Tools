@@ -31,7 +31,7 @@ use std::sync::Arc;
 pub enum Start {
     /// The options form of the action (or straight to the job with `--yes`)
     Normal,
-    /// The Settings window (`mmt settings`, or mmt started without arguments from a file manager)
+    /// The Settings window (`cmmt settings`, or cmmt started without arguments from a file manager)
     Settings,
     /// Text of a command that has no console to print to (Windows)
     Message { title: String, lines: Vec<String>, ok: bool },
@@ -47,7 +47,7 @@ pub struct Tools {
 pub struct Launch {
     pub start: Start,
     pub action: Action,
-    /// An own menu item (`mmt run <id>`)
+    /// An own menu item (`cmmt run <id>`)
     pub custom_id: Option<String>,
     pub files: Vec<PathBuf>,
     pub cfg: Arc<Config>,
@@ -107,13 +107,13 @@ pub fn run(l: Launch) -> Result<(), String> {
             .with_inner_size([w * scale, h * scale])
             .with_min_inner_size([360.0 * scale, 160.0 * scale])
             .with_title(format!("Media Tools — {}", env.title))
-            .with_app_id("mmt")
+            .with_app_id("cmmt")
             .with_transparent(transparent),
         centered: true,
         ..Default::default()
     };
     eframe::run_native(
-        "mmt",
+        "cmmt",
         options,
         Box::new(move |cc| {
             theme::install_fonts(&cc.egui_ctx);

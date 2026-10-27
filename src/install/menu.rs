@@ -78,14 +78,14 @@ pub const SUBMENUS: [Submenu; 2] = [
 
 /// One entry of a flat menu (Thunar, PCManFM): no submenus, every item at the top
 pub struct Flat {
-    /// the name of the action in Thunar's uca.xml (after "mmt-")
+    /// the name of the action in Thunar's uca.xml (after "cmmt-")
     pub thunar_id: String,
-    /// the name of the PCManFM file (after "mmt-")
+    /// the name of the PCManFM file (after "cmmt-")
     pub file_id: String,
     pub name: String,
     pub icon: &'static str,
     pub kinds: Vec<Kind>,
-    /// the arguments of mmt, before the files
+    /// the arguments of cmmt, before the files
     pub args: String,
 }
 
@@ -144,8 +144,8 @@ mod tests {
 
     #[test]
     fn quoting() {
-        assert_eq!(desktop_quote("/home/my user/mmt"), "\"/home/my user/mmt\"");
-        assert_eq!(desktop_quote("/usr/bin/mmt"), "/usr/bin/mmt");
+        assert_eq!(desktop_quote("/home/my user/cmmt"), "\"/home/my user/cmmt\"");
+        assert_eq!(desktop_quote("/usr/bin/cmmt"), "/usr/bin/cmmt");
         assert_eq!(sh_quote("it's"), "'it'\\''s'");
         assert_eq!(xml_escape("a&<\">"), "a&amp;&lt;&quot;&gt;");
     }

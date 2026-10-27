@@ -17,7 +17,7 @@ pub struct MenuSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Custom {
-    /// the name of the command `mmt run <id>`; made from the name when empty
+    /// the name of the command `cmmt run <id>`; made from the name when empty
     pub id: String,
     pub name: String,
     /// video | audio | image
@@ -105,7 +105,7 @@ impl Settings {
     pub fn save(&self) -> Result<(), String> {
         let path = paths::settings_file();
         let body = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
-        let text = format!("# Settings of mmt. The Settings window (run `mmt settings`) writes this file; you can edit it, too.\n\n{body}");
+        let text = format!("# Settings of Media Tools (cmmt). The Settings window (run `cmmt settings`) writes this file; you can edit it, too.\n\n{body}");
         write_creating_dir(&path, text.as_bytes())
     }
 
@@ -132,7 +132,7 @@ impl Settings {
     }
 }
 
-/// Every own item needs a unique id (it is the name of the command `mmt run <id>`):
+/// Every own item needs a unique id (it is the name of the command `cmmt run <id>`):
 /// an empty one is made from the name, a repeated one gets a number.
 pub fn assign_ids(items: &mut [Custom]) {
     let mut seen: Vec<String> = Vec::new();
@@ -183,7 +183,7 @@ struct Bundle {
 /// Write the own items to a file (a copy of the [[custom]] part of settings.toml)
 pub fn export_custom(items: &[Custom], path: &Path) -> Result<usize, String> {
     let text = toml::to_string_pretty(&Bundle { custom: items.to_vec() }).map_err(|e| e.to_string())?;
-    let header = "# Own menu items of mmt (Settings > Menu > Import reads this file)\n\n";
+    let header = "# Own menu items of Media Tools (cmmt) (Settings > Menu > Import reads this file)\n\n";
     write_creating_dir(path, format!("{header}{text}").as_bytes())?;
     Ok(items.len())
 }
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn own_items_export_and_import() {
-        let dir = std::env::temp_dir().join(format!("mmt-export-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cmmt-export-{}", std::process::id()));
         let file = dir.join("items.toml");
         let items = vec![
             Custom { id: "a".into(), name: "Make GIF".into(), command: "ffmpeg -n -i {input} {output}".into(), ..Default::default() },

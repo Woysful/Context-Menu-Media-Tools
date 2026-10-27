@@ -1,9 +1,9 @@
 # =============================================================================
-#  mmt presets - the complete ffmpeg command of every function of the program.
+#  cmmt presets - the complete ffmpeg command of every function of the program.
 #
-#  This file is the built-in copy. `mmt config --init` writes it to your own file:
-#      Linux:    ~/.config/mmt/presets.toml
-#      Windows:  %APPDATA%\mmt\presets.toml
+#  This file is the built-in copy. `cmmt config --init` writes it to your own file:
+#      Linux:    ~/.config/cmmt/presets.toml
+#      Windows:  %APPDATA%\cmmt\presets.toml
 #  Edit the commands there; a change applies at the next launch. A function that
 #  is missing from your file (or a whole new program version with new presets) is taken
 #  from the built-in copy, so the file may also contain only the entries you changed.

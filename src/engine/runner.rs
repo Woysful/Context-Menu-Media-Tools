@@ -14,7 +14,7 @@ pub(super) struct TempDir(PathBuf);
 impl TempDir {
     pub fn new() -> Result<TempDir, String> {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
-        let path = std::env::temp_dir().join(format!("mmt-{}-{}", std::process::id(), nanos));
+        let path = std::env::temp_dir().join(format!("cmmt-{}-{}", std::process::id(), nanos));
         std::fs::create_dir_all(&path).map_err(|e| format!("temp dir: {e}"))?;
         Ok(TempDir(path))
     }

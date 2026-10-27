@@ -13,7 +13,7 @@ const QUIET: Duration = Duration::from_millis(700);
 const STALE_LOCK: Duration = Duration::from_secs(60);
 
 fn spool_dir(action: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("mmt-batch-{action}"))
+    std::env::temp_dir().join(format!("cmmt-batch-{action}"))
 }
 
 /// Returns Some(all files) in the leader process, None in the followers.
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn only_one_process_wins_and_it_gets_every_file() {
-        let dir = std::env::temp_dir().join(format!("mmt-batch-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cmmt-batch-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let mut handles = Vec::new();
         for i in 0..6 {

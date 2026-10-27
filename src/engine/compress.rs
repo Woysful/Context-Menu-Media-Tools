@@ -164,7 +164,7 @@ pub(super) fn limit(job: &Job, file: &Path, info: &Info, codec: &Codec, mb: f64,
     let dur = info.duration.filter(|d| *d > 0.0).unwrap_or(1.0);
     let fps = info.fps.unwrap_or(30.0);
 
-    let chunked = match std::env::var("MMT_CHUNKED").as_deref() {
+    let chunked = match std::env::var("CMMT_CHUNKED").as_deref() {
         Ok("1") => true,
         Ok("0") => false,
         _ => codec.chunked,
