@@ -55,6 +55,9 @@ Start `cmmt` without arguments or open **Media Tools** from the application menu
 Here you set the theme, accent colour and interface scale, turn off menu items you don't need, add your own items
 with any ffmpeg command, and set the paths to ffmpeg / ffprobe.
 
+Once a day the Settings window checks GitHub for a newer release (with `curl`).
+If there is one, a dot and a link appear above the version number. You can turn this off under *General → Updates*.
+
 Settings are stored in `~/.config/cmmt/` (Windows: `%APPDATA%\cmmt\`).
 
 ## Editing the commands

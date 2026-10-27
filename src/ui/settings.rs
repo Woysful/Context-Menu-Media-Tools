@@ -12,6 +12,7 @@ use crate::settings::{self, Custom, Settings};
 use crate::syspal::{self, Palette};
 use crate::theme::{self, bold, c, CONTROL_H};
 use crate::units;
+use crate::update;
 use eframe::egui::{self, pos2, vec2, Align, Color32, FontId, Layout, Margin, Rect, RichText, Sense, Stroke};
 use std::path::Path;
 
@@ -29,6 +30,7 @@ pub struct SettingsState {
     auto_close_text: String,
     /// the interface scale while its slider is dragged
     scale_draft: Option<f64>,
+    update: update::Checker,
 }
 
 impl SettingsState {
@@ -45,6 +47,7 @@ impl SettingsState {
             ffprobe_info: String::new(),
             transfer_path: paths::home_dir().join("cmmt-commands.toml").display().to_string(),
             scale_draft: None,
+            update: update::Checker::default(),
         };
         st.refresh_tools();
         st
@@ -249,8 +252,16 @@ pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Comm
                     st.tab = i;
                 }
             }
+            let repaint = {
+                let ctx = ctx.clone();
+                move || ctx.request_repaint()
+            };
+            let release = st.update.poll(st.s.check_updates, repaint).cloned();
             ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                 ui.label(RichText::new(format!("{} {}", ts.version, env!("CARGO_PKG_VERSION"))).small().color(k.muted));
+                if let Some(r) = release {
+                    update_notice(ui, &r);
+                }
             });
         },
     );
@@ -274,6 +285,20 @@ pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Comm
     pressed
 }
 
+/// A small accent dot and "Version x is out"; a click opens the page of the release
+fn update_notice(ui: &mut egui::Ui, r: &update::Release) {
+    let k = c();
+    ui.horizontal(|ui| {
+        let (dot, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
+        ui.painter().circle_filled(dot.center(), 4.0, k.accent);
+        let text = si::s().update_available.replace("{}", &r.version);
+        let link = ui.add(egui::Link::new(RichText::new(text).small().color(k.accent)));
+        if link.on_hover_text(&r.url).clicked() {
+            proc::open_path(Path::new(&r.url));
+        }
+    });
+}
+
 fn general_page(ui: &mut egui::Ui, st: &mut SettingsState, pressed: &mut Option<Command>) {
     let ts = si::s();
     let close_ok = units::parse_decimal(&st.auto_close_text).filter(|v| (0.0..=3600.0).contains(v));
@@ -283,6 +308,9 @@ fn general_page(ui: &mut egui::Ui, st: &mut SettingsState, pressed: &mut Option<
     }
     setting_row(ui, ts.gpu_codecs, ts.gpu_codecs_hint, |ui| {
         ui.checkbox(&mut st.s.show_all_gpus, ts.gpu_codecs_check);
+    });
+    setting_row(ui, ts.updates, ts.updates_hint, |ui| {
+        ui.checkbox(&mut st.s.check_updates, ts.updates_check);
     });
     let mut changed = false;
     for (title, path, info) in [(ts.ffmpeg, &mut st.s.ffmpeg, &st.ffmpeg_info), (ts.ffprobe, &mut st.s.ffprobe, &st.ffprobe_info)] {

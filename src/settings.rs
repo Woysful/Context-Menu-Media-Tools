@@ -63,6 +63,8 @@ pub struct Settings {
     pub show_all_gpus: bool,
     /// GNOME: "01 Compress Video" ... instead of plain names (Files sorts scripts by name)
     pub numbered_scripts: bool,
+    /// look for a newer version on GitHub (once a day, when the Settings window opens)
+    pub check_updates: bool,
     pub ffmpeg: String,
     pub ffprobe: String,
     pub menu: MenuSettings,
@@ -81,6 +83,7 @@ impl Default for Settings {
             auto_close: 4.0,
             show_all_gpus: false,
             numbered_scripts: false,
+            check_updates: true,
             ffmpeg: String::new(),
             ffprobe: String::new(),
             menu: MenuSettings::default(),

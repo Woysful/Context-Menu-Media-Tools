@@ -21,6 +21,7 @@ mod syspal;
 mod theme;
 mod ui;
 mod units;
+mod update;
 
 use action::Action;
 use config::Config;
