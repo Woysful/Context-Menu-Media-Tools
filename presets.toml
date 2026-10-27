@@ -1,0 +1,639 @@
+# =============================================================================
+#  mmt presets - the complete ffmpeg command of every function of the program.
+#
+#  This file is the built-in copy. `mmt config --init` writes it to your own file:
+#      Linux:    ~/.config/mmt/presets.toml
+#      Windows:  %APPDATA%\mmt\presets.toml
+#  Edit the commands there; a change applies at the next launch. A function that
+#  is missing from your file (or a whole new program version with new presets) is taken
+#  from the built-in copy, so the file may also contain only the entries you changed.
+#
+#  A `command` is a normal ffmpeg command line (quotes work like in a shell). The program
+#  fills the placeholders:
+#
+#      {input}   the file; {output}  the result (named by `output`, never overwrites a file)
+#      {vf}      "-vf <filters>" for the chosen resolution, or nothing
+#      {scale}   the same filters as a prefix with a trailing comma, for your own -vf chain
+#      {q} {p}   values of the compression level (low / medium / high) of the entry
+#      {render_node}   the GPU device of AMD / Intel (VAAPI)
+#      size limit mode only:
+#      {rate}    -b:v -maxrate -bufsize (computed from the limit)   {pass}   two-pass options
+#      {audio}   audio options (or -an)   {seek}   -ss / -t of a chunk   {overwrite}   -n or -y
+#      {fps} {quality} {compression} {size}      WebP animation
+#
+#  `output` is the name of the result: {base} = path of the file without extension,
+#  {name} = its name, {dir} = its folder, {srcext} = its extension, {ext} = extension
+#  of the chosen format, {fmt} = key of the format, {mb} = the size limit.
+#  Other keys: label (what the drop-down shows), group, backend, q / p, rc_max, rc_buf,
+#  aim, bpp_min, twopass, chunked - see README.md.
+#  An entry can have [entry.windows] / [entry.linux] sub-tables that override it on
+#  that system only (used for the AMD / Intel GPUs: VAAPI on Linux, AMF / QSV on Windows).
+# =============================================================================
+
+# ------------------------------------------------------------------ Compress Video: presets
+# group: cpu | nvidia | amd | intel | pi     backend: cpu | nvenc | vaapi | amf | qsv | v4l2m2m
+
+[compress.h264_cpu]
+label = "H.264"
+group = "cpu"
+backend = "cpu"
+command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx264 -profile:v main -crf {q} {output}'
+output = "{base}_compressed.mp4"
+q = [22, 30, 35]
+
+[compress.h265_cpu]
+label = "HEVC"
+group = "cpu"
+backend = "cpu"
+command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx265 -profile:v main -crf {q} -tag:v hvc1 {output}'
+output = "{base}_compressed.mp4"
+q = [22, 30, 35]
+
+[compress.av1_cpu_fast]
+label = "AV1 Fast"
+group = "cpu"
+backend = "cpu"
+command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {output}'
+output = "{base}_compressed.mp4"
+q = [32, 44, 55]
+p = [7, 7, 5]
+
+[compress.av1_cpu_slow]
+label = "AV1 Slow"
+group = "cpu"
+backend = "cpu"
+command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {output}'
+output = "{base}_compressed.mp4"
+q = [32, 44, 55]
+p = [5, 5, 4]
+
+[compress.h264_nv]
+label = "H.264"
+group = "nvidia"
+backend = "nvenc"
+command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v h264_nvenc -profile:v main -cq {q} -preset p7 {output}'
+output = "{base}_compressed.mp4"
+q = [29, 37, 41]
+
+[compress.h265_nv]
+label = "HEVC"
+group = "nvidia"
+backend = "nvenc"
+command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v hevc_nvenc -profile:v main -cq {q} -preset p7 -tag:v hvc1 {output}'
+output = "{base}_compressed.mp4"
+q = [28, 37, 43]
+
+[compress.av1_nv]
+label = "AV1"
+group = "nvidia"
+backend = "nvenc"
+command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v av1_nvenc -cq {q} -preset p7 {output}'
+output = "{base}_compressed.mp4"
+q = [37, 47, 56]
+
+[compress.h264_amd]
+label = "H.264"
+group = "amd"
+backend = "vaapi"
+vendor = "amd"
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {output}'
+output = "{base}_compressed.mp4"
+q = [29, 37, 41]
+[compress.h264_amd.windows]
+backend = "amf"
+command = 'ffmpeg -n -i {input} {vf} -c:v h264_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -qp_b {q} {output}'
+
+[compress.h265_amd]
+label = "HEVC"
+group = "amd"
+backend = "vaapi"
+vendor = "amd"
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {output}'
+output = "{base}_compressed.mp4"
+q = [28, 37, 43]
+[compress.h265_amd.windows]
+backend = "amf"
+command = 'ffmpeg -n -i {input} {vf} -c:v hevc_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -tag:v hvc1 {output}'
+
+[compress.av1_amd]
+label = "AV1"
+group = "amd"
+backend = "vaapi"
+vendor = "amd"
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {output}'
+output = "{base}_compressed.mp4"
+q = [37, 47, 56]
+[compress.av1_amd.windows]
+backend = "amf"
+command = 'ffmpeg -n -i {input} {vf} -c:v av1_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} {output}'
+
+[compress.h264_intel]
+label = "H.264"
+group = "intel"
+backend = "vaapi"
+vendor = "intel"
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {output}'
+output = "{base}_compressed.mp4"
+q = [29, 37, 41]
+[compress.h264_intel.windows]
+backend = "qsv"
+command = 'ffmpeg -n -i {input} {vf} -c:v h264_qsv -profile:v main -preset slower -global_quality {q} {output}'
+
+[compress.h265_intel]
+label = "HEVC"
+group = "intel"
+backend = "vaapi"
+vendor = "intel"
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {output}'
+output = "{base}_compressed.mp4"
+q = [28, 37, 43]
+[compress.h265_intel.windows]
+backend = "qsv"
+command = 'ffmpeg -n -i {input} {vf} -c:v hevc_qsv -preset slower -global_quality {q} -tag:v hvc1 {output}'
+
+[compress.av1_intel]
+label = "AV1"
+group = "intel"
+backend = "vaapi"
+vendor = "intel"
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {output}'
+output = "{base}_compressed.mp4"
+q = [37, 47, 56]
+[compress.av1_intel.windows]
+backend = "qsv"
+command = 'ffmpeg -n -i {input} {vf} -c:v av1_qsv -preset slower -global_quality {q} {output}'
+
+[compress.h264_pi]
+label = "H.264"
+group = "pi"
+backend = "v4l2m2m"
+command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v h264_v4l2m2m -b:v {q} {output}'
+output = "{base}_compressed.mp4"
+q = ["8M", "4M", "2M"]
+
+# The hardware encoder of the Raspberry Pi 3 / 4 has no quality mode, so the levels are bitrates.
+# (a Raspberry Pi 5 has no hardware video encoder: use the CPU codecs there)
+
+# ------------------------------------------------------------------ Compress Video: size limit
+# The bitrate is computed from the size limit and given to the command as {rate}. Parameters:
+#   rc_max / rc_buf  maxrate / bufsize as % of the target bitrate
+#   aim              % of the limit that is really aimed at (reserve against rate-control error)
+#   bpp_min          bits per pixel below which "Auto" resolution scales the picture down
+#   twopass          "x264" | "x265" = the entry supports the two-pass option ({pass})
+#   chunked          true = hardware encoders: encoded in chunks with feedback so the size is exact
+#                    (the same command is run once per chunk, with {seek} and {overwrite} filled in)
+# Presets (preset = true) are listed above the codecs; `inherit` copies another entry.
+
+[limit.discord]
+preset = true
+label = "Discord — 20 MB, HEVC (CPU)"
+inherit = "h265_cpu"
+limit = 20
+output = "{base}_discord.mp4"
+
+[limit.h264_cpu]
+label = "H.264"
+group = "cpu"
+backend = "cpu"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libx264 -profile:v main -pix_fmt yuv420p -preset medium {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_h264cpu.mp4"
+rc_max = 200
+rc_buf = 600
+aim = 99.0
+bpp_min = 0.07
+twopass = "x264"
+
+[limit.h265_cpu]
+label = "HEVC"
+group = "cpu"
+backend = "cpu"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium -tag:v hvc1 {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_hevccpu.mp4"
+rc_max = 200
+rc_buf = 600
+aim = 98.5
+bpp_min = 0.05
+twopass = "x265"
+
+[limit.av1_cpu]
+label = "AV1"
+group = "cpu"
+backend = "cpu"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libsvtav1 -preset 6 -pix_fmt yuv420p {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_av1cpu.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 96.0
+bpp_min = 0.05
+
+[limit.h264_nv]
+label = "H.264"
+group = "nvidia"
+backend = "nvenc"
+command = 'ffmpeg {overwrite} -hwaccel cuda -hwaccel_output_format cuda {seek} -i {input} {vf} -c:v h264_nvenc -profile:v main -preset p7 -rc:v vbr {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_h264gpu.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.07
+chunked = true
+
+[limit.h265_nv]
+label = "HEVC"
+group = "nvidia"
+backend = "nvenc"
+command = 'ffmpeg {overwrite} -hwaccel cuda -hwaccel_output_format cuda {seek} -i {input} {vf} -c:v hevc_nvenc -profile:v main -preset p7 -rc:v vbr -tag:v hvc1 {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_hevcgpu.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.05
+chunked = true
+
+[limit.av1_nv]
+label = "AV1"
+group = "nvidia"
+backend = "nvenc"
+command = 'ffmpeg {overwrite} -hwaccel cuda -hwaccel_output_format cuda {seek} -i {input} {vf} -c:v av1_nvenc -preset p7 -rc:v vbr {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_av1gpu.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.05
+chunked = true
+
+[limit.h264_amd]
+label = "H.264"
+group = "amd"
+backend = "vaapi"
+vendor = "amd"
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_h264amd.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.07
+chunked = true
+[limit.h264_amd.windows]
+backend = "amf"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v h264_amf -quality quality -rc vbr_peak {rate} {pass} {audio} {output}'
+
+[limit.h265_amd]
+label = "HEVC"
+group = "amd"
+backend = "vaapi"
+vendor = "amd"
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -tag:v hvc1 {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_h265amd.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.05
+chunked = true
+[limit.h265_amd.windows]
+backend = "amf"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v hevc_amf -quality quality -rc vbr_peak -tag:v hvc1 {rate} {pass} {audio} {output}'
+
+[limit.av1_amd]
+label = "AV1"
+group = "amd"
+backend = "vaapi"
+vendor = "amd"
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_av1amd.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.05
+chunked = true
+[limit.av1_amd.windows]
+backend = "amf"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v av1_amf -quality quality -rc vbr_peak {rate} {pass} {audio} {output}'
+
+[limit.h264_intel]
+label = "H.264"
+group = "intel"
+backend = "vaapi"
+vendor = "intel"
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_h264intel.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.07
+chunked = true
+[limit.h264_intel.windows]
+backend = "qsv"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v h264_qsv -profile:v main -preset slower {rate} {pass} {audio} {output}'
+
+[limit.h265_intel]
+label = "HEVC"
+group = "intel"
+backend = "vaapi"
+vendor = "intel"
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -tag:v hvc1 {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_h265intel.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.05
+chunked = true
+[limit.h265_intel.windows]
+backend = "qsv"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v hevc_qsv -preset slower -tag:v hvc1 {rate} {pass} {audio} {output}'
+
+[limit.av1_intel]
+label = "AV1"
+group = "intel"
+backend = "vaapi"
+vendor = "intel"
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_av1intel.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.05
+chunked = true
+[limit.av1_intel.windows]
+backend = "qsv"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v av1_qsv -preset slower {rate} {pass} {audio} {output}'
+
+[limit.h264_pi]
+label = "H.264"
+group = "pi"
+backend = "v4l2m2m"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -pix_fmt yuv420p -c:v h264_v4l2m2m {rate} {pass} {audio} {output}'
+output = "{base}_limit_{mb}MB_h264pi.mp4"
+rc_max = 145
+rc_buf = 200
+aim = 98.0
+bpp_min = 0.07
+chunked = true
+
+
+# ------------------------------------------------------------------ Convert Video
+# One entry per output format: `text` is what the drop-down shows, `default = true` preselects it.
+
+[video_convert.mp4]
+text = "MP4"
+ext = "mp4"
+default = true
+command = 'ffmpeg -n -i {input} -c:v copy -c:a aac {output}'
+output = "{base}.{ext}"
+
+[video_convert.avi]
+text = "AVI"
+ext = "avi"
+command = 'ffmpeg -n -i {input} -c:v mpeg4 -q:v 2 {output}'
+output = "{base}.{ext}"
+
+[video_convert.mov]
+text = "MOV"
+ext = "mov"
+command = 'ffmpeg -n -i {input} -c:v copy {output}'
+output = "{base}.{ext}"
+
+[video_convert.mkv]
+text = "MKV"
+ext = "mkv"
+command = 'ffmpeg -n -i {input} -c:v copy -c:a copy {output}'
+output = "{base}.{ext}"
+
+[video_convert.m4v]
+text = "M4V"
+ext = "m4v"
+command = 'ffmpeg -n -i {input} -c:v copy -c:a aac {output}'
+output = "{base}.{ext}"
+
+[video_convert.webm]
+text = "WebM"
+ext = "webm"
+command = 'ffmpeg -n -i {input} -c:v libvpx-vp9 -c:a libopus {output}'
+output = "{base}.{ext}"
+
+# ------------------------------------------------------------------ Convert Audio (of a video)
+# The video is copied, the audio tracks are re-encoded; the container of the source is kept
+# (clip.mkv -> clip_audio_mp3.mkv).
+
+[video_audio.wav]
+text = "WAV"
+ext = "wav"
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a pcm_s16le {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+[video_audio.mp3]
+text = "MP3"
+ext = "mp3"
+default = true
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a mp3 -b:a 192k {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+[video_audio.flac]
+text = "FLAC"
+ext = "flac"
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a flac {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+[video_audio.aac]
+text = "AAC"
+ext = "aac"
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+[video_audio.ogg]
+text = "OGG"
+ext = "ogg"
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a libvorbis -q:a 0 {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+[video_audio.wma]
+text = "WMA"
+ext = "wma"
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a wmav2 -b:a 192k {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+[video_audio.m4a]
+text = "M4A"
+ext = "m4a"
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a aac -b:a 192k {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+[video_audio.opus]
+text = "Opus"
+ext = "opus"
+command = 'ffmpeg -n -i {input} -map 0:v -c:v copy -map 0:a -c:a libopus -q:a 0 {output}'
+output = "{base}_audio_{fmt}.{srcext}"
+
+# ------------------------------------------------------------------ Extract Audio
+
+[extract.mp3]
+text = "MP3"
+ext = "mp3"
+default = true
+command = 'ffmpeg -n -i {input} -vn -q:a 0 {output}'
+output = "{base}.{ext}"
+
+[extract.aac]
+text = "AAC"
+ext = "aac"
+command = 'ffmpeg -n -i {input} -vn -c copy {output}'
+output = "{base}.{ext}"
+
+[extract.opus]
+text = "Opus"
+ext = "opus"
+command = 'ffmpeg -n -i {input} -vn -c:a libopus -q:a 0 -vbr on {output}'
+output = "{base}.{ext}"
+
+[extract.wav]
+text = "WAV"
+ext = "wav"
+command = 'ffmpeg -n -i {input} -vn -q:a 0 {output}'
+output = "{base}.{ext}"
+
+[extract.m4a]
+text = "M4A"
+ext = "m4a"
+command = 'ffmpeg -n -i {input} -vn -q:a 0 -map a -map_metadata 0 {output}'
+output = "{base}.{ext}"
+
+[extract.mka]
+text = "MKA"
+ext = "mka"
+command = 'ffmpeg -n -i {input} -vn -c:a copy -map a -map_metadata 0 {output}'
+output = "{base}.{ext}"
+
+# ------------------------------------------------------------------ Make frame sequence
+# The frames go into a folder named like the video ({base}); an existing folder is never reused.
+
+[frames.png]
+text = "PNG"
+ext = "png"
+default = true
+command = 'ffmpeg -n -i {input} {output}'
+output = "{base}/frame_%06d.{ext}"
+
+[frames.jpg]
+text = "JPG"
+ext = "jpg"
+command = 'ffmpeg -n -i {input} -q:v 1 {output}'
+output = "{base}/frame_%06d.{ext}"
+
+[frames.webp]
+text = "WebP"
+ext = "webp"
+command = 'ffmpeg -n -i {input} -c:v libwebp -q:v 95 -pix_fmt yuva420p {output}'
+output = "{base}/frame_%06d.{ext}"
+
+# ------------------------------------------------------------------ Convert Audio (audio files)
+
+[audio_file.wav]
+text = "WAV"
+ext = "wav"
+command = 'ffmpeg -n -i {input} -c:a pcm_s16le {output}'
+output = "{base}.{ext}"
+
+[audio_file.mp3]
+text = "MP3"
+ext = "mp3"
+default = true
+command = 'ffmpeg -n -i {input} -ab 192k -map_metadata 0 -id3v2_version 3 {output}'
+output = "{base}.{ext}"
+
+[audio_file.flac]
+text = "FLAC"
+ext = "flac"
+command = 'ffmpeg -n -i {input} -c:a flac {output}'
+output = "{base}.{ext}"
+
+[audio_file.aac]
+text = "AAC"
+ext = "aac"
+command = 'ffmpeg -n -i {input} -c:a aac -b:a 192k {output}'
+output = "{base}.{ext}"
+
+[audio_file.ogg]
+text = "OGG"
+ext = "ogg"
+command = 'ffmpeg -n -i {input} -c:a libvorbis -q:a 0 {output}'
+output = "{base}.{ext}"
+
+[audio_file.wma]
+text = "WMA"
+ext = "wma"
+command = 'ffmpeg -n -i {input} -c:a wmav2 -b:a 192k {output}'
+output = "{base}.{ext}"
+
+[audio_file.m4a]
+text = "M4A"
+ext = "m4a"
+command = 'ffmpeg -n -i {input} -c:a aac -b:a 192k {output}'
+output = "{base}.{ext}"
+
+[audio_file.opus]
+text = "Opus"
+ext = "opus"
+command = 'ffmpeg -n -i {input} -q:a 0 -c:a libopus {output}'
+output = "{base}.{ext}"
+
+# ------------------------------------------------------------------ Convert Image
+
+[image.jpg]
+text = "JPG"
+ext = "jpg"
+default = true
+command = 'ffmpeg -n -i {input} -q:v 5 {output}'
+output = "{base}.{ext}"
+
+[image.png]
+text = "PNG"
+ext = "png"
+command = 'ffmpeg -n -i {input} {output}'
+output = "{base}.{ext}"
+
+[image.bmp]
+text = "BMP"
+ext = "bmp"
+command = 'ffmpeg -n -i {input} {output}'
+output = "{base}.{ext}"
+
+[image.tiff]
+text = "TIFF"
+ext = "tiff"
+command = 'ffmpeg -n -i {input} {output}'
+output = "{base}.{ext}"
+
+[image.gif]
+text = "GIF"
+ext = "gif"
+command = 'ffmpeg -n -i {input} -f gif {output}'
+output = "{base}.{ext}"
+
+[image.webp]
+text = "WebP"
+ext = "webp"
+command = 'ffmpeg -n -i {input} -c:v libwebp -q:v 95 {output}'
+output = "{base}.{ext}"
+
+[image.tga]
+text = "TGA"
+ext = "tga"
+command = 'ffmpeg -n -i {input} {output}'
+output = "{base}.{ext}"
+
+# ------------------------------------------------------------------ Delete sound
+
+[delete_sound]
+command = 'ffmpeg -n -i {input} -an -c copy {output}'
+output = "{base} (no audio).{srcext}"
+
+# ------------------------------------------------------------------ Convert to WebP animation
+# size / fps / quality / compression preselect the dialog. {size} limits the SHORTER side of the picture.
+
+[webp_anim]
+size = 720
+fps = 20
+quality = 80
+compression = 5
+command = '''ffmpeg -n -i {input} -an -vf "fps={fps},scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos" -c:v libwebp -quality {quality} -compression_level {compression} -loop 0 {output}'''
+output = "{base}.webp"
