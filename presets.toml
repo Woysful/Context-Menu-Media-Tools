@@ -16,9 +16,10 @@
 #      {scale}   the same filters as a prefix with a trailing comma, for your own -vf chain
 #      {q} {p}   values of the compression level (low / medium / high) of the entry
 #      {render_node}   the GPU device of AMD / Intel (VAAPI)
+#      {audio}   Compress Video: the options of the Audio choice ([compress_audio], or -an)
 #      size limit mode only:
 #      {rate}    -b:v -maxrate -bufsize (computed from the limit)   {pass}   two-pass options
-#      {audio}   audio options (or -an)   {seek}   -ss / -t of a chunk   {overwrite}   -n or -y
+#      {seek}    -ss / -t of a chunk   {overwrite}   -n or -y
 #      {fps} {quality} {compression} {size}      WebP animation
 #
 #  `output` is the name of the result: {base} = path of the file without extension,
@@ -37,7 +38,7 @@
 label = "H.264"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx264 -profile:v main -crf {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx264 -profile:v main -crf {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [22, 30, 35]
 
@@ -45,7 +46,7 @@ q = [22, 30, 35]
 label = "HEVC"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx265 -profile:v main -crf {q} -tag:v hvc1 {output}'
+command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx265 -profile:v main -crf {q} -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [22, 30, 35]
 
@@ -53,7 +54,7 @@ q = [22, 30, 35]
 label = "AV1 Fast"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [32, 44, 55]
 p = [7, 7, 5]
@@ -62,7 +63,7 @@ p = [7, 7, 5]
 label = "AV1 Slow"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [32, 44, 55]
 p = [5, 5, 4]
@@ -71,7 +72,7 @@ p = [5, 5, 4]
 label = "H.264"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v h264_nvenc -profile:v main -cq {q} -preset p7 {output}'
+command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v h264_nvenc -profile:v main -cq {q} -preset p7 {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [29, 37, 41]
 
@@ -79,7 +80,7 @@ q = [29, 37, 41]
 label = "HEVC"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v hevc_nvenc -profile:v main -cq {q} -preset p7 -tag:v hvc1 {output}'
+command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v hevc_nvenc -profile:v main -cq {q} -preset p7 -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [28, 37, 43]
 
@@ -87,7 +88,7 @@ q = [28, 37, 43]
 label = "AV1"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v av1_nvenc -cq {q} -preset p7 {output}'
+command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v av1_nvenc -cq {q} -preset p7 {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [37, 47, 56]
 
@@ -96,78 +97,78 @@ label = "H.264"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [29, 37, 41]
 [compress.h264_amd.windows]
 backend = "amf"
-command = 'ffmpeg -n -i {input} {vf} -c:v h264_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -qp_b {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v h264_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -qp_b {q} {audio} {output}'
 
 [compress.h265_amd]
 label = "HEVC"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [28, 37, 43]
 [compress.h265_amd.windows]
 backend = "amf"
-command = 'ffmpeg -n -i {input} {vf} -c:v hevc_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -tag:v hvc1 {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v hevc_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -tag:v hvc1 {audio} {output}'
 
 [compress.av1_amd]
 label = "AV1"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [37, 47, 56]
 [compress.av1_amd.windows]
 backend = "amf"
-command = 'ffmpeg -n -i {input} {vf} -c:v av1_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v av1_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} {audio} {output}'
 
 [compress.h264_intel]
 label = "H.264"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [29, 37, 41]
 [compress.h264_intel.windows]
 backend = "qsv"
-command = 'ffmpeg -n -i {input} {vf} -c:v h264_qsv -profile:v main -preset slower -global_quality {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v h264_qsv -profile:v main -preset slower -global_quality {q} {audio} {output}'
 
 [compress.h265_intel]
 label = "HEVC"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [28, 37, 43]
 [compress.h265_intel.windows]
 backend = "qsv"
-command = 'ffmpeg -n -i {input} {vf} -c:v hevc_qsv -preset slower -global_quality {q} -tag:v hvc1 {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v hevc_qsv -preset slower -global_quality {q} -tag:v hvc1 {audio} {output}'
 
 [compress.av1_intel]
 label = "AV1"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = [37, 47, 56]
 [compress.av1_intel.windows]
 backend = "qsv"
-command = 'ffmpeg -n -i {input} {vf} -c:v av1_qsv -preset slower -global_quality {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v av1_qsv -preset slower -global_quality {q} {audio} {output}'
 
 [compress.h264_pi]
 label = "H.264"
 group = "pi"
 backend = "v4l2m2m"
-command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v h264_v4l2m2m -b:v {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v h264_v4l2m2m -b:v {q} {audio} {output}'
 output = "{base}_compressed.mp4"
 q = ["8M", "4M", "2M"]
 
@@ -370,6 +371,40 @@ aim = 98.0
 bpp_min = 0.07
 chunked = true
 
+
+# ------------------------------------------------------------------ Compress Video: audio
+# The Audio list of Compress Video, for both tabs. `args` are the ffmpeg options of the audio
+# tracks; the program puts them into the commands as {audio}, together with -map options that
+# keep the video and every audio track. {bitrate} in `args` is `bitrate` with the presets and the
+# bitrate computed from the limit in the size limit mode (shared by the tracks). Without
+# {bitrate} (copy, FLAC) the size limit mode makes the audio first, so its size is known.
+# `fallback`: the entry used for a file whose tracks cannot be copied into an MP4 (WMA, PCM, ...).
+# The first entry (or the one with `default = true`) is preselected.
+
+[compress_audio.copy]
+label = "Copy"
+args = '-c:a copy'
+fallback = "aac"
+default = true
+
+[compress_audio.aac]
+label = "AAC"
+args = '-c:a aac -b:a {bitrate}'
+bitrate = "160k"
+
+[compress_audio.opus]
+label = "Opus"
+args = '-c:a libopus -b:a {bitrate}'
+bitrate = "128k"
+
+[compress_audio.mp3]
+label = "MP3"
+args = '-c:a libmp3lame -b:a {bitrate}'
+bitrate = "192k"
+
+[compress_audio.flac]
+label = "FLAC"
+args = '-c:a flac -strict -2'
 
 # ------------------------------------------------------------------ Convert Video
 # One entry per output format: `text` is the name the window shows, `hint` a few words next to it,

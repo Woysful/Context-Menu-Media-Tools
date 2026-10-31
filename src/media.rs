@@ -75,6 +75,8 @@ pub struct Info {
     pub bitrate_estimated: bool,
     pub audio_bps: Option<f64>,
     pub has_audio: bool,
+    /// codec_name of every audio track
+    pub audio_codecs: Vec<String>,
 }
 
 fn num(v: Option<&Value>) -> Option<f64> {
@@ -103,6 +105,7 @@ pub fn parse_probe(name: &str, json: &str) -> Option<Info> {
     let mut info = Info { name: name.to_string(), has_audio: audio.is_some(), ..Default::default() };
     info.duration = num(fmt.and_then(|f| f.get("duration"))).or_else(|| num(video.and_then(|v| v.get("duration"))));
     info.audio_bps = audio.and_then(|a| num(a.get("bit_rate")));
+    info.audio_codecs = streams.iter().filter(|s| s["codec_type"] == "audio").map(|s| s["codec_name"].as_str().unwrap_or_default().to_string()).collect();
 
     if let Some(v) = video {
         let mut w = num(v.get("width")).unwrap_or(0.0) as u32;
@@ -169,7 +172,7 @@ mod tests {
     const SAMPLE: &str = r#"{"streams":[
         {"codec_type":"video","width":1080,"height":1920,"avg_frame_rate":"30/1","bit_rate":"6100000",
          "side_data_list":[{"rotation":-90}]},
-        {"codec_type":"audio","bit_rate":"69000"}],
+        {"codec_type":"audio","codec_name":"aac","bit_rate":"69000"}],
         "format":{"duration":"6.0","size":"5000000"}}"#;
 
     #[test]
@@ -179,6 +182,7 @@ mod tests {
         assert_eq!(i.fps, Some(30.0));
         assert_eq!(i.duration, Some(6.0));
         assert!(i.has_audio);
+        assert_eq!(i.audio_codecs, ["aac"]);
         assert_eq!(describe(&i, "audio"), "1920×1080 · 30 fps · 6.1 Mbit/s · audio 69 kbit/s · 0:06");
     }
 

@@ -57,6 +57,7 @@ Options:
   --limit MB         compress: fit the result into this size
   --scale S          compress: orig | auto | 720p | 50% | x0.5 ...
   --twopass          compress with --limit: two-pass encoding (CPU H.264 / HEVC)
+  --audio A          compress: copy | aac | opus | mp3 | flac (keys of [compress_audio])
   --size N --fps N --quality N --compression N          webp
 ";
 
@@ -69,7 +70,7 @@ struct Cli {
 
 impl Cli {
     fn parse(args: Vec<String>) -> Cli {
-        const WITH_VALUE: &[&str] = &["format", "level", "codec", "limit", "scale", "size", "fps", "quality", "compression"];
+        const WITH_VALUE: &[&str] = &["format", "level", "codec", "limit", "scale", "audio", "size", "fps", "quality", "compression"];
         let mut it = args.into_iter();
         let mut cli = Cli { action: it.next().unwrap_or_default(), files: vec![], opts: HashMap::new(), flags: vec![] };
         while let Some(a) = it.next() {
@@ -121,6 +122,10 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
         Some(s) => ScaleMode::from_code(s).or_else(|| scale::parse_typed(s)).ok_or_else(|| format!("bad --scale: {s}"))?,
         None => ScaleMode::Orig,
     };
+    let audio = cli.opt("audio").unwrap_or(cfg.default_audio()).to_string();
+    if cfg.audio_codec(&audio).is_none() {
+        return Err(format!("bad --audio: {audio}"));
+    }
     if let Some(what) = action.convert_kind(first_kind) {
         let format = cli.opt("format").or_else(|| cfg.default_format(what)).ok_or("no formats")?;
         return Ok(Request::Convert { what, format: format.to_string() });
@@ -129,7 +134,7 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
         Action::Compress => match cli.opt("limit") {
             Some(l) => {
                 let mb = units::parse_decimal(l).filter(|v| *v > 0.0).ok_or_else(|| format!("bad --limit: {l}"))?;
-                Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass") }
+                Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass"), audio }
             }
             None => {
                 let level = match cli.opt("level").unwrap_or("medium") {
@@ -138,7 +143,7 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
                     "high" => 2,
                     other => return Err(format!("bad --level: {other}")),
                 };
-                Request::CompressPreset { level, codec, scale }
+                Request::CompressPreset { level, codec, scale, audio }
             }
         },
         Action::DeleteSound => Request::DeleteSound,

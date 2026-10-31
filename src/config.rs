@@ -92,6 +92,26 @@ impl Codec {
     }
 }
 
+/// An entry of the Audio list of Compress Video
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct AudioCodec {
+    pub label: String,
+    /// ffmpeg options of the audio tracks; {bitrate} = `bitrate`, or the bitrate of the size limit
+    pub args: String,
+    pub bitrate: String,
+    /// the entry for a file whose tracks cannot be copied into the result
+    pub fallback: String,
+    pub default: bool,
+}
+
+impl AudioCodec {
+    /// The options name a bitrate (else the size of the audio is only known once it is made)
+    pub fn has_bitrate(&self) -> bool {
+        crate::cmdline::placeholders(&self.args).is_ok_and(|p| p.iter().any(|x| x == "bitrate"))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct DeleteSound {
@@ -159,6 +179,7 @@ pub struct Config {
     pub settings: Settings,
     pub compress: Vec<(String, Codec)>,
     pub limit: Vec<(String, Codec)>,
+    pub audio: Vec<(String, AudioCodec)>,
     formats: [Formats; 6],
     pub delete_sound: DeleteSound,
     pub webp: WebpAnim,
@@ -303,13 +324,14 @@ impl Config {
             settings,
             compress: section(&root, "compress", &mut warnings),
             limit: section(&root, "limit", &mut warnings),
+            audio: section(&root, "compress_audio", &mut warnings),
             formats: ConvertKind::ALL.map(|k| section(&root, k.section(), &mut warnings)),
             delete_sound: single(&root, "delete_sound", &mut warnings),
             webp: single(&root, "webp_anim", &mut warnings),
             warnings,
         };
         // A user entry that merges into something unusable must not break the program
-        if cfg.compress.is_empty() || cfg.limit.is_empty() {
+        if cfg.compress.is_empty() || cfg.limit.is_empty() || cfg.audio.is_empty() {
             let mut fallback = Config::from_sources(defaults, None, cfg.settings.clone());
             fallback.warnings = cfg.warnings;
             fallback.warnings.push("the codec lists are empty, built-in presets are used".into());
@@ -357,6 +379,15 @@ impl Config {
     pub fn limit_codec(&self, key: &str) -> Option<&Codec> {
         self.limit.iter().find(|(k, _)| k == key).map(|(_, c)| c)
     }
+
+    pub fn audio_codec(&self, key: &str) -> Option<&AudioCodec> {
+        self.audio.iter().find(|(k, _)| k == key).map(|(_, a)| a)
+    }
+
+    /// The audio entry marked `default = true`, else the first one
+    pub fn default_audio(&self) -> &str {
+        self.audio.iter().find(|(_, a)| a.default).or_else(|| self.audio.first()).map_or("copy", |(k, _)| k.as_str())
+    }
 }
 
 #[cfg(test)]
@@ -379,6 +410,11 @@ mod tests {
         assert_eq!(c.webp.size, 720);
         assert_eq!(c.compress[0].0, "h264_cpu");
         assert_eq!(c.default_format(ConvertKind::Video), Some("mp4"));
+        assert_eq!(c.audio.len(), 5);
+        assert_eq!(c.default_audio(), "copy");
+        assert!(!c.audio_codec("copy").unwrap().has_bitrate() && c.audio_codec("aac").unwrap().has_bitrate());
+        assert!(c.audio_codec(&c.audio_codec("copy").unwrap().fallback).is_some());
+        assert!(c.compress.iter().all(|(_, e)| e.command.contains("{audio}")));
     }
 
     #[test]

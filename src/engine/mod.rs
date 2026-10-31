@@ -27,12 +27,15 @@ pub enum Request {
         level: usize,
         codec: String,
         scale: ScaleMode,
+        /// key of [compress_audio]
+        audio: String,
     },
     CompressLimit {
         mb: f64,
         codec: String,
         scale: ScaleMode,
         twopass: bool,
+        audio: String,
     },
     Convert {
         what: ConvertKind,
@@ -145,15 +148,15 @@ fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<String> {
     let info = media::probe(&job.ffprobe, file).unwrap_or_else(|| Info { name: short_name(file), ..Default::default() });
     let unknown = |key: &str| Failure::Error(format!("{} {key}", t.unknown_codec));
     match req {
-        Request::CompressPreset { level, codec, scale } => {
+        Request::CompressPreset { level, codec, scale, audio } => {
             let c = job.cfg.compress_codec(codec).ok_or_else(|| unknown(codec))?;
             // "auto" only exists in the size limit mode
             let mode = if *scale == ScaleMode::Auto { ScaleMode::Orig } else { *scale };
-            compress::preset(job, file, &info, *level, c, mode)
+            compress::preset(job, file, &info, *level, c, mode, audio)
         }
-        Request::CompressLimit { mb, codec, scale, twopass } => {
+        Request::CompressLimit { mb, codec, scale, twopass, audio } => {
             let c = job.cfg.limit_codec(codec).ok_or_else(|| unknown(codec))?;
-            compress::limit(job, file, &info, c, *mb, *scale, *twopass)
+            compress::limit(job, file, &info, c, *mb, *scale, *twopass, audio)
         }
         Request::Convert { what, format } => {
             let f = job.cfg.format(*what, format).ok_or_else(|| unknown(format))?;

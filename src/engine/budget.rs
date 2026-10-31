@@ -13,20 +13,32 @@ pub struct Bitrates {
     pub tight: bool,
 }
 
+/// What the audio of the result takes from the budget
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AudioSize {
+    None,
+    /// encoded at a bitrate chosen here
+    Rate,
+    /// already made: its size in bytes
+    Bytes(f64),
+}
+
 /// Bitrates (bit/s) from the real budget in bytes:
 ///  * `aim`% of the limit is the target (a small reserve against rate-control error). One-pass
 ///    rate control needs a moment to settle, so its relative error grows on short videos:
 ///    the reserve gets an extra 30/duration percent (capped at 8%). Exact modes (two-pass,
 ///    chunked) see the real result and do not need that extra reserve.
-///  * the audio bitrate scales down for very tight budgets and is 0 without audio
-pub fn bitrates(mb: f64, dur: f64, fps: f64, has_audio: bool, aim: f64, exact: bool) -> Bitrates {
+///  * the audio bitrate scales down for very tight budgets and is 0 without audio; audio that
+///    is already made takes exactly its size
+pub fn bitrates(mb: f64, dur: f64, fps: f64, audio: AudioSize, aim: f64, exact: bool) -> Bitrates {
     let extra = if exact { 0.0 } else { (30.0 / dur).min(8.0) };
     let budget = mb * 1_048_576.0 * (aim - extra) / 100.0;
-    let total = (budget - overhead(dur, fps, has_audio)) * 8.0 / dur;
-    let audio = match (has_audio, total) {
-        (false, _) => 0.0,
-        (true, t) if t > 400_000.0 => 128_000.0,
-        (true, t) if t > 150_000.0 => 96_000.0,
+    let total = (budget - overhead(dur, fps, audio != AudioSize::None)) * 8.0 / dur;
+    let audio = match (audio, total) {
+        (AudioSize::None, _) => 0.0,
+        (AudioSize::Bytes(b), _) => b * 8.0 / dur,
+        (AudioSize::Rate, t) if t > 400_000.0 => 128_000.0,
+        (AudioSize::Rate, t) if t > 150_000.0 => 96_000.0,
         _ => 64_000.0,
     };
     let video = total - audio;
@@ -62,7 +74,7 @@ mod tests {
     #[test]
     fn bitrates_match_the_old_awk_formula() {
         // 20 MB, 60 s, 30 fps, audio, aim 99, one pass: extra reserve = 30/60 = 0.5%
-        let b = bitrates(20.0, 60.0, 30.0, true, 99.0, false);
+        let b = bitrates(20.0, 60.0, 30.0, AudioSize::Rate, 99.0, false);
         // overhead = 4096 + 60*30*12 + 60*47*20 = 82096
         let budget = 20.0 * 1_048_576.0 * 98.5 / 100.0;
         let total = (budget - 82_096.0) * 8.0 / 60.0;
@@ -73,17 +85,26 @@ mod tests {
 
     #[test]
     fn no_audio_no_audio_bitrate() {
-        let b = bitrates(5.0, 30.0, 25.0, false, 99.0, true);
+        let b = bitrates(5.0, 30.0, 25.0, AudioSize::None, 99.0, true);
         assert_eq!(b.audio, 0);
         assert!(b.video > 1_000_000);
     }
 
     #[test]
     fn tight_budget_is_flagged() {
-        let b = bitrates(0.1, 600.0, 30.0, true, 99.0, false);
+        let b = bitrates(0.1, 600.0, 30.0, AudioSize::Rate, 99.0, false);
         assert!(b.tight);
         assert_eq!(b.video, 50_000);
         assert_eq!(b.audio, 64_000);
+    }
+
+    #[test]
+    fn audio_that_is_made_takes_its_size() {
+        // a copied track of 1.5 MB in 60 s = 200 kbit/s, whatever the budget
+        let b = bitrates(20.0, 60.0, 30.0, AudioSize::Bytes(1_500_000.0), 99.0, true);
+        assert_eq!(b.audio, 200_000);
+        let rate = bitrates(20.0, 60.0, 30.0, AudioSize::Rate, 99.0, true);
+        assert_eq!(b.video, rate.video + rate.audio - 200_000);
     }
 
     #[test]

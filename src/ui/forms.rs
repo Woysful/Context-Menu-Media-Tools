@@ -1,6 +1,6 @@
 //! The options forms of the actions, and the size of their windows.
 
-use super::dropdown::{build_groups, codec_combo, need_id, Group};
+use super::dropdown::{build_groups, codec_combo, dropdown, need_id, Col, Group};
 use super::scale_field::ScaleField;
 use super::widgets::{
     button_row, card, chars_fitting, field, file_name, form_row, hint, line_edit, muted, number_field, one_line, option_grid, primary_button, secondary_button,
@@ -28,6 +28,8 @@ pub struct CompressForm {
     l_scale: ScaleField,
     mb_text: String,
     twopass: bool,
+    p_audio: String,
+    l_audio: String,
 }
 
 pub struct FormatForm {
@@ -43,7 +45,7 @@ pub struct WebpForm {
 }
 
 pub enum Form {
-    Compress(CompressForm),
+    Compress(Box<CompressForm>),
     Format(FormatForm),
     Webp(WebpForm),
     /// Nothing to choose (Delete sound, own items)
@@ -64,7 +66,7 @@ impl Form {
             return Form::Format(FormatForm { what, selected: cfg.default_format(what).unwrap_or_default().to_string() });
         }
         match env.action {
-            Action::Compress => Form::Compress(CompressForm {
+            Action::Compress => Form::Compress(Box::new(CompressForm {
                 tab: 0,
                 level: 1,
                 p_groups: build_groups(&cfg.compress, env.t, cfg),
@@ -75,7 +77,9 @@ impl Form {
                 l_scale: ScaleField::new(),
                 mb_text: "20".into(),
                 twopass: false,
-            }),
+                p_audio: cfg.default_audio().to_string(),
+                l_audio: cfg.default_audio().to_string(),
+            })),
             Action::Webp => Form::Webp(WebpForm {
                 size_text: cfg.webp.size.to_string(),
                 fps_text: cfg.webp.fps.to_string(),
@@ -152,7 +156,13 @@ impl CompressForm {
         });
         form_row(ui, t.codec, |ui| codec_combo(ui, "p_codec", &self.p_groups, &mut self.p_codec, t));
         form_row(ui, t.resolution, |ui| self.p_scale.ui(ui, "p_scale", t, false, &env.infos));
-        (!self.p_scale.invalid).then(|| Request::CompressPreset { level: self.level, codec: self.p_codec.clone(), scale: self.p_scale.mode })
+        form_row(ui, t.audio, |ui| audio_combo(ui, "p_audio", env, &mut self.p_audio));
+        (!self.p_scale.invalid).then(|| Request::CompressPreset {
+            level: self.level,
+            codec: self.p_codec.clone(),
+            scale: self.p_scale.mode,
+            audio: self.p_audio.clone(),
+        })
     }
 
     fn limit_rows(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
@@ -188,11 +198,25 @@ impl CompressForm {
         });
         form_row(ui, t.codec, |ui| codec_combo(ui, "l_codec", &self.l_groups, &mut self.l_codec, t));
         form_row(ui, t.resolution, |ui| self.l_scale.ui(ui, "l_scale", t, true, &env.infos));
+        form_row(ui, t.audio, |ui| audio_combo(ui, "l_audio", env, &mut self.l_audio));
         if self.l_scale.invalid {
             return None;
         }
-        Some(Request::CompressLimit { mb: mb?, codec: self.l_codec.clone(), scale: self.l_scale.mode, twopass: self.twopass && twopass_ok })
+        Some(Request::CompressLimit {
+            mb: mb?,
+            codec: self.l_codec.clone(),
+            scale: self.l_scale.mode,
+            twopass: self.twopass && twopass_ok,
+            audio: self.l_audio.clone(),
+        })
     }
+}
+
+/// The Audio list of Compress Video ([compress_audio] of presets.toml)
+fn audio_combo(ui: &mut egui::Ui, id: &str, env: &Env, selected: &mut String) {
+    let items: Vec<(String, String)> = env.cfg.audio.iter().map(|(k, a)| (k.clone(), if a.label.is_empty() { k.clone() } else { a.label.clone() })).collect();
+    let shown = items.iter().find(|(k, _)| k == selected).map_or_else(|| selected.clone(), |(_, l)| l.clone());
+    dropdown(ui, id, &shown, &[Col { title: None, items }], selected);
 }
 
 /// The name of the result in one row of the form (of the first file; the others are counted)
