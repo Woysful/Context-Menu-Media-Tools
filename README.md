@@ -41,7 +41,7 @@ On Windows 11 the items are under *Show more options*.
 | Convert Video | MP4, AVI, MOV, MKV, M4V, WebM |
 | Convert Audio | WAV, MP3, FLAC, AAC, OGG, WMA, M4A, Opus; for videos, only the audio tracks are converted |
 | Extract Audio | MP3, AAC, Opus, WAV, M4A, MKA |
-| Delete sound | the video without the audio tracks you tick (all of them by default) |
+| Delete sound | the video without the audio tracks you untick |
 | Make frame sequence | PNG / JPG / WebP frames in a new folder |
 | Convert to WebP anim | size, fps, quality, compression |
 | Convert Image | JPG, PNG, BMP, TIFF, GIF, WebP, TGA |

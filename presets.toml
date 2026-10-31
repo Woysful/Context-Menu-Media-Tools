@@ -738,8 +738,8 @@ output = "{base}.{ext}"
 
 # ------------------------------------------------------------------ Delete sound
 
-# command / output: every audio track goes. tracks_command / tracks_output: only the tracks ticked
-# in the window; {remove} = "-map -0:a:N" for each of them (N counts from 0).
+# command / output: every audio track goes. tracks_command / tracks_output: only the tracks
+# unticked in the window; {remove} = "-map -0:a:N" for each of them (N counts from 0).
 
 [delete_sound]
 command = 'ffmpeg -n -i {input} -an -c copy {output}'

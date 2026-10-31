@@ -37,7 +37,7 @@ pub struct FormatForm {
     selected: String,
 }
 
-/// The audio tracks of the files (by number) and whether each one is removed
+/// The audio tracks of the files (by number) and whether each one is kept
 pub struct DeleteForm {
     tracks: Vec<(String, bool)>,
 }
@@ -136,7 +136,7 @@ impl Form {
 }
 
 impl DeleteForm {
-    /// Track N is described by the first file that has it; all of them are ticked
+    /// Track N is described by the first file that has it; all of them are ticked (kept)
     fn new(env: &Env) -> DeleteForm {
         let count = env.infos.iter().map(|i| i.audio.len()).max().unwrap_or(0);
         let tracks = (0..count)
@@ -168,9 +168,13 @@ impl DeleteForm {
                 hint(ui, t.del_by_number);
             }
         });
-        let remove: Vec<usize> = self.tracks.iter().enumerate().filter(|(_, (_, on))| *on).map(|(i, _)| i).collect();
+        let remove: Vec<usize> = self.tracks.iter().enumerate().filter(|(_, (_, keep))| !*keep).map(|(i, _)| i).collect();
         match remove.len() {
-            0 => None,
+            0 => {
+                ui.add_space(4.0);
+                hint(ui, t.del_untick);
+                None
+            }
             n if n == self.tracks.len() => Some(Request::DeleteSound { remove: None }),
             _ => Some(Request::DeleteSound { remove: Some(remove) }),
         }
@@ -381,6 +385,13 @@ pub fn show(ctx: &egui::Context, env: &Env, form: &mut Form, valid: bool) -> Sho
 
 /// The forms the window has to be tall enough for (both tabs of Compress Video, the longest hints)
 fn measured_forms(env: &Env) -> Vec<Form> {
+    if let Form::DeleteSound(mut f) = Form::new(env) {
+        // the names of the results appear once a track is unticked
+        if let Some(first) = f.tracks.first_mut() {
+            first.1 = false;
+        }
+        return vec![Form::new(env), Form::DeleteSound(f)];
+    }
     let Form::Compress(_) = Form::new(env) else { return vec![Form::new(env)] };
     let mut out = Vec::new();
     for tab in 0..2usize {
