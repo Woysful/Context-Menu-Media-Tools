@@ -37,11 +37,11 @@ On Windows 11 the items are under *Show more options*.
 
 | Item | What it does |
 |---|---|
-| Compress Video | quality level or a size limit in MB (e.g. Discord), codec on CPU or GPU (Nvidia, AMD, Intel, Raspberry Pi), resolution, audio (copy, AAC, Opus, MP3, FLAC) |
+| Compress Video | quality level or a size limit in MB (e.g. Discord), codec on CPU or GPU (Nvidia, AMD, Intel, Raspberry Pi), resolution, audio (copy, none, AAC, Opus, MP3, AC-3, E-AC-3, FLAC, ALAC, PCM) |
 | Convert Video | MP4, AVI, MOV, MKV, M4V, WebM |
 | Convert Audio | WAV, MP3, FLAC, AAC, OGG, WMA, M4A, Opus; for videos, only the audio tracks are converted |
 | Extract Audio | MP3, AAC, Opus, WAV, M4A, MKA |
-| Delete sound | the video without audio |
+| Delete sound | the video without the audio tracks you tick (all of them by default) |
 | Make frame sequence | PNG / JPG / WebP frames in a new folder |
 | Convert to WebP anim | size, fps, quality, compression |
 | Convert Image | JPG, PNG, BMP, TIFF, GIF, WebP, TGA |

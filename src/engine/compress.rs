@@ -1,7 +1,7 @@
 //! Compress Video: the presets (fixed quality) and the size limit mode.
 
 use super::budget::{self, bitrates, chunk_target, plan_chunks, AudioSize};
-use super::output::{new_file, short_name};
+use super::output::{new_file_ext, short_name};
 use super::runner::{run_ffmpeg, run_template, value_after, TempDir, Track};
 use super::{Failure, Job, Outcome};
 use crate::cmdline::{self, Val};
@@ -91,19 +91,22 @@ fn scale_chain(job: &Job, file: &Path, info: &Info, mode: ScaleMode, fps: f64, v
 /// Codecs a copied track may have in an MP4 / MOV that players understand
 const MP4_AUDIO: &[&str] = &["aac", "mp3", "mp2", "ac3", "eac3", "opus", "flac", "alac", "dts"];
 
+fn find_audio<'a>(job: &'a Job, key: &str) -> Outcome<&'a AudioCodec> {
+    job.cfg.audio_codec(key).ok_or_else(|| Failure::Error(format!("{} {key}", i18n::t().unknown_codec)))
+}
+
 /// The audio entry for this file: the chosen one, or its fallback when a track cannot be copied
 /// into the result
-fn audio_entry<'a>(job: &'a Job, file: &Path, info: &Info, key: &str, output: &Path) -> Outcome<&'a AudioCodec> {
+fn audio_entry<'a>(job: &'a Job, file: &Path, info: &Info, chosen: &'a AudioCodec, output: &Path) -> Outcome<&'a AudioCodec> {
     let t = i18n::t();
-    let find = |k: &str| job.cfg.audio_codec(k).ok_or_else(|| Failure::Error(format!("{} {k}", t.unknown_codec)));
-    let chosen = find(key)?;
     let ext = output.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     if chosen.fallback.is_empty() || !matches!(ext.as_str(), "mp4" | "m4v" | "mov") {
         return Ok(chosen);
     }
-    match info.audio_codecs.iter().find(|c| !MP4_AUDIO.contains(&c.as_str())) {
+    let allowed = |c: &str| MP4_AUDIO.contains(&c) || (ext == "mov" && c.starts_with("pcm_"));
+    match info.audio.iter().map(|a| a.codec.as_str()).find(|c| !allowed(c)) {
         Some(bad) => {
-            let fallback = find(&chosen.fallback)?;
+            let fallback = find_audio(job, &chosen.fallback)?;
             job.prog.info(format!("{}: {bad} {} {}", short_name(file), t.audio_no_copy, fallback.label));
             Ok(fallback)
         }
@@ -117,10 +120,10 @@ fn audio_args(a: &AudioCodec, bitrate: &str) -> Result<Vec<String>, String> {
 }
 
 /// {audio} of a command: the video and every audio track, with the options of the audio entry
-/// (nothing for a file without audio)
+/// (-an for a result without audio)
 fn audio_val(has_audio: bool, args: &[String]) -> Val {
     if !has_audio {
-        return Val::L(vec![]);
+        return no_audio();
     }
     let mut v = vec![s("-map"), s("0:v:0"), s("-map"), s("0:a")];
     v.extend(args.iter().cloned());
@@ -155,9 +158,11 @@ fn encode_audio(job: &Job, file: &Path, args: &[String], out: &Path) -> Outcome<
 pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &Codec, mode: ScaleMode, audio: &str) -> Outcome<String> {
     let node = render_node(i18n::t(), codec)?;
     let (chain, _) = scale_chain(job, file, info, mode, 30.0, 0.0, 0.0);
-    let output = new_file(&codec.output, file, &[]);
-    let a = audio_entry(job, file, info, audio, &output)?;
+    let chosen = find_audio(job, audio)?;
+    let output = new_file_ext(&codec.output, file, &[], &chosen.ext);
+    let a = audio_entry(job, file, info, chosen, &output)?;
     let audio_opts = audio_args(a, &a.bitrate)?;
+    let has_audio = info.has_audio && !a.removes();
     let mut vars = vec![
         ("input", path_val(file)),
         ("output", path_val(&output)),
@@ -165,7 +170,7 @@ pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &
         ("scale", scale_val(&chain)),
         ("q", Val::S(Codec::pick(&codec.q, level))),
         ("p", Val::S(Codec::pick(&codec.p, level))),
-        ("audio", audio_val(info.has_audio, &audio_opts)),
+        ("audio", audio_val(has_audio, &audio_opts)),
     ];
     push_node(&mut vars, &node);
     run_template(job, &with_audio(&codec.command), &vars, !chain.is_empty(), Track::whole(info.duration), None)?;
@@ -253,11 +258,13 @@ pub(super) fn limit(job: &Job, file: &Path, info: &Info, codec: &Codec, mb: f64,
     let aim = if chunked { 99.0 } else { codec.aim };
 
     let mb_text = fmt_float(mb);
-    let output = new_file(&codec.output, file, &[("mb", mb_text.clone())]);
+    let chosen = find_audio(job, audio)?;
+    let output = new_file_ext(&codec.output, file, &[("mb", mb_text.clone())], &chosen.ext);
     // Audio without a bitrate of its own (copied, lossless) is made first: the video gets what is left
-    let a = audio_entry(job, file, info, audio, &output)?;
+    let a = audio_entry(job, file, info, chosen, &output)?;
+    let has_audio = info.has_audio && !a.removes();
     let work = TempDir::new()?;
-    let (audio_file, audio_size) = if !info.has_audio {
+    let (audio_file, audio_size) = if !has_audio {
         (None, AudioSize::None)
     } else if a.has_bitrate() {
         (None, AudioSize::Rate)
@@ -274,9 +281,9 @@ pub(super) fn limit(job: &Job, file: &Path, info: &Info, codec: &Codec, mb: f64,
     // Resolution; "auto" walks down a ladder until the picture gets enough bits per pixel
     let (chain, scale_note) = scale_chain(job, file, info, mode, fps, br.video as f64, codec.bpp_min);
     // the audio bitrate is shared by the tracks
-    let tracks = info.audio_codecs.len().max(1) as u64;
+    let tracks = info.audio.len().max(1) as u64;
     let audio_opts = audio_args(a, &(br.audio / tracks).to_string())?;
-    let plan = Plan { file, codec, mb, node, chain, audio: audio_opts, audio_file, dur, fps, has_audio: info.has_audio, aim };
+    let plan = Plan { file, codec, mb, node, chain, audio: audio_opts, audio_file, dur, fps, has_audio, aim };
 
     let mode_note = if chunked {
         " | chunked"
@@ -459,6 +466,6 @@ mod tests {
     #[test]
     fn audio_maps_every_track() {
         assert_eq!(audio_val(true, &[s("-c:a"), s("copy")]), Val::l(["-map", "0:v:0", "-map", "0:a", "-c:a", "copy"]));
-        assert_eq!(audio_val(false, &[s("-c:a"), s("copy")]), Val::L(vec![]));
+        assert_eq!(audio_val(false, &[s("-c:a"), s("copy")]), Val::l(["-an"]));
     }
 }

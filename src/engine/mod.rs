@@ -41,7 +41,10 @@ pub enum Request {
         what: ConvertKind,
         format: String,
     },
-    DeleteSound,
+    DeleteSound {
+        /// numbers of the audio tracks to remove, from 0 (None = all of them)
+        remove: Option<Vec<usize>>,
+    },
     Webp {
         size: u32,
         fps: u32,
@@ -68,16 +71,19 @@ impl Request {
 /// The name of what `req` would make of `file` now (a taken name gets a number, as in the job).
 /// Frames go into a folder: "clip/".
 pub fn result_name(cfg: &Config, req: &Request, file: &Path) -> Option<String> {
-    let name = |pattern: &str, extra: &[(&str, String)]| short_name(&output::unique_path(output::named(pattern, file, extra)));
+    let named = |pattern: &str, extra: &[(&str, String)], ext: &str| short_name(&output::unique_path(output::named_ext(pattern, file, extra, ext)));
+    let name = |pattern: &str, extra: &[(&str, String)]| named(pattern, extra, "");
+    let audio_ext = |key: &str| cfg.audio_codec(key).map_or(String::new(), |a| a.ext.clone());
     Some(match req {
-        Request::CompressPreset { codec, .. } => name(&cfg.compress_codec(codec)?.output, &[]),
-        Request::CompressLimit { mb, codec, .. } => name(&cfg.limit_codec(codec)?.output, &[("mb", fmt_float(*mb))]),
+        Request::CompressPreset { codec, audio, .. } => named(&cfg.compress_codec(codec)?.output, &[], &audio_ext(audio)),
+        Request::CompressLimit { mb, codec, audio, .. } => named(&cfg.limit_codec(codec)?.output, &[("mb", fmt_float(*mb))], &audio_ext(audio)),
         Request::Convert { what: ConvertKind::Frames, .. } => format!("{}/", short_name(&output::unique_path(PathBuf::from(output::base_of(file))))),
         Request::Convert { what, format } => {
             let f = cfg.format(*what, format)?;
             name(&f.output, &[("ext", f.extension(format).to_string()), ("fmt", format.clone())])
         }
-        Request::DeleteSound => name(&cfg.delete_sound.output, &[]),
+        Request::DeleteSound { remove: None } => name(&cfg.delete_sound.output, &[]),
+        Request::DeleteSound { remove: Some(_) } => name(&cfg.delete_sound.tracks_output, &[]),
         Request::Webp { .. } => name(&cfg.webp.output, &[]),
         Request::Custom { id } => name(&cfg.settings.custom(id)?.output, &[]),
     })
@@ -162,7 +168,7 @@ fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<String> {
             let f = job.cfg.format(*what, format).ok_or_else(|| unknown(format))?;
             convert::format(job, file, &info, *what, format, f)
         }
-        Request::DeleteSound => convert::delete_sound(job, file, &info),
+        Request::DeleteSound { remove } => convert::delete_sound(job, file, &info, remove.as_deref()),
         Request::Webp { size, fps, quality, compression } => convert::webp(job, file, &info, *size, *fps, *quality, *compression),
         Request::Custom { id } => {
             let c = job.cfg.settings.custom(id).ok_or_else(|| unknown(id))?;

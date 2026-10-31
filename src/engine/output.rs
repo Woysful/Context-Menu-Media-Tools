@@ -23,9 +23,24 @@ pub fn named(pattern: &str, file: &Path, extra: &[(&str, String)]) -> PathBuf {
     PathBuf::from(text)
 }
 
+/// The name from the pattern with another extension (empty = the one of the pattern)
+pub fn named_ext(pattern: &str, file: &Path, extra: &[(&str, String)], ext: &str) -> PathBuf {
+    let p = named(pattern, file, extra);
+    if ext.is_empty() {
+        p
+    } else {
+        p.with_extension(ext)
+    }
+}
+
 /// The result for `file`: a name that is not taken yet, in a folder that exists
 pub fn new_file(pattern: &str, file: &Path, extra: &[(&str, String)]) -> PathBuf {
-    let out = unique_path(named(pattern, file, extra));
+    new_file_ext(pattern, file, extra, "")
+}
+
+/// `new_file` with another extension (empty = the one of the pattern)
+pub fn new_file_ext(pattern: &str, file: &Path, extra: &[(&str, String)], ext: &str) -> PathBuf {
+    let out = unique_path(named_ext(pattern, file, extra, ext));
     ensure_parent(&out);
     out
 }

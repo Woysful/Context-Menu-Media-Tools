@@ -97,11 +97,15 @@ impl Codec {
 #[serde(default)]
 pub struct AudioCodec {
     pub label: String,
+    /// the column of the list: source | lossy | lossless
+    pub group: String,
     /// ffmpeg options of the audio tracks; {bitrate} = `bitrate`, or the bitrate of the size limit
     pub args: String,
     pub bitrate: String,
     /// the entry for a file whose tracks cannot be copied into the result
     pub fallback: String,
+    /// extension of the result instead of the one of the codec entry ("mov")
+    pub ext: String,
     pub default: bool,
 }
 
@@ -110,6 +114,11 @@ impl AudioCodec {
     pub fn has_bitrate(&self) -> bool {
         crate::cmdline::placeholders(&self.args).is_ok_and(|p| p.iter().any(|x| x == "bitrate"))
     }
+
+    /// The result has no audio at all
+    pub fn removes(&self) -> bool {
+        crate::cmdline::split(&self.args).is_ok_and(|w| w.iter().any(|x| x == "-an"))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -117,6 +126,9 @@ impl AudioCodec {
 pub struct DeleteSound {
     pub command: String,
     pub output: String,
+    /// only some audio tracks: {remove} = the -map options that drop them
+    pub tracks_command: String,
+    pub tracks_output: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -354,6 +366,7 @@ impl Config {
             }
         }
         check_command("[delete_sound]", &self.delete_sound.command, &mut w);
+        check_command("[delete_sound] tracks_command", &self.delete_sound.tracks_command, &mut w);
         check_command("[webp_anim]", &self.webp.command, &mut w);
         self.warnings.extend(w);
     }
@@ -410,7 +423,9 @@ mod tests {
         assert_eq!(c.webp.size, 720);
         assert_eq!(c.compress[0].0, "h264_cpu");
         assert_eq!(c.default_format(ConvertKind::Video), Some("mp4"));
-        assert_eq!(c.audio.len(), 5);
+        assert_eq!(c.audio.len(), 11);
+        assert!(c.audio_codec("none").unwrap().removes() && !c.audio_codec("copy").unwrap().removes());
+        assert_eq!(c.audio_codec("pcm16").unwrap().ext, "mov");
         assert_eq!(c.default_audio(), "copy");
         assert!(!c.audio_codec("copy").unwrap().has_bitrate() && c.audio_codec("aac").unwrap().has_bitrate());
         assert!(c.audio_codec(&c.audio_codec("copy").unwrap().fallback).is_some());

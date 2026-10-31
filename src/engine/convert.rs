@@ -6,6 +6,7 @@ use super::runner::{run_template, Track};
 use super::{ConvertKind, Job, Outcome};
 use crate::cmdline::Val;
 use crate::config::Format;
+use crate::i18n;
 use crate::media::Info;
 use crate::settings::Custom;
 use crate::units::fmt_mb;
@@ -44,11 +45,25 @@ pub(super) fn format(job: &Job, file: &Path, info: &Info, what: ConvertKind, key
     Ok(arrow(file, shown))
 }
 
-pub(super) fn delete_sound(job: &Job, file: &Path, info: &Info) -> Outcome<String> {
+/// `remove`: the audio tracks to remove (None = all); a track the file does not have is left out
+pub(super) fn delete_sound(job: &Job, file: &Path, info: &Info, remove: Option<&[usize]>) -> Outcome<String> {
     let d = &job.cfg.delete_sound;
-    let output = new_file(&d.output, file, &[]);
-    run(job, &d.command, file, &output, vec![], info.duration)?;
-    Ok(arrow(file, short_name(&output)))
+    let count = info.audio.len();
+    let chosen: Option<Vec<usize>> = remove.map(|r| r.iter().copied().filter(|i| *i < count).collect());
+    match chosen {
+        Some(list) if list.is_empty() => Ok(format!("{}: {}", short_name(file), i18n::t().del_nothing)),
+        Some(list) if list.len() < count => {
+            let output = new_file(&d.tracks_output, file, &[]);
+            let maps = list.iter().flat_map(|i| ["-map".to_string(), format!("-0:a:{i}")]).collect();
+            run(job, &d.tracks_command, file, &output, vec![("remove", Val::L(maps))], info.duration)?;
+            Ok(arrow(file, short_name(&output)))
+        }
+        _ => {
+            let output = new_file(&d.output, file, &[]);
+            run(job, &d.command, file, &output, vec![], info.duration)?;
+            Ok(arrow(file, short_name(&output)))
+        }
+    }
 }
 
 pub(super) fn webp(job: &Job, file: &Path, info: &Info, size: u32, fps: u32, quality: u32, compression: u32) -> Outcome<String> {

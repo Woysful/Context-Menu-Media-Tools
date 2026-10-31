@@ -29,7 +29,7 @@ fn num(v: Option<&Value>) -> Option<f64> {
 }
 
 /// The usual name of a codec ("h264" -> "H.264")
-fn codec_name(name: &str) -> String {
+pub fn codec_name(name: &str) -> String {
     let known = [
         ("h264", "H.264"),
         ("hevc", "HEVC"),

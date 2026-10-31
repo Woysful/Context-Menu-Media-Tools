@@ -37,6 +37,11 @@ pub struct FormatForm {
     selected: String,
 }
 
+/// The audio tracks of the files (by number) and whether each one is removed
+pub struct DeleteForm {
+    tracks: Vec<(String, bool)>,
+}
+
 pub struct WebpForm {
     size_text: String,
     fps_text: String,
@@ -48,7 +53,8 @@ pub enum Form {
     Compress(Box<CompressForm>),
     Format(FormatForm),
     Webp(WebpForm),
-    /// Nothing to choose (Delete sound, own items)
+    DeleteSound(DeleteForm),
+    /// Nothing to choose (own items)
     Confirm(Request),
 }
 
@@ -86,7 +92,7 @@ impl Form {
                 quality: cfg.webp.quality,
                 compression: cfg.webp.compression,
             }),
-            _ => Form::Confirm(Request::DeleteSound),
+            _ => Form::DeleteSound(DeleteForm::new(env)),
         }
     }
 
@@ -116,20 +122,57 @@ impl Form {
                 });
                 Some(Request::Webp { size: size?, fps: fps?, quality: f.quality, compression: f.compression })
             }
+            Form::DeleteSound(f) => f.ui(ui, env),
             Form::Confirm(req) => {
-                match &*req {
-                    Request::Custom { id } => {
-                        if let Some(item) = env.cfg.settings.custom(id) {
-                            field(ui, t.command, |ui| card(ui, |ui| ui.add(egui::Label::new(RichText::new(&item.command).monospace()).wrap())));
-                        }
-                    }
-                    _ => {
-                        ui.label(t.delete_sound_text);
-                        ui.add_space(8.0);
+                if let Request::Custom { id } = &*req {
+                    if let Some(item) = env.cfg.settings.custom(id) {
+                        field(ui, t.command, |ui| card(ui, |ui| ui.add(egui::Label::new(RichText::new(&item.command).monospace()).wrap())));
                     }
                 }
                 Some(req.clone())
             }
+        }
+    }
+}
+
+impl DeleteForm {
+    /// Track N is described by the first file that has it; all of them are ticked
+    fn new(env: &Env) -> DeleteForm {
+        let count = env.infos.iter().map(|i| i.audio.len()).max().unwrap_or(0);
+        let tracks = (0..count)
+            .map(|n| {
+                let about = env.infos.iter().find_map(|i| i.audio.get(n)).map(|a| a.describe()).unwrap_or_default();
+                let label = if about.is_empty() { format!("{} {}", env.t.del_track, n + 1) } else { format!("{} {} — {about}", env.t.del_track, n + 1) };
+                (label, true)
+            })
+            .collect();
+        DeleteForm { tracks }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
+        let t = env.t;
+        ui.label(t.delete_sound_text);
+        ui.add_space(10.0);
+        if self.tracks.is_empty() {
+            hint(ui, t.del_no_tracks);
+            ui.add_space(4.0);
+            return Some(Request::DeleteSound { remove: None });
+        }
+        field(ui, t.del_tracks, |ui| {
+            card(ui, |ui| {
+                for (label, on) in &mut self.tracks {
+                    ui.checkbox(on, label.as_str());
+                }
+            });
+            if env.files.len() > 1 {
+                hint(ui, t.del_by_number);
+            }
+        });
+        let remove: Vec<usize> = self.tracks.iter().enumerate().filter(|(_, (_, on))| *on).map(|(i, _)| i).collect();
+        match remove.len() {
+            0 => None,
+            n if n == self.tracks.len() => Some(Request::DeleteSound { remove: None }),
+            _ => Some(Request::DeleteSound { remove: Some(remove) }),
         }
     }
 }
@@ -212,11 +255,29 @@ impl CompressForm {
     }
 }
 
-/// The Audio list of Compress Video ([compress_audio] of presets.toml)
+/// The Audio list of Compress Video ([compress_audio] of presets.toml), a column per group
 fn audio_combo(ui: &mut egui::Ui, id: &str, env: &Env, selected: &mut String) {
-    let items: Vec<(String, String)> = env.cfg.audio.iter().map(|(k, a)| (k.clone(), if a.label.is_empty() { k.clone() } else { a.label.clone() })).collect();
-    let shown = items.iter().find(|(k, _)| k == selected).map_or_else(|| selected.clone(), |(_, l)| l.clone());
-    dropdown(ui, id, &shown, &[Col { title: None, items }], selected);
+    let t = env.t;
+    let mut cols: Vec<(String, Col)> = Vec::new();
+    for (key, a) in &env.cfg.audio {
+        let label = if a.label.is_empty() { key.clone() } else { a.label.clone() };
+        match cols.iter_mut().find(|(g, _)| *g == a.group) {
+            Some((_, col)) => col.items.push((key.clone(), label)),
+            None => {
+                let title = match a.group.as_str() {
+                    "source" => t.audio_source,
+                    "lossy" => t.audio_lossy,
+                    "lossless" => t.audio_lossless,
+                    other => other,
+                };
+                let title = (!title.is_empty()).then(|| title.to_string());
+                cols.push((a.group.clone(), Col { title, items: vec![(key.clone(), label)] }));
+            }
+        }
+    }
+    let cols: Vec<Col> = cols.into_iter().map(|(_, c)| c).collect();
+    let shown = cols.iter().flat_map(|c| &c.items).find(|(k, _)| k == selected).map_or_else(|| selected.clone(), |(_, l)| l.clone());
+    dropdown(ui, id, &shown, &cols, selected);
 }
 
 /// The name of the result in one row of the form (of the first file; the others are counted)

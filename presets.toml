@@ -379,32 +379,73 @@ chunked = true
 # bitrate computed from the limit in the size limit mode (shared by the tracks). Without
 # {bitrate} (copy, FLAC) the size limit mode makes the audio first, so its size is known.
 # `fallback`: the entry used for a file whose tracks cannot be copied into an MP4 (WMA, PCM, ...).
+# `ext` changes the extension of the result (PCM: MOV, which players read with PCM, unlike MP4).
+# `group`: source | lossy | lossless, the columns of the list.
 # The first entry (or the one with `default = true`) is preselected.
 
 [compress_audio.copy]
 label = "Copy"
+group = "source"
 args = '-c:a copy'
 fallback = "aac"
 default = true
 
+[compress_audio.none]
+label = "No audio"
+group = "source"
+args = '-an'
+
 [compress_audio.aac]
 label = "AAC"
+group = "lossy"
 args = '-c:a aac -b:a {bitrate}'
 bitrate = "160k"
 
 [compress_audio.opus]
 label = "Opus"
+group = "lossy"
 args = '-c:a libopus -b:a {bitrate}'
 bitrate = "128k"
 
 [compress_audio.mp3]
 label = "MP3"
+group = "lossy"
 args = '-c:a libmp3lame -b:a {bitrate}'
 bitrate = "192k"
 
+[compress_audio.ac3]
+label = "AC-3"
+group = "lossy"
+args = '-c:a ac3 -b:a {bitrate}'
+bitrate = "384k"
+
+[compress_audio.eac3]
+label = "E-AC-3"
+group = "lossy"
+args = '-c:a eac3 -b:a {bitrate}'
+bitrate = "256k"
+
 [compress_audio.flac]
 label = "FLAC"
+group = "lossless"
 args = '-c:a flac -strict -2'
+
+[compress_audio.alac]
+label = "ALAC"
+group = "lossless"
+args = '-c:a alac'
+
+[compress_audio.pcm16]
+label = "PCM 16-bit"
+group = "lossless"
+args = '-c:a pcm_s16le'
+ext = "mov"
+
+[compress_audio.pcm24]
+label = "PCM 24-bit"
+group = "lossless"
+args = '-c:a pcm_s24le'
+ext = "mov"
 
 # ------------------------------------------------------------------ Convert Video
 # One entry per output format: `text` is the name the window shows, `hint` a few words next to it,
@@ -697,9 +738,14 @@ output = "{base}.{ext}"
 
 # ------------------------------------------------------------------ Delete sound
 
+# command / output: every audio track goes. tracks_command / tracks_output: only the tracks ticked
+# in the window; {remove} = "-map -0:a:N" for each of them (N counts from 0).
+
 [delete_sound]
 command = 'ffmpeg -n -i {input} -an -c copy {output}'
 output = "{base} (no audio).{srcext}"
+tracks_command = 'ffmpeg -n -i {input} -map 0 -map -0:d? {remove} -c copy {output}'
+tracks_output = "{base} (audio tracks removed).{srcext}"
 
 # ------------------------------------------------------------------ Convert to WebP animation
 # size / fps / quality / compression preselect the dialog. {size} limits the SHORTER side of the picture.

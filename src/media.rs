@@ -75,8 +75,42 @@ pub struct Info {
     pub bitrate_estimated: bool,
     pub audio_bps: Option<f64>,
     pub has_audio: bool,
-    /// codec_name of every audio track
-    pub audio_codecs: Vec<String>,
+    pub audio: Vec<AudioTrack>,
+}
+
+/// One audio track of a file
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AudioTrack {
+    /// codec_name of ffprobe ("aac")
+    pub codec: String,
+    pub channels: u32,
+    pub layout: String,
+    pub language: String,
+    pub title: String,
+}
+
+impl AudioTrack {
+    /// "AAC · stereo · eng · Commentary"
+    pub fn describe(&self) -> String {
+        let channels = match (self.layout.as_str(), self.channels) {
+            ("", 0) => String::new(),
+            ("", 1) => "mono".into(),
+            ("", 2) => "stereo".into(),
+            ("", n) => format!("{n} ch"),
+            (l, _) => l.to_string(),
+        };
+        let language = if self.language == "und" { "" } else { &self.language };
+        [crate::report::codec_name(&self.codec), channels, language.to_string(), self.title.clone()]
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
+fn tag(s: &Value, key: &str) -> String {
+    let found = s.get("tags").and_then(|t| t.as_object()).and_then(|t| t.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)));
+    found.and_then(|(_, v)| v.as_str()).unwrap_or_default().to_string()
 }
 
 fn num(v: Option<&Value>) -> Option<f64> {
@@ -105,7 +139,17 @@ pub fn parse_probe(name: &str, json: &str) -> Option<Info> {
     let mut info = Info { name: name.to_string(), has_audio: audio.is_some(), ..Default::default() };
     info.duration = num(fmt.and_then(|f| f.get("duration"))).or_else(|| num(video.and_then(|v| v.get("duration"))));
     info.audio_bps = audio.and_then(|a| num(a.get("bit_rate")));
-    info.audio_codecs = streams.iter().filter(|s| s["codec_type"] == "audio").map(|s| s["codec_name"].as_str().unwrap_or_default().to_string()).collect();
+    info.audio = streams
+        .iter()
+        .filter(|s| s["codec_type"] == "audio")
+        .map(|s| AudioTrack {
+            codec: s["codec_name"].as_str().unwrap_or_default().to_string(),
+            channels: num(s.get("channels")).unwrap_or(0.0) as u32,
+            layout: s["channel_layout"].as_str().unwrap_or_default().to_string(),
+            language: tag(s, "language"),
+            title: tag(s, "title"),
+        })
+        .collect();
 
     if let Some(v) = video {
         let mut w = num(v.get("width")).unwrap_or(0.0) as u32;
@@ -172,7 +216,7 @@ mod tests {
     const SAMPLE: &str = r#"{"streams":[
         {"codec_type":"video","width":1080,"height":1920,"avg_frame_rate":"30/1","bit_rate":"6100000",
          "side_data_list":[{"rotation":-90}]},
-        {"codec_type":"audio","codec_name":"aac","bit_rate":"69000"}],
+        {"codec_type":"audio","codec_name":"aac","bit_rate":"69000","channels":2,"tags":{"language":"eng","title":"Commentary"}}],
         "format":{"duration":"6.0","size":"5000000"}}"#;
 
     #[test]
@@ -182,7 +226,9 @@ mod tests {
         assert_eq!(i.fps, Some(30.0));
         assert_eq!(i.duration, Some(6.0));
         assert!(i.has_audio);
-        assert_eq!(i.audio_codecs, ["aac"]);
+        assert_eq!(i.audio.len(), 1);
+        assert_eq!(i.audio[0].describe(), "AAC · stereo · eng · Commentary");
+        assert_eq!(AudioTrack { codec: "pcm_s16le".into(), channels: 6, language: "und".into(), ..Default::default() }.describe(), "PCM (s16le) · 6 ch");
         assert_eq!(describe(&i, "audio"), "1920×1080 · 30 fps · 6.1 Mbit/s · audio 69 kbit/s · 0:06");
     }
 
