@@ -35,7 +35,7 @@ impl Stats {
                 .iter()
                 .map(|f| FileStats {
                     name: file_name(f),
-                    report: report::build(&media::probe_json(&tools.ffprobe, f), t),
+                    report: report::build(&media::probe_json(&tools.ffprobe, f), t, f),
                     text: engine::stats_text(&tools.ffprobe, f),
                 })
                 .collect();

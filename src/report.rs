@@ -4,6 +4,7 @@
 use crate::i18n::T;
 use crate::units::{fmt_duration, fmt_float, fmt_rate};
 use serde_json::{Map, Value};
+use std::path::Path;
 
 pub struct Section {
     pub title: String,
@@ -152,8 +153,45 @@ fn audio_rows(s: &Value, t: &T) -> Vec<(String, String)> {
     rows
 }
 
-/// The JSON of `ffprobe -print_format json -show_format -show_streams` as a report
-pub fn build(json: &str, t: &T) -> Option<Report> {
+/// The container of the file. ffprobe names its demuxer, which reads a whole family: every
+/// MP4 is "QuickTime / MOV", every MKV and WebM "Matroska / WebM". The brand of an MP4 tells
+/// them apart, the DocType at the start of a Matroska file (or else the extension).
+fn container_name(format_name: &str, long_name: &str, brand: Option<&str>, file: &Path) -> String {
+    let ext = file.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if format_name.starts_with("mov,mp4") {
+        let brand = brand.map(|b| b.trim().to_lowercase()).unwrap_or_default();
+        let by = |b: &str| brand.starts_with(b) || (brand.is_empty() && ext == b);
+        return match () {
+            _ if brand == "qt" || (brand.is_empty() && ext == "mov") => "QuickTime / MOV",
+            _ if by("m4a") => "M4A",
+            _ if by("m4v") => "M4V",
+            _ if by("3g2") => "3G2",
+            _ if by("3g") => "3GP",
+            _ if brand.starts_with("mj") || (brand.is_empty() && ext == "mj2") => "Motion JPEG 2000",
+            _ if by("f4v") => "F4V",
+            _ => "MP4",
+        }
+        .to_string();
+    }
+    if format_name == "matroska,webm" {
+        let mut head = [0u8; 64];
+        let n = std::fs::File::open(file).and_then(|mut f| std::io::Read::read(&mut f, &mut head)).unwrap_or(0);
+        let has = |word: &[u8]| head[..n].windows(word.len()).any(|w| w == word);
+        let webm = if has(b"webm") {
+            true
+        } else if has(b"matroska") {
+            false
+        } else {
+            ext == "webm"
+        };
+        return (if webm { "WebM" } else { "Matroska" }).to_string();
+    }
+    // "WAV / WAVE (Waveform Audio)" -> "WAV / WAVE"
+    long_name.split(" (").next().unwrap_or(long_name).trim().to_string()
+}
+
+/// The JSON of `ffprobe -print_format json -show_format -show_streams` about `file` as a report
+pub fn build(json: &str, t: &T, file: &Path) -> Option<Report> {
     let data: Value = serde_json::from_str(json).ok()?;
     let streams = data.get("streams")?.as_array()?;
     let empty = Value::Object(Map::new());
@@ -179,8 +217,8 @@ pub fn build(json: &str, t: &T) -> Option<Report> {
     let container = if still {
         streams.first().and_then(|s| text(s.get("codec_name"))).map(|c| codec_name(&c))
     } else {
-        // "WAV / WAVE (Waveform Audio)" -> "WAV / WAVE"
-        text(fmt.get("format_long_name")).map(|n| n.split(" (").next().unwrap_or(&n).trim().to_string())
+        let brand = fmt.get("tags").and_then(|tags| text(tags.get("major_brand")));
+        text(fmt.get("format_long_name")).map(|long| container_name(&format_name, &long, brand.as_deref(), file))
     };
     if let Some(c) = container {
         metrics.push((t.st_container.to_string(), c));
@@ -234,9 +272,9 @@ mod tests {
 
     #[test]
     fn a_video_becomes_numbers_and_sections() {
-        let r = build(CLIP, crate::i18n::t()).unwrap();
+        let r = build(CLIP, crate::i18n::t(), Path::new("/v/clip.mp4")).unwrap();
         let m: Vec<&str> = r.metrics.iter().map(|(_, v)| v.as_str()).collect();
-        assert_eq!(m, ["0:08", "5.9 MB", "6.2 Mbit/s", "QuickTime / MOV"]);
+        assert_eq!(m, ["0:08", "5.9 MB", "6.2 Mbit/s", "MP4"]);
         let titles: Vec<&str> = r.sections.iter().map(|s| s.title.as_str()).collect();
         assert_eq!(titles, ["Video", "Audio 1", "Audio 2", "Tags"]);
         let video = &r.sections[0].rows;
@@ -255,9 +293,26 @@ mod tests {
     fn a_picture_has_no_duration() {
         let json = r#"{"streams":[{"codec_type":"video","codec_name":"png","width":640,"height":480,"pix_fmt":"rgb24","avg_frame_rate":"25/1"}],
             "format":{"format_name":"png_pipe","format_long_name":"piped png sequence","size":"2048"}}"#;
-        let r = build(json, crate::i18n::t()).unwrap();
+        let r = build(json, crate::i18n::t(), Path::new("/p/a.png")).unwrap();
         assert_eq!(r.metrics, [("Size".into(), "2 KB".into()), ("Container".into(), "PNG".into())]);
         assert_eq!(r.sections[0].title, "Image");
         assert!(!r.sections[0].rows.iter().any(|(k, _)| k == "Frame rate"));
+    }
+
+    #[test]
+    fn the_container_is_told_apart_within_its_family() {
+        let mov = "mov,mp4,m4a,3gp,3g2,mj2";
+        let name = |format: &str, brand: Option<&str>, file: &str| container_name(format, "QuickTime / MOV", brand, Path::new(file));
+        assert_eq!(name(mov, Some("isom"), "/v/a.mp4"), "MP4");
+        assert_eq!(name(mov, Some("mp42"), "/v/a.mov"), "MP4");
+        assert_eq!(name(mov, Some("qt  "), "/v/a.mp4"), "QuickTime / MOV");
+        assert_eq!(name(mov, Some("M4A "), "/v/a.m4a"), "M4A");
+        assert_eq!(name(mov, Some("3gp5"), "/v/a.3gp"), "3GP");
+        assert_eq!(name(mov, None, "/v/a.mov"), "QuickTime / MOV");
+        assert_eq!(name(mov, None, "/v/a.mp4"), "MP4");
+        // no file to read: the extension decides
+        assert_eq!(name("matroska,webm", Some("isom"), "/none/a.mkv"), "Matroska");
+        assert_eq!(name("matroska,webm", None, "/none/a.webm"), "WebM");
+        assert_eq!(container_name("wav", "WAV / WAVE (Waveform Audio)", None, Path::new("/a.wav")), "WAV / WAVE");
     }
 }

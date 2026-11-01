@@ -124,13 +124,11 @@ pub fn remove_path_blocks(name: &str) -> Vec<String> {
 
 const ICON: &[u8] = include_bytes!("../../assets/cmmt.png");
 
-/// The entry of the application menu that opens the Settings window. `hidden`: not listed in
-/// the menu, it only gives the windows their icon (Wayland finds it by the app id "cmmt").
-pub fn launcher_desktop(exe: &str, hidden: bool) -> String {
+/// The entry of the application menu that opens the Settings window
+pub fn launcher_desktop(exe: &str) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Media Tools\nComment=Settings of the Media Tools context menu\nExec={} settings\nIcon=cmmt\nTerminal=false\nCategories=AudioVideo;Video;\nStartupWMClass=cmmt\n{}",
-        desktop_quote(exe),
-        if hidden { "NoDisplay=true\n" } else { "" }
+        "[Desktop Entry]\nType=Application\nName=Media Tools\nComment=Settings of the Media Tools context menu\nExec={} settings\nIcon=cmmt\nTerminal=false\nCategories=AudioVideo;Video;\n",
+        desktop_quote(exe)
     )
 }
 
@@ -162,17 +160,14 @@ fn write(path: &Path, bytes: &[u8]) -> bool {
     path.parent().is_some_and(|d| fs::create_dir_all(d).is_ok()) && fs::write(path, bytes).is_ok()
 }
 
-pub fn launcher_install(exe: &Path, hidden: bool) -> Vec<String> {
+pub fn launcher_install(exe: &Path) -> Vec<String> {
     let file = launcher_file();
     let _ = write(&icon_file(), ICON);
-    if !write(&file, launcher_desktop(&exe.to_string_lossy(), hidden).as_bytes()) {
-        return vec![];
-    }
-    set_executable(&file);
-    if hidden {
-        vec![format!("window icon: {} (not shown in the menu)", file.display())]
-    } else {
+    if write(&file, launcher_desktop(&exe.to_string_lossy()).as_bytes()) {
+        set_executable(&file);
         vec![format!("application menu: \"Media Tools\" opens the Settings ({})", file.display())]
+    } else {
+        vec![]
     }
 }
 
@@ -212,10 +207,9 @@ mod tests {
 
     #[test]
     fn launcher_entry_opens_the_settings() {
-        let d = launcher_desktop("/home/u/.local/bin/cmmt", false);
+        let d = launcher_desktop("/home/u/.local/bin/cmmt");
         assert!(d.contains("Exec=/home/u/.local/bin/cmmt settings") && d.contains("Categories=AudioVideo;Video;"));
-        assert!(d.contains("Icon=cmmt\n") && !d.contains("NoDisplay"));
-        assert!(launcher_desktop("/x/cmmt", true).ends_with("NoDisplay=true\n"));
+        assert!(d.contains("Icon=cmmt\n"));
         assert!(ICON.starts_with(b"\x89PNG"));
     }
 
