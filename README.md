@@ -1,37 +1,44 @@
-# Media Tools (`cmmt`)
+# Media Tools
 
-Adds ffmpeg actions to the right-click menu of your file manager: compress, convert, extract audio and more.
-Works with Windows Explorer, KDE (Dolphin), GNOME (Files), XFCE (Thunar) and Raspberry Pi OS (PCManFM), on x86 and ARM.
+Adds ffmpeg actions to the context menu of your file manager: compress, convert, extract audio and more.
+Works with Windows, KDE (Dolphin), GNOME (Files), XFCE (Thunar), on x86 and ARM.
 
-The only requirement is `ffmpeg` with `ffprobe`. Linux gets one AppImage, Windows gets one `.exe`.
-Every ffmpeg command lives in a text file, so you can edit any of them.
+![](assets/Preview.webp)
 
 ## Install
 
 **Linux**
 
 1. Install `ffmpeg` with your package manager.
-2. Download the AppImage for your machine:
-   `cmmt-linux-x86_64.AppImage` (PC), `cmmt-linux-aarch64.AppImage` (64-bit ARM, Raspberry Pi 3/4/5),
-   `cmmt-linux-armv7.AppImage` (32-bit Raspberry Pi OS).
-3. Make it executable, start it and press **Install** in the window that opens. Or in a terminal:
+2. [Download](https://github.com/woysful/context-menu-media-tools/release) app the for your machine. 
+3. Make it executable (you can install AppImage with GearLever), start it and press **Install** in the window that opens.
+
+   Or do it in a terminal:
 
    ```
    chmod +x cmmt-linux-x86_64.AppImage
-   ./cmmt-linux-x86_64.AppImage install     # detects the desktop; or --kde --gnome --xfce --pcmanfm
+   ./cmmt-linux-x86_64.AppImage install
    ./cmmt-linux-x86_64.AppImage uninstall
    ```
+   > The **Install** button doesn't install the app itself, it creates items inside context menu. So, don't forget to uninstall those items before deleting the app.
 
-The menu items point to the AppImage where it is. If you move it, press **Install** again.
-On XFCE and PCManFM, restart the file manager once (`thunar -q`, `pcmanfm -q`).
-On GNOME, the items are under **Scripts → Media Tools**.
+4. Restart file manager.
 
 **Windows**
+1. [Download app](https://github.com/woysful/context-menu-media-tools/releases/latest/download/cmmt-windows-x86_64.exe) and place it where you like. For example `C:\Program Files\cmmt\`
+2. Download ffmpeg and put `ffmpeg.exe` with `ffprobe.exe` next to `cmmt.exe`.
+   
+   Or instead you can add them to `PATH`.
+3. Start `cmmt.exe` and press **Install**.
 
-Put `ffmpeg.exe` and `ffprobe.exe` next to `cmmt.exe` or in `PATH`, start `cmmt.exe` and press **Install**.
+   > The **Install** button doesn't install the app itself, it creates items inside context menu. So, don't forget to uninstall those items before deleting the app.
+
+4. Restart windows explorer process of log out/in.
+
+
 On Windows 11 the items are under *Show more options*.
 
-`install --path` also makes `cmmt` available in a terminal.
+>`install --path` also makes `cmmt` available in a terminal.
 
 ## Menu items
 
