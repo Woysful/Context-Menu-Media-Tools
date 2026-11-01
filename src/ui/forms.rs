@@ -120,7 +120,7 @@ impl Fields {
     }
 
     /// Draws the fields; returns the request when the form is valid (None = Start is disabled).
-    /// Compress Video draws "Delete the original" as one of its rows.
+    /// The forms made of rows draw "Delete the original" and the result as rows of their own.
     fn ui(&mut self, ui: &mut egui::Ui, env: &Env, delete_original: &mut bool) -> Option<Request> {
         let t = env.t;
         match self {
@@ -133,38 +133,7 @@ impl Fields {
                 }
                 Some(Request::Convert { what: f.what, format: f.selected.clone() })
             }
-            Fields::Webp(f) => {
-                let size = parse_in(&f.size_text, 64, 4320);
-                let fps = parse_in(&f.fps_text, 1, 120);
-                let (r_size, r_fps) = ui.columns(2, |cols| {
-                    (
-                        field(&mut cols[0], t.webp_size, |ui| small_number(ui, &mut f.size_text, size.is_some(), "px")),
-                        field(&mut cols[1], t.webp_fps, |ui| small_number(ui, &mut f.fps_text, fps.is_some(), "")),
-                    )
-                });
-                hint(ui, t.webp_size_hint);
-                ui.add_space(10.0);
-                let r_quality = field(ui, t.webp_quality, |ui| slider_row(ui, &mut f.quality, 0..=100));
-                let r_compression = field(ui, t.webp_compression, |ui| {
-                    let r = slider_row(ui, &mut f.compression, 0..=6);
-                    hint(ui, t.webp_compression_hint);
-                    r
-                });
-                if let Some(v) = default_menu(&r_size, env, dv::WEBP_SIZE, size.map(|v| v.to_string()).as_deref()) {
-                    f.size_text = v;
-                }
-                if let Some(v) = default_menu(&r_fps, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
-                    f.fps_text = v;
-                }
-                if let Some(v) = default_menu(&r_quality, env, dv::WEBP_QUALITY, Some(&f.quality.to_string())) {
-                    f.quality = v.parse().unwrap_or(f.quality);
-                }
-                if let Some(v) = default_menu(&r_compression, env, dv::WEBP_COMPRESSION, Some(&f.compression.to_string())) {
-                    f.compression = v.parse().unwrap_or(f.compression);
-                }
-                let (size, fps) = (parse_in(&f.size_text, 64, 4320), parse_in(&f.fps_text, 1, 120));
-                Some(Request::Webp { size: size?, fps: fps?, quality: f.quality, compression: f.compression })
-            }
+            Fields::Webp(f) => f.ui(ui, env, delete_original),
             Fields::DeleteAudio(f) => f.ui(ui, env),
             Fields::Confirm(req) => {
                 if let Request::Custom { id } = &*req {
@@ -283,6 +252,55 @@ fn original_check(ui: &mut egui::Ui, env: &Env, on: &mut bool, text: &str) {
         .inner;
     if let Some(v) = default_menu(&r, env, dv::DELETE_ORIGINAL, Some(bool_text(*on))) {
         *on = v == "true";
+    }
+}
+
+impl WebpForm {
+    /// Rows like those of Compress Video: the name at the left, the control and a line about it
+    fn ui(&mut self, ui: &mut egui::Ui, env: &Env, delete_original: &mut bool) -> Option<Request> {
+        let t = env.t;
+        let size = parse_in(&self.size_text, 64, 4320);
+        let fps = parse_in(&self.fps_text, 1, 120);
+        let r = form_row(ui, t.webp_size, |ui| {
+            let r = small_number(ui, &mut self.size_text, size.is_some(), "px");
+            one_line(ui, t.webp_size_hint, muted());
+            r
+        });
+        if let Some(v) = default_menu(&r, env, dv::WEBP_SIZE, size.map(|v| v.to_string()).as_deref()) {
+            self.size_text = v;
+        }
+        let r = form_row(ui, t.webp_fps, |ui| {
+            let r = small_number(ui, &mut self.fps_text, fps.is_some(), "fps");
+            one_line(ui, t.webp_fps_hint, muted());
+            r
+        });
+        if let Some(v) = default_menu(&r, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
+            self.fps_text = v;
+        }
+        let r = form_row(ui, t.webp_quality, |ui| {
+            let r = slider_row(ui, &mut self.quality, 0..=100);
+            one_line(ui, t.webp_quality_hint, muted());
+            r
+        });
+        if let Some(v) = default_menu(&r, env, dv::WEBP_QUALITY, Some(&self.quality.to_string())) {
+            self.quality = v.parse().unwrap_or(self.quality);
+        }
+        let r = form_row(ui, t.webp_compression, |ui| {
+            let r = slider_row(ui, &mut self.compression, 0..=6);
+            one_line(ui, t.webp_compression_hint, muted());
+            r
+        });
+        if let Some(v) = default_menu(&r, env, dv::WEBP_COMPRESSION, Some(&self.compression.to_string())) {
+            self.compression = v.parse().unwrap_or(self.compression);
+        }
+        form_row(ui, t.original, |ui| original_check(ui, env, delete_original, t.delete_after));
+        let (size, fps) = (parse_in(&self.size_text, 64, 4320), parse_in(&self.fps_text, 1, 120));
+        let req = match (size, fps) {
+            (Some(size), Some(fps)) => Some(Request::Webp { size, fps, quality: self.quality, compression: self.compression }),
+            _ => None,
+        };
+        result_row(ui, env, req.as_ref());
+        req
     }
 }
 
@@ -581,8 +599,7 @@ fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
     }
     ui.add_space(14.0);
     let req = form.fields.ui(ui, env, &mut form.delete_original);
-    // Compress Video has these as rows of its own
-    if !matches!(form.fields, Fields::Compress(_)) {
+    if !matches!(form.fields, Fields::Compress(_) | Fields::Webp(_)) {
         ui.add_space(2.0);
         original_check(ui, env, &mut form.delete_original, env.t.delete_original);
         if let Some(r) = &req {
