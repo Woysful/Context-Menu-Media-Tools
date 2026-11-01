@@ -10,7 +10,7 @@ Works with Windows, KDE (Dolphin), GNOME (Files), XFCE (Thunar), on x86 and ARM.
 **Linux**
 
 1. Install `ffmpeg` with your package manager.
-2. [Download app](https://github.com/Woysful/Context-Menu-Media-Tools/releases) the for your machine. 
+2. [Download app](https://github.com/Woysful/Context-Menu-Media-Tools/releases) for your machine. 
 3. Make it executable (you can install AppImage with GearLever), start it and press **Install** in the window that opens.
 
    Or do it in a terminal:
