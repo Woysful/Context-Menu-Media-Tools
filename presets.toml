@@ -447,7 +447,7 @@ group = "lossless"
 args = '-c:a pcm_s24le'
 ext = "mov"
 
-# "Merge into one track" of Compress Video: the filter that mixes the ticked audio tracks into
+# "Merge into one track" of Compress Video and Delete Audio: the filter that mixes the ticked audio tracks into
 # one ({count} = their number). normalize=0 keeps the volume of every track (the sum can get
 # louder); duration=longest lasts as long as the longest track. Merged tracks are always
 # encoded: Copy uses its fallback.
@@ -748,6 +748,9 @@ output = "{base}.{ext}"
 
 # command / output: every audio track goes. tracks_command / tracks_output: only the tracks
 # unticked in the window; {remove} = "-map -0:a:N" for each of them (N counts from 0).
+# merge_command / merge_output: "Merge the kept tracks into one"; {mix} = the filter of
+# [compress_audio_merge] on the kept tracks and "-map [mix]", {encode} = merge_codec (a mix
+# cannot be copied), merge_codec_webm for .webm / .ogg / .ogv files (AAC is not allowed there).
 # (A user file may still call this table [delete_sound], its name before 1.2.)
 
 [delete_audio]
@@ -755,6 +758,10 @@ command = 'ffmpeg -n -i {input} -an -c copy {output}'
 output = "{base} (no audio).{srcext}"
 tracks_command = 'ffmpeg -n -i {input} -map 0 -map -0:d? {remove} -c copy {output}'
 tracks_output = "{base} (audio tracks removed).{srcext}"
+merge_command = 'ffmpeg -n -i {input} -map 0 -map -0:a -map -0:d? {mix} -c copy {encode} {output}'
+merge_output = "{base} (audio merged).{srcext}"
+merge_codec = '-c:a aac -b:a 192k'
+merge_codec_webm = '-c:a libopus -b:a 160k'
 
 # ------------------------------------------------------------------ Convert to WebP animation
 # size / fps / quality / compression preselect the dialog. {size} limits the SHORTER side of the picture.

@@ -3,7 +3,7 @@
 use super::budget::{self, bitrates, chunk_target, plan_chunks, AudioSize};
 use super::output::{new_file_ext, short_name};
 use super::runner::{run_ffmpeg, run_template, value_after, TempDir, Track};
-use super::{Failure, Job, Outcome, Tracks};
+use super::{Done, Failure, Job, Outcome, Tracks};
 use crate::cmdline::{self, Val};
 use crate::config::{AudioCodec, Codec};
 use crate::gpu;
@@ -128,15 +128,20 @@ fn select(job: &Job, file: &Path, info: &Info, tracks: &Tracks) -> Selection {
     }
     let merged = tracks.merge && kept.len() > 1;
     let maps = if merged {
-        let inputs: String = kept.iter().map(|i| format!("[0:a:{i}]")).collect();
-        let filter = job.cfg.audio_merge.filter.replace("{count}", &kept.len().to_string());
-        vec![s("-filter_complex"), format!("{inputs}{filter}[mix]"), s("-map"), s("[mix]")]
+        merge_maps(job, &kept)
     } else if kept.len() == all {
         vec![s("-map"), s("0:a")]
     } else {
         kept.iter().flat_map(|i| [s("-map"), format!("0:a:{i}")]).collect()
     };
     Selection { kept, maps, merged }
+}
+
+/// The options that mix the audio tracks `kept` into one and pick the result
+pub(super) fn merge_maps(job: &Job, kept: &[usize]) -> Vec<String> {
+    let inputs: String = kept.iter().map(|i| format!("[0:a:{i}]")).collect();
+    let filter = job.cfg.audio_merge.filter.replace("{count}", &kept.len().to_string());
+    vec![s("-filter_complex"), format!("{inputs}{filter}[mix]"), s("-map"), s("[mix]")]
 }
 
 /// The audio entry for this file: the chosen one, or its fallback when a track cannot be copied
@@ -211,7 +216,7 @@ fn encode_audio(job: &Job, file: &Path, maps: &[String], args: &[String], out: &
 // ------------------------------------------------------------------ presets
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &Codec, mode: ScaleMode, audio: &str, tracks: &Tracks) -> Outcome<String> {
+pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &Codec, mode: ScaleMode, audio: &str, tracks: &Tracks) -> Outcome<Done> {
     let node = render_node(i18n::t(), codec)?;
     let (chain, _) = scale_chain(job, file, info, mode, 30.0, 0.0, 0.0);
     let chosen = find_audio(job, audio)?;
@@ -232,7 +237,7 @@ pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &
     ];
     push_node(&mut vars, &node);
     run_template(job, &with_audio(&codec.command), &vars, !chain.is_empty(), Track::whole(info.duration), None)?;
-    Ok(format!("{} → {} ({})", short_name(file), short_name(&output), fmt_mb(file_size(&output))))
+    Ok(Done::new(format!("{} → {} ({})", short_name(file), short_name(&output), fmt_mb(file_size(&output))), &output))
 }
 
 // ------------------------------------------------------------------ size limit
@@ -305,7 +310,7 @@ pub(super) fn limit(
     want_twopass: bool,
     audio: &str,
     tracks: &Tracks,
-) -> Outcome<String> {
+) -> Outcome<Done> {
     let t = i18n::t();
     if mb.is_nan() || mb <= 0.0 {
         return Err(format!("{} {mb}", t.invalid_limit).into());
@@ -394,7 +399,7 @@ pub(super) fn limit(
         job.prog.warn(over.clone());
         text.push_str(&format!("\n⚠ {over}"));
     }
-    Ok(text)
+    Ok(Done::new(text, &output))
 }
 
 /// One pass at a bitrate computed in advance, or two passes: pass 1 only analyses the video
@@ -544,7 +549,7 @@ mod tests {
     fn job_and_info(tracks: usize) -> (Job, Info) {
         let cfg = std::sync::Arc::new(crate::config::Config::defaults());
         let prog = super::super::Progress::new(Box::new(|| {}), false);
-        let job = Job { cfg, ffmpeg: PathBuf::new(), ffprobe: PathBuf::new(), prog };
+        let job = Job { cfg, ffmpeg: PathBuf::new(), ffprobe: PathBuf::new(), prog, delete_original: false };
         let info = Info { audio: vec![Default::default(); tracks], ..Default::default() };
         (job, info)
     }

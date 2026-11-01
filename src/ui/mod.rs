@@ -55,13 +55,15 @@ pub struct Launch {
     pub tools: Option<Tools>,
     /// Some = skip the options dialog (`--yes`)
     pub request: Option<Request>,
+    /// `--delete-original` (with `--yes`)
+    pub delete_original: bool,
     pub first_kind: Option<Kind>,
 }
 
 impl Launch {
     /// A window that is not about files (the Settings, a message)
     pub fn plain(start: Start, cfg: Arc<Config>) -> Launch {
-        Launch { start, action: Action::Stats, custom_id: None, files: vec![], cfg, tools: None, request: None, first_kind: None }
+        Launch { start, action: Action::Stats, custom_id: None, files: vec![], cfg, tools: None, request: None, delete_original: false, first_kind: None }
     }
 }
 
@@ -75,6 +77,8 @@ struct Env {
     files: Vec<PathBuf>,
     /// ffprobe about the first files
     infos: Vec<Info>,
+    /// the number of audio tracks of every file (the windows that choose tracks)
+    track_counts: Vec<usize>,
     first_kind: Option<Kind>,
     tools: Option<Tools>,
 }
@@ -86,11 +90,16 @@ impl Env {
 }
 
 pub fn run(l: Launch) -> Result<(), String> {
-    let Launch { start, action, custom_id, files, cfg, tools, request, first_kind } = l;
+    let Launch { start, action, custom_id, files, cfg, tools, request, delete_original, first_kind } = l;
     let t = i18n::t();
     let infos: Vec<Info> = match (&tools, &start) {
         (Some(tools), Start::Normal) => files.iter().take(3).filter_map(|f| media::probe(&tools.ffprobe, f)).collect(),
         _ => vec![],
+    };
+    let chooses_tracks = matches!(action, Action::Compress | Action::DeleteAudio) && custom_id.is_none() && request.is_none();
+    let track_counts = match (&tools, &start) {
+        (Some(tools), Start::Normal) if chooses_tracks && files.len() > 1 => media::audio_counts(&tools.ffprobe, &files),
+        _ => infos.iter().map(|i| i.audio.len()).collect(),
     };
     let title = match (&start, &custom_id) {
         (Start::Settings, _) => si::s().title.to_string(),
@@ -98,7 +107,7 @@ pub fn run(l: Launch) -> Result<(), String> {
         (_, Some(id)) => cfg.settings.custom(id).map_or(id.clone(), |c| c.name.clone()),
         _ => action.title(t).to_string(),
     };
-    let env = Env { t, cfg, action, title, custom_id, files, infos, first_kind, tools };
+    let env = Env { t, cfg, action, title, custom_id, files, infos, track_counts, first_kind, tools };
     let scale = env.cfg.settings.ui_scale.clamp(0.5, 3.0) as f32;
     let transparent = effects::transparency_enabled(&env.cfg.settings);
     let (w, h) = initial_size(&env, &start, request.is_some());
@@ -117,7 +126,7 @@ pub fn run(l: Launch) -> Result<(), String> {
         options,
         Box::new(move |cc| {
             theme::install_fonts(&cc.egui_ctx);
-            Ok(Box::new(app::App::new(env, start, request, &cc.egui_ctx, transparent)))
+            Ok(Box::new(app::App::new(env, start, request.map(|r| (r, delete_original)), &cc.egui_ctx, transparent)))
         }),
     )
     .map_err(|e| e.to_string())

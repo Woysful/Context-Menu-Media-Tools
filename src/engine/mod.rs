@@ -55,6 +55,8 @@ pub enum Request {
     DeleteAudio {
         /// numbers of the audio tracks to remove, from 0 (None = all of them)
         remove: Option<Vec<usize>>,
+        /// mix the tracks that stay into one
+        merge: bool,
     },
     Webp {
         size: u32,
@@ -93,8 +95,9 @@ pub fn result_name(cfg: &Config, req: &Request, file: &Path) -> Option<String> {
             let f = cfg.format(*what, format)?;
             name(&f.output, &[("ext", f.extension(format).to_string()), ("fmt", format.clone())])
         }
-        Request::DeleteAudio { remove: None } => name(&cfg.delete_audio.output, &[]),
-        Request::DeleteAudio { remove: Some(_) } => name(&cfg.delete_audio.tracks_output, &[]),
+        Request::DeleteAudio { remove: None, .. } => name(&cfg.delete_audio.output, &[]),
+        Request::DeleteAudio { merge: true, .. } => name(&cfg.delete_audio.merge_output, &[]),
+        Request::DeleteAudio { remove: Some(_), .. } => name(&cfg.delete_audio.tracks_output, &[]),
         Request::Webp { .. } => name(&cfg.webp.output, &[]),
         Request::Custom { id } => name(&cfg.settings.custom(id)?.output, &[]),
     })
@@ -105,6 +108,27 @@ pub struct Job {
     pub ffmpeg: PathBuf,
     pub ffprobe: PathBuf,
     pub prog: Arc<Progress>,
+    /// delete every original that got a result (Settings: to the trash or for good)
+    pub delete_original: bool,
+}
+
+/// What became of one file
+pub struct Done {
+    /// the line of the log
+    text: String,
+    /// the result (a file, or the folder of frames); None = nothing was made
+    output: Option<PathBuf>,
+}
+
+impl Done {
+    fn new(text: String, output: &Path) -> Done {
+        Done { text, output: Some(output.to_path_buf()) }
+    }
+
+    /// Nothing to do for this file
+    fn nothing(text: String) -> Done {
+        Done { text, output: None }
+    }
 }
 
 /// Why a file has no result
@@ -148,7 +172,13 @@ pub fn run(job: &Job, req: &Request, files: &[PathBuf]) {
         }
         p.begin_file(i, eligible.len(), &short_name(file));
         match process_one(job, req, file) {
-            Ok(text) => p.result(text),
+            Ok(done) => {
+                p.result(done.text);
+                let made = done.output.is_some_and(|o| o.exists() && o != **file);
+                if job.delete_original && made {
+                    remove_original(job, file);
+                }
+            }
             Err(Failure::Cancelled) => break,
             Err(Failure::Error(e)) => p.error(format!("{} {}\n{}", t.failed, short_name(file), e)),
         }
@@ -160,7 +190,18 @@ pub fn run(job: &Job, req: &Request, files: &[PathBuf]) {
     p.finish();
 }
 
-fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<String> {
+/// The original after a result was made: to the trash, or for good. When that fails it stays.
+fn remove_original(job: &Job, file: &Path) {
+    let t = i18n::t();
+    let to_trash = job.cfg.settings.delete_mode != "permanent";
+    let r = if to_trash { crate::trash::put(file) } else { std::fs::remove_file(file).map_err(|e| e.to_string()) };
+    match r {
+        Ok(()) => job.prog.info(format!("{}: {}", short_name(file), if to_trash { t.original_trashed } else { t.original_deleted })),
+        Err(e) => job.prog.warn(format!("{}: {} {e}", short_name(file), t.original_kept)),
+    }
+}
+
+fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<Done> {
     let t = i18n::t();
     let info = media::probe(&job.ffprobe, file).unwrap_or_else(|| Info { name: short_name(file), ..Default::default() });
     let unknown = |key: &str| Failure::Error(format!("{} {key}", t.unknown_codec));
@@ -179,7 +220,7 @@ fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<String> {
             let f = job.cfg.format(*what, format).ok_or_else(|| unknown(format))?;
             convert::format(job, file, &info, *what, format, f)
         }
-        Request::DeleteAudio { remove } => convert::delete_audio(job, file, &info, remove.as_deref()),
+        Request::DeleteAudio { remove, merge } => convert::delete_audio(job, file, &info, remove.as_deref(), *merge),
         Request::Webp { size, fps, quality, compression } => convert::webp(job, file, &info, *size, *fps, *quality, *compression),
         Request::Custom { id } => {
             let c = job.cfg.settings.custom(id).ok_or_else(|| unknown(id))?;

@@ -126,7 +126,7 @@ impl AudioCodec {
     }
 }
 
-/// "Merge into one track" of Compress Video
+/// "Merge into one track" of Compress Video and Delete Audio
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct AudioMerge {
@@ -142,6 +142,12 @@ pub struct DeleteAudio {
     /// only some audio tracks: {remove} = the -map options that drop them
     pub tracks_command: String,
     pub tracks_output: String,
+    /// the kept tracks mixed into one: {mix} = the filter and its -map, {encode} = merge_codec
+    pub merge_command: String,
+    pub merge_output: String,
+    pub merge_codec: String,
+    /// merge_codec of .webm / .ogg / .ogv files
+    pub merge_codec_webm: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -388,6 +394,7 @@ impl Config {
         }
         check_command("[delete_audio]", &self.delete_audio.command, &mut w);
         check_command("[delete_audio] tracks_command", &self.delete_audio.tracks_command, &mut w);
+        check_command("[delete_audio] merge_command", &self.delete_audio.merge_command, &mut w);
         check_command("[webp_anim]", &self.webp.command, &mut w);
         self.warnings.extend(w);
     }

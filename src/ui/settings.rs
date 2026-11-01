@@ -332,6 +332,9 @@ fn general_page(ui: &mut egui::Ui, st: &mut SettingsState, pressed: &mut Option<
     setting_row(ui, ts.updates, ts.updates_hint, |ui| {
         ui.checkbox(&mut st.s.check_updates, ts.updates_check);
     });
+    setting_row(ui, ts.originals, ts.originals_hint, |ui| {
+        choice(ui, &mut st.s.delete_mode, &[("trash", ts.to_trash), ("permanent", ts.permanently)]);
+    });
     let mut changed = false;
     for (title, path, info) in [(ts.ffmpeg, &mut st.s.ffmpeg, &st.ffmpeg_info), (ts.ffprobe, &mut st.s.ffprobe, &st.ffprobe_info)] {
         let status = if info.is_empty() { format!("{} — {}", ts.not_found, ts.tool_hint) } else { format!("{}: {info}", ts.found) };
@@ -523,6 +526,8 @@ fn field_names(t: &T, key: &str) -> (String, String) {
         dv::WEBP_FPS => (t.webp_fps, t.t_webp.to_string()),
         dv::WEBP_QUALITY => (t.webp_quality, t.t_webp.to_string()),
         dv::WEBP_COMPRESSION => (t.webp_compression, t.t_webp.to_string()),
+        dv::DELETE_MERGE => (t.merge_kept, t.t_delete_audio.to_string()),
+        dv::DELETE_ORIGINAL => (t.delete_original, ts.every_window.to_string()),
         _ => match dv::kind_of(key) {
             Some(Kind::Format(k)) => {
                 let action = match k {

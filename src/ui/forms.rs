@@ -45,6 +45,8 @@ pub struct FormatForm {
 /// The audio tracks of the files (by number) and whether each one is kept
 pub struct DeleteForm {
     tracks: Vec<(String, bool)>,
+    /// mix the kept tracks into one
+    merge: bool,
 }
 
 pub struct WebpForm {
@@ -54,7 +56,19 @@ pub struct WebpForm {
     compression: u32,
 }
 
-pub enum Form {
+/// The fields of the action and "Delete the original"
+pub struct Form {
+    fields: Fields,
+    delete_original: bool,
+}
+
+impl Form {
+    pub fn new(env: &Env) -> Form {
+        Form { fields: Fields::new(env), delete_original: dv::flag(&env.cfg, dv::DELETE_ORIGINAL) }
+    }
+}
+
+pub enum Fields {
     Compress(Box<CompressForm>),
     Format(FormatForm),
     Webp(WebpForm),
@@ -67,19 +81,19 @@ fn parse_in(text: &str, lo: u32, hi: u32) -> Option<u32> {
     text.trim().parse::<u32>().ok().filter(|v| (lo..=hi).contains(v))
 }
 
-impl Form {
-    pub fn new(env: &Env) -> Form {
+impl Fields {
+    fn new(env: &Env) -> Fields {
         let cfg = &env.cfg;
         if let Some(id) = &env.custom_id {
-            return Form::Confirm(Request::Custom { id: id.clone() });
+            return Fields::Confirm(Request::Custom { id: id.clone() });
         }
         // every field starts with its own default value (settings.toml) or the standard one
         let d = |key: &str| dv::value(cfg, key);
         if let Some(what) = env.action.convert_kind(env.first_kind) {
-            return Form::Format(FormatForm { what, selected: d(&dv::format_key(what)) });
+            return Fields::Format(FormatForm { what, selected: d(&dv::format_key(what)) });
         }
         match env.action {
-            Action::Compress => Form::Compress(Box::new(CompressForm {
+            Action::Compress => Fields::Compress(Box::new(CompressForm {
                 tab: usize::from(d(dv::MODE) == "limit"),
                 level: dv::level_index(&d(dv::LEVEL)),
                 p_groups: build_groups(&cfg.compress, env.t, cfg),
@@ -95,22 +109,23 @@ impl Form {
                 tracks: track_list(env),
                 merge: dv::flag(cfg, dv::MERGE),
             })),
-            Action::Webp => Form::Webp(WebpForm {
+            Action::Webp => Fields::Webp(WebpForm {
                 size_text: d(dv::WEBP_SIZE),
                 fps_text: d(dv::WEBP_FPS),
                 quality: d(dv::WEBP_QUALITY).parse().unwrap_or(cfg.webp.quality),
                 compression: d(dv::WEBP_COMPRESSION).parse().unwrap_or(cfg.webp.compression),
             }),
-            _ => Form::DeleteAudio(DeleteForm::new(env)),
+            _ => Fields::DeleteAudio(DeleteForm::new(env)),
         }
     }
 
-    /// Draws the fields; returns the request when the form is valid (None = Start is disabled)
-    fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
+    /// Draws the fields; returns the request when the form is valid (None = Start is disabled).
+    /// Compress Video draws "Delete the original" as one of its rows.
+    fn ui(&mut self, ui: &mut egui::Ui, env: &Env, delete_original: &mut bool) -> Option<Request> {
         let t = env.t;
         match self {
-            Form::Compress(f) => f.ui(ui, env),
-            Form::Format(f) => {
+            Fields::Compress(f) => f.ui(ui, env, delete_original),
+            Fields::Format(f) => {
                 let options: Vec<(&str, &str, &str)> = env.cfg.formats(f.what).iter().map(|(k, fmt)| (k.as_str(), fmt.label(k), fmt.hint.as_str())).collect();
                 let r = field(ui, t.format, |ui| option_grid(ui, &mut f.selected, &options));
                 if let Some(v) = default_menu(&r, env, &dv::format_key(f.what), Some(&f.selected)) {
@@ -118,7 +133,7 @@ impl Form {
                 }
                 Some(Request::Convert { what: f.what, format: f.selected.clone() })
             }
-            Form::Webp(f) => {
+            Fields::Webp(f) => {
                 let size = parse_in(&f.size_text, 64, 4320);
                 let fps = parse_in(&f.fps_text, 1, 120);
                 let (r_size, r_fps) = ui.columns(2, |cols| {
@@ -150,8 +165,8 @@ impl Form {
                 let (size, fps) = (parse_in(&f.size_text, 64, 4320), parse_in(&f.fps_text, 1, 120));
                 Some(Request::Webp { size: size?, fps: fps?, quality: f.quality, compression: f.compression })
             }
-            Form::DeleteAudio(f) => f.ui(ui, env),
-            Form::Confirm(req) => {
+            Fields::DeleteAudio(f) => f.ui(ui, env),
+            Fields::Confirm(req) => {
                 if let Request::Custom { id } = &*req {
                     if let Some(item) = env.cfg.settings.custom(id) {
                         field(ui, t.command, |ui| card(ui, |ui| ui.add(egui::Label::new(RichText::new(&item.command).monospace()).wrap())));
@@ -165,7 +180,7 @@ impl Form {
 
 /// The audio tracks of the files, all ticked. Track N is described by the first file that has it.
 fn track_list(env: &Env) -> Vec<(String, bool)> {
-    let count = env.infos.iter().map(|i| i.audio.len()).max().unwrap_or(0);
+    let count = env.infos.iter().map(|i| i.audio.len()).chain(env.track_counts.iter().copied()).max().unwrap_or(0);
     (0..count)
         .map(|n| {
             let about = env.infos.iter().find_map(|i| i.audio.get(n)).map(|a| a.describe()).unwrap_or_default();
@@ -175,9 +190,18 @@ fn track_list(env: &Env) -> Vec<(String, bool)> {
         .collect()
 }
 
+/// A warning when the files have different numbers of audio tracks
+fn tracks_differ(ui: &mut egui::Ui, env: &Env) {
+    let (Some(lo), Some(hi)) = (env.track_counts.iter().min(), env.track_counts.iter().max()) else { return };
+    if lo != hi {
+        let text = env.t.tracks_differ.replace("{}", &format!("{lo}–{hi}"));
+        ui.add(egui::Label::new(RichText::new(format!("⚠ {text}")).small().color(c().warn)).wrap());
+    }
+}
+
 impl DeleteForm {
     fn new(env: &Env) -> DeleteForm {
-        DeleteForm { tracks: track_list(env) }
+        DeleteForm { tracks: track_list(env), merge: dv::flag(&env.cfg, dv::DELETE_MERGE) }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
@@ -187,35 +211,73 @@ impl DeleteForm {
         if self.tracks.is_empty() {
             hint(ui, t.del_no_tracks);
             ui.add_space(4.0);
-            return Some(Request::DeleteAudio { remove: None });
+            return Some(Request::DeleteAudio { remove: None, merge: false });
         }
+        let kept = self.tracks.iter().filter(|(_, on)| *on).count();
         field(ui, t.del_tracks, |ui| {
             card(ui, |ui| {
                 for (label, on) in &mut self.tracks {
                     ui.checkbox(on, label.as_str());
                 }
             });
+            tracks_differ(ui, env);
             if env.files.len() > 1 {
                 hint(ui, t.del_by_number);
             }
+            if self.tracks.len() > 1 {
+                ui.add_space(4.0);
+                let r = ui.add_enabled(kept > 1, egui::Checkbox::new(&mut self.merge, t.merge_kept));
+                if let Some(v) = default_menu(&r, env, dv::DELETE_MERGE, Some(bool_text(self.merge))) {
+                    self.merge = v == "true";
+                }
+                if self.merge && kept > 1 {
+                    hint(ui, t.del_merge_hint);
+                }
+            }
         });
+        let merge = self.merge && kept > 1;
         let remove: Vec<usize> = self.tracks.iter().enumerate().filter(|(_, (_, keep))| !*keep).map(|(i, _)| i).collect();
         match remove.len() {
+            0 if merge => Some(Request::DeleteAudio { remove: Some(remove), merge }),
             0 => {
                 ui.add_space(4.0);
                 hint(ui, t.del_untick);
                 None
             }
-            n if n == self.tracks.len() => Some(Request::DeleteAudio { remove: None }),
-            _ => Some(Request::DeleteAudio { remove: Some(remove) }),
+            n if n == self.tracks.len() => Some(Request::DeleteAudio { remove: None, merge: false }),
+            _ => Some(Request::DeleteAudio { remove: Some(remove), merge }),
         }
+    }
+}
+
+fn bool_text(on: bool) -> &'static str {
+    if on {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+/// "Delete the original when done": to the trash or for good, as the Settings say
+fn original_check(ui: &mut egui::Ui, env: &Env, on: &mut bool, text: &str) {
+    let t = env.t;
+    let r = ui
+        .horizontal(|ui| {
+            let r = ui.checkbox(on, text);
+            let (note, color) = if env.cfg.settings.delete_mode == "permanent" { (t.for_good, c().warn) } else { (t.to_trash, muted()) };
+            ui.label(RichText::new(note).small().color(color));
+            r
+        })
+        .inner;
+    if let Some(v) = default_menu(&r, env, dv::DELETE_ORIGINAL, Some(bool_text(*on))) {
+        *on = v == "true";
     }
 }
 
 impl CompressForm {
     /// Both modes have the same rows (a control with a line under it, the codec, the resolution,
     /// the result), so the window fits either of them without empty space
-    fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
+    fn ui(&mut self, ui: &mut egui::Ui, env: &Env, delete_original: &mut bool) -> Option<Request> {
         let t = env.t;
         let r = segmented(ui, &[t.tab_presets, t.tab_limit], &mut self.tab);
         if let Some(v) = default_menu(&r, env, dv::MODE, Some(["presets", "limit"][self.tab.min(1)])) {
@@ -225,6 +287,7 @@ impl CompressForm {
         one_line(ui, if self.tab == 0 { t.tab_presets_text } else { t.tab_limit_text }, muted());
         ui.add_space(14.0);
         let req = if self.tab == 0 { self.quality_rows(ui, env) } else { self.limit_rows(ui, env) };
+        form_row(ui, t.original, |ui| original_check(ui, env, delete_original, t.delete_after));
         result_row(ui, env, req.as_ref());
         req
     }
@@ -270,10 +333,13 @@ impl CompressForm {
         let merge = form_row(ui, t.tracks, |ui| {
             let merge = ui
                 .add_enabled_ui(!removes, |ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    for (label, on) in &mut self.tracks {
-                        ui.checkbox(on, label.as_str());
-                    }
+                    card(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        for (label, on) in &mut self.tracks {
+                            ui.checkbox(on, label.as_str());
+                        }
+                    });
+                    tracks_differ(ui, env);
                     ui.add_space(2.0);
                     ui.add_enabled(kept.len() > 1, egui::Checkbox::new(&mut self.merge, t.merge_tracks))
                 })
@@ -292,7 +358,7 @@ impl CompressForm {
             one_line(ui, note, color);
             merge
         });
-        if let Some(v) = default_menu(&merge, env, dv::MERGE, Some(if self.merge { "true" } else { "false" })) {
+        if let Some(v) = default_menu(&merge, env, dv::MERGE, Some(bool_text(self.merge))) {
             self.merge = v == "true";
         }
         if removes {
@@ -348,7 +414,7 @@ impl CompressForm {
         if let Some(v) = default_menu(&r_mb, env, dv::LIMIT_SIZE, own_mb.as_deref()) {
             self.mb_text = v;
         }
-        if let Some(v) = default_menu(&r_twopass, env, dv::TWO_PASS, Some(if self.twopass { "true" } else { "false" })) {
+        if let Some(v) = default_menu(&r_twopass, env, dv::TWO_PASS, Some(bool_text(self.twopass))) {
             self.twopass = v == "true";
         }
         let r = form_row(ui, t.codec, |ui| codec_combo(ui, "l_codec", &self.l_groups, &mut self.l_codec, t));
@@ -502,10 +568,14 @@ fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
         ui.label(RichText::new(format!("⚠ {} {w}", env.t.config_warning)).small().color(c().warn));
     }
     ui.add_space(14.0);
-    let req = form.ui(ui, env);
-    // Compress Video has the result as a row of its own
-    if let (Some(r), false) = (&req, matches!(form, Form::Compress(_))) {
-        results(ui, env, r);
+    let req = form.fields.ui(ui, env, &mut form.delete_original);
+    // Compress Video has these as rows of its own
+    if !matches!(form.fields, Fields::Compress(_)) {
+        ui.add_space(2.0);
+        original_check(ui, env, &mut form.delete_original, env.t.delete_original);
+        if let Some(r) = &req {
+            results(ui, env, r);
+        }
     }
     req
 }
@@ -528,6 +598,7 @@ fn buttons(ui: &mut egui::Ui, t: &T, valid: bool) -> (bool, bool) {
 pub struct Shown {
     /// The request the form makes now (None = it is not valid)
     pub request: Option<Request>,
+    pub delete_original: bool,
     pub start: bool,
     pub cancel: bool,
 }
@@ -537,30 +608,39 @@ pub struct Shown {
 pub fn show(ctx: &egui::Context, env: &Env, form: &mut Form, valid: bool) -> Shown {
     let mut pressed = (false, false);
     let (request, _) = window(ctx, true, |ui| pressed = buttons(ui, env.t, valid), |ui| content(ui, env, form));
-    Shown { request, start: pressed.0, cancel: pressed.1 }
+    Shown { request, delete_original: form.delete_original, start: pressed.0, cancel: pressed.1 }
 }
 
 /// The forms the window has to be tall enough for (both tabs of Compress Video, the longest hints)
 fn measured_forms(env: &Env) -> Vec<Form> {
-    if let Form::DeleteAudio(mut f) = Form::new(env) {
-        // the names of the results appear once a track is unticked
-        if let Some(first) = f.tracks.first_mut() {
-            first.1 = false;
+    let with = |fields: Fields| Form { fields, delete_original: false };
+    if let Fields::DeleteAudio(_) = Fields::new(env) {
+        // the names of the results appear once a track is unticked, the line about merging
+        // once it is ticked
+        let mut out = vec![Form::new(env)];
+        for merge in [false, true] {
+            if let Fields::DeleteAudio(mut f) = Fields::new(env) {
+                if let (Some(last), false) = (f.tracks.last_mut(), merge) {
+                    last.1 = false;
+                }
+                f.merge = merge;
+                out.push(with(Fields::DeleteAudio(f)));
+            }
         }
-        return vec![Form::new(env), Form::DeleteAudio(f)];
+        return out;
     }
-    let Form::Compress(_) = Form::new(env) else { return vec![Form::new(env)] };
+    let Fields::Compress(_) = Fields::new(env) else { return vec![Form::new(env)] };
     let mut out = Vec::new();
     for tab in 0..2usize {
         for mode in [ScaleMode::Orig, ScaleMode::Height(720), ScaleMode::Auto] {
             if tab == 0 && mode == ScaleMode::Auto {
                 continue;
             }
-            if let Form::Compress(mut f) = Form::new(env) {
+            if let Fields::Compress(mut f) = Fields::new(env) {
                 f.tab = tab;
                 f.p_scale.mode = mode;
                 f.l_scale.mode = mode;
-                out.push(Form::Compress(f));
+                out.push(with(Fields::Compress(f)));
             }
         }
     }

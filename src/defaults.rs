@@ -20,6 +20,9 @@ pub const WEBP_SIZE: &str = "webp.size";
 pub const WEBP_FPS: &str = "webp.fps";
 pub const WEBP_QUALITY: &str = "webp.quality";
 pub const WEBP_COMPRESSION: &str = "webp.compression";
+pub const DELETE_MERGE: &str = "delete_audio.merge";
+/// "Delete the original when done", one value for every window
+pub const DELETE_ORIGINAL: &str = "original.delete";
 
 /// The values of the Compression field of Compress Video, in its order
 pub const LEVELS: [&str; 3] = ["low", "medium", "high"];
@@ -76,6 +79,8 @@ pub fn fields() -> Vec<(String, Kind)> {
             (WEBP_FPS, Kind::Number { lo: 1, hi: 120 }),
             (WEBP_QUALITY, Kind::Number { lo: 0, hi: 100 }),
             (WEBP_COMPRESSION, Kind::Number { lo: 0, hi: 6 }),
+            (DELETE_MERGE, Kind::Flag),
+            (DELETE_ORIGINAL, Kind::Flag),
         ]
         .map(|(k, kind)| (k.to_string(), kind)),
     );
@@ -95,7 +100,7 @@ pub fn standard(cfg: &Config, key: &str) -> String {
         CODEC | LIMIT_CODEC => s("h264_cpu"),
         RESOLUTION | LIMIT_RESOLUTION => s("orig"),
         AUDIO | LIMIT_AUDIO => s(cfg.default_audio()),
-        MERGE | TWO_PASS => s("false"),
+        MERGE | TWO_PASS | DELETE_MERGE | DELETE_ORIGINAL => s("false"),
         LIMIT_SIZE => s("20"),
         WEBP_SIZE => cfg.webp.size.to_string(),
         WEBP_FPS => cfg.webp.fps.to_string(),

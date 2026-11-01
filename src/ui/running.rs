@@ -19,11 +19,11 @@ pub struct Running {
 }
 
 impl Running {
-    pub fn start(env: &Env, ctx: &egui::Context, req: Request) -> Running {
+    pub fn start(env: &Env, ctx: &egui::Context, req: Request, delete_original: bool) -> Running {
         let tools = env.tools.clone().expect("the window checks for ffmpeg before a job starts");
         let repaint = ctx.clone();
         let prog = Progress::new(Box::new(move || repaint.request_repaint()), false);
-        let job = Job { cfg: env.cfg.clone(), ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe, prog: prog.clone() };
+        let job = Job { cfg: env.cfg.clone(), ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe, prog: prog.clone(), delete_original };
         let files = env.files.clone();
         let worker = std::thread::spawn(move || engine::run(&job, &req, &files));
         Running { prog, worker: Some(worker), close_at: None, keep_open: false }

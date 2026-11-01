@@ -216,6 +216,7 @@ mod tests {
             ffmpeg: PathBuf::from("ffmpeg"),
             ffprobe: PathBuf::from("ffprobe"),
             prog: Progress::new(Box::new(|| {}), false),
+            delete_original: false,
         }
     }
 

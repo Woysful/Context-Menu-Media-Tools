@@ -181,6 +181,27 @@ pub fn probe_json(ffprobe: &Path, file: &Path) -> String {
     }
 }
 
+/// The number of audio tracks of a file (a short ffprobe call, for many files)
+pub fn audio_count(ffprobe: &Path, file: &Path) -> Option<usize> {
+    let out = crate::proc::command(ffprobe)
+        .args(["-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0"])
+        .arg(file)
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).lines().filter(|l| !l.trim().is_empty()).count())
+}
+
+/// The audio tracks of every file (those ffprobe cannot read are left out), a few files at a time
+pub fn audio_counts(ffprobe: &Path, files: &[std::path::PathBuf]) -> Vec<usize> {
+    let files = &files[..files.len().min(500)];
+    let per_thread = files.len().div_ceil(8).max(1);
+    std::thread::scope(|s| {
+        let jobs: Vec<_> =
+            files.chunks(per_thread).map(|part| s.spawn(move || part.iter().filter_map(|f| audio_count(ffprobe, f)).collect::<Vec<_>>())).collect();
+        jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
+    })
+}
+
 pub fn probe(ffprobe: &Path, file: &Path) -> Option<Info> {
     let name = file.file_name()?.to_string_lossy().to_string();
     parse_probe(&name, &probe_json(ffprobe, file))

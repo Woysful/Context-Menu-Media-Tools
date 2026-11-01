@@ -20,6 +20,7 @@ mod scale;
 mod settings;
 mod syspal;
 mod theme;
+mod trash;
 mod ui;
 mod units;
 mod update;
@@ -61,7 +62,9 @@ Options:
   --audio A          compress: copy | none | aac | opus | mp3 | ac3 | eac3 | flac | alac | pcm16 | pcm24
   --tracks 2,3       compress: keep only these audio tracks; delete-audio: remove only these
                      (counted from 1; default: all)
-  --merge            compress: mix the audio tracks that are kept into one
+  --merge            compress, delete-audio: mix the audio tracks that are kept into one
+  --delete-original  delete the original file after a successful result (to the trash or
+                     permanently, as in Settings > General)
   --size N --fps N --quality N --compression N          webp
 ";
 
@@ -159,7 +162,11 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
                 Request::CompressPreset { level, codec, scale, audio, tracks }
             }
         },
-        Action::DeleteAudio => Request::DeleteAudio { remove: track_list },
+        // --merge alone: no track is removed, all of them are mixed
+        Action::DeleteAudio => match (track_list, cli.flag("merge")) {
+            (None, true) => Request::DeleteAudio { remove: Some(vec![]), merge: true },
+            (remove, merge) => Request::DeleteAudio { remove, merge },
+        },
         Action::Webp => Request::Webp {
             size: num("size", cfg.webp.size),
             fps: num("fps", cfg.webp.fps),
@@ -301,17 +308,25 @@ fn run_action(action: Action, custom: Option<String>, cli: Cli) -> i32 {
         Some(request_from(action, &cli, &cfg, first_kind))
     };
     if headless {
-        return run_console(action, request, &cfg, tools, &files);
+        return run_console(action, request, &cfg, tools, &files, cli.flag("delete-original"));
     }
     let request = match request.transpose() {
         Ok(r) => r,
         Err(e) => return emit("cmmt", vec![e], 2),
     };
-    show(ui::Launch { start: ui::Start::Normal, action, custom_id: custom, files, cfg, tools, request, first_kind })
+    let delete_original = cli.flag("delete-original");
+    show(ui::Launch { start: ui::Start::Normal, action, custom_id: custom, files, cfg, tools, request, delete_original, first_kind })
 }
 
 /// `--cli`: the job without a window. `request` is None only for Stats.
-fn run_console(action: Action, request: Option<Result<Request, String>>, cfg: &Arc<Config>, tools: Option<ui::Tools>, files: &[PathBuf]) -> i32 {
+fn run_console(
+    action: Action,
+    request: Option<Result<Request, String>>,
+    cfg: &Arc<Config>,
+    tools: Option<ui::Tools>,
+    files: &[PathBuf],
+    delete_original: bool,
+) -> i32 {
     let t = i18n::t();
     let Some(tools) = tools else {
         eprintln!("{}", t.ffmpeg_missing);
@@ -335,7 +350,7 @@ fn run_console(action: Action, request: Option<Result<Request, String>>, cfg: &A
         eprintln!("{} {w}", t.config_warning);
     }
     let prog = engine::Progress::new(Box::new(|| {}), true);
-    let job = engine::Job { cfg: cfg.clone(), ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe, prog: prog.clone() };
+    let job = engine::Job { cfg: cfg.clone(), ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe, prog: prog.clone(), delete_original };
     engine::run(&job, &req, files);
     println!();
     let st = prog.snapshot();

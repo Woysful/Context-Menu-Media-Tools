@@ -66,6 +66,8 @@ pub struct Settings {
     pub numbered_scripts: bool,
     /// look for a newer version on GitHub (once a day, when the Settings window opens)
     pub check_updates: bool,
+    /// what "Delete the original when done" does: trash | permanent
+    pub delete_mode: String,
     pub ffmpeg: String,
     pub ffprobe: String,
     pub menu: MenuSettings,
@@ -87,6 +89,7 @@ impl Default for Settings {
             show_all_gpus: false,
             numbered_scripts: false,
             check_updates: true,
+            delete_mode: "trash".into(),
             ffmpeg: String::new(),
             ffprobe: String::new(),
             menu: MenuSettings::default(),

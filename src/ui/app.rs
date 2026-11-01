@@ -42,14 +42,15 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(env: Env, start: Start, request: Option<Request>, ctx: &egui::Context, transparent: bool) -> App {
+    /// `request`: skip the form (`--yes`); with whether the originals are deleted
+    pub fn new(env: Env, start: Start, request: Option<(Request, bool)>, ctx: &egui::Context, transparent: bool) -> App {
         let stage = match start {
             Start::Settings => Stage::Settings(Box::new(SettingsState::new(env.cfg.clone()))),
             Start::Message { title, lines, ok } => Stage::Message { title, lines, ok },
             Start::Normal if env.tools.is_none() => Stage::Missing,
             Start::Normal if env.is_stats() => Stage::Stats(Stats::spawn(&env, ctx)),
             Start::Normal => match request {
-                Some(req) => Stage::Running(Running::start(&env, ctx, req)),
+                Some((req, delete_original)) => Stage::Running(Running::start(&env, ctx, req, delete_original)),
                 None => Stage::Form(Form::new(&env)),
             },
         };
@@ -147,7 +148,7 @@ impl eframe::App for App {
                 let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
                 if shown.start || enter {
                     if let Some(req) = self.valid.clone() {
-                        next = Some((Stage::Running(Running::start(&self.env, ctx, req)), 560.0, 380.0));
+                        next = Some((Stage::Running(Running::start(&self.env, ctx, req, shown.delete_original)), 560.0, 380.0));
                     }
                 }
                 close = shown.cancel || (ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()));

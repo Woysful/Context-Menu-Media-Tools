@@ -41,13 +41,17 @@ On Windows 11 the items are under *Show more options*.
 | Convert Video | MP4, AVI, MOV, MKV, M4V, WebM |
 | Convert Audio | WAV, MP3, FLAC, AAC, OGG, WMA, M4A, Opus; for videos, only the audio tracks are converted |
 | Extract Audio | MP3, AAC, Opus, WAV, M4A, MKA |
-| Delete Audio | the video without the audio tracks you untick |
+| Delete Audio | the video without the audio tracks you untick; the kept tracks can be merged into one |
 | Make frame sequence | PNG / JPG / WebP frames in a new folder |
 | Convert to WebP anim | size, fps, quality, compression |
 | Convert Image | JPG, PNG, BMP, TIFF, GIF, WebP, TGA |
 | Stats | duration, size, bitrate and streams of the files, plus the full `ffprobe` output |
 
 Existing files are never overwritten: the result gets a name like `clip_compressed (1).mp4`.
+
+Every option window has **Delete the original when done**: after a successful result the original file goes
+to the trash, or is deleted permanently if you choose that under *Settings → General → Deleting originals*.
+When the trash cannot be used (e.g. a system drive), the original stays and the log says why.
 
 Right-click a field of an option window to make its current value the default (**Save as default**)
 or to go back to the built-in value (**Reset to standard**).
@@ -90,6 +94,7 @@ To add a format or preset, add a new table.
 ```
 cmmt compress --cli --limit 20 --codec h265_cpu video.mp4    # no window, progress in the terminal
 cmmt convert-audio --yes --format mp3 song.wav               # no options dialog
+cmmt delete-audio --cli --merge --delete-original film.mkv   # one mixed track, the original to the trash
 cmmt help
 ```
 
