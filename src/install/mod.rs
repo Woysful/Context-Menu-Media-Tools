@@ -24,6 +24,15 @@ use crate::paths;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The app id of the windows: the name of the menu entry that starts the program. Wayland
+/// matches a window to its entry by it (the icon of the title bar and of the taskbar). An
+/// AppImage that an integration tool (Gear Lever, AppImageLauncher) put into the menu has the
+/// entry of that tool; anything else has cmmt.desktop.
+pub fn app_id() -> String {
+    let entry = paths::appimage().and_then(|image| linux::integrated_entry(&linux::applications_dir(), &image));
+    entry.and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string())).unwrap_or_else(|| "cmmt".into())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Target {
     Kde,

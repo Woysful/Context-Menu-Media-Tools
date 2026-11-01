@@ -116,7 +116,7 @@ pub fn run(l: Launch) -> Result<(), String> {
             .with_inner_size([w * scale, h * scale])
             .with_min_inner_size([360.0 * scale, 160.0 * scale])
             .with_title("Media Tools")
-            .with_app_id("cmmt")
+            .with_app_id(crate::install::app_id())
             .with_icon(icon())
             .with_transparent(transparent),
         centered: true,
@@ -133,8 +133,8 @@ pub fn run(l: Launch) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-/// The icon of the window (X11, Windows). Wayland takes it from the desktop file named like
-/// the app id: cmmt.desktop (see install::linux).
+/// The icon of the window (X11, Windows). Wayland takes it from the menu entry named like the
+/// app id (see `install::app_id`).
 fn icon() -> egui::IconData {
     eframe::icon_data::from_png_bytes(include_bytes!("../../assets/cmmt.png")).unwrap_or_default()
 }
