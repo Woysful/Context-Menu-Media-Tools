@@ -1,6 +1,6 @@
 //! The progress of a job, then its result.
 
-use super::widgets::{button_row, caption, card, chars_fitting, primary_button, secondary_button, short, title, window};
+use super::widgets::{button_row, caption, card, fit_name, primary_button, secondary_button, title, window};
 use super::Env;
 use crate::engine::{self, Job, Line, LineKind, Progress, Request, State};
 use crate::media;
@@ -144,7 +144,7 @@ fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
             caption(ui, &t.file_of.replacen("{}", &(s.file_index + 1).to_string(), 1).replacen("{}", &s.file_count.to_string(), 1));
         }
         if !s.file_name.is_empty() {
-            ui.label(bold(short(&s.file_name, chars_fitting(ui)), 13.0));
+            ui.label(bold(fit_name(ui, &s.file_name, egui::FontId::new(13.0, crate::theme::bold_family())), 13.0));
             if let Some(info) = env.infos.iter().find(|i| i.name == s.file_name) {
                 ui.label(RichText::new(media::describe(info, t.audio_word)).small().color(k.muted));
             }

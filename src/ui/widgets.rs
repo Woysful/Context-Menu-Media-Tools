@@ -15,25 +15,49 @@ pub fn text_width(ctx: &egui::Context, text: &str, font: FontId) -> f32 {
     ctx.fonts(|f| f.layout_no_wrap(text.to_string(), font, Color32::WHITE).size().x)
 }
 
-/// How many characters of a 13 px name fit into the width of `ui` (the font is monospaced)
-pub fn chars_fitting(ui: &egui::Ui) -> usize {
-    ((ui.available_width() / 7.8) as usize).clamp(16, 160)
-}
-
 pub fn file_name(path: &std::path::Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
 }
 
-/// A long name with its middle cut out, so the extension stays visible
-pub fn short(name: &str, max: usize) -> String {
+/// How many characters stay at the end of a cut name: the extension and 5 before it
+fn tail_len(name: &str) -> usize {
+    let chars = name.chars().count();
+    let ext = name.rfind('.').map(|i| name[i..].chars().count()).filter(|&n| n > 1 && n <= 9 && n < chars);
+    (ext.unwrap_or(3) + 5).min(chars)
+}
+
+/// The name with its middle cut out, `head` characters kept at the start ("Verylongfile…blabla.mp4")
+pub fn cut_name(name: &str, head: usize) -> String {
     let chars: Vec<char> = name.chars().collect();
-    if chars.len() <= max {
-        name.to_string()
-    } else {
-        let head: String = chars[..max.saturating_sub(9)].iter().collect();
-        let tail: String = chars[chars.len() - 6..].iter().collect();
-        format!("{head}…{tail}")
+    let tail = tail_len(name);
+    if head + tail + 1 >= chars.len() {
+        return name.to_string();
     }
+    let start: String = chars[..head].iter().collect();
+    let end: String = chars[chars.len() - tail..].iter().collect();
+    format!("{}…{}", start.trim_end(), end)
+}
+
+/// The name cut in the middle so that it fits into `width` in `font`
+pub fn fit_name_in(ctx: &egui::Context, name: &str, font: FontId, width: f32) -> String {
+    if text_width(ctx, name, font.clone()) <= width {
+        return name.to_string();
+    }
+    let (mut lo, mut hi) = (0, name.chars().count());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if text_width(ctx, &cut_name(name, mid), font.clone()) <= width {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    cut_name(name, lo)
+}
+
+/// The name cut in the middle so that it fits into the width left in `ui`
+pub fn fit_name(ui: &egui::Ui, name: &str, font: FontId) -> String {
+    fit_name_in(ui.ctx(), name, font, ui.available_width() - 2.0)
 }
 
 /// The title of a window
@@ -280,4 +304,17 @@ pub fn window<R>(ctx: &egui::Context, scroll: bool, footer: impl FnOnce(&mut egu
         })
         .inner;
     (inner, BODY_TOP + content_h + foot.response.rect.height())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cut_name;
+
+    #[test]
+    fn cut_keeps_the_end_of_the_name() {
+        assert_eq!(cut_name("Verylongfilename_blabla.mp4", 8), "Verylong…labla.mp4");
+        assert_eq!(cut_name("short.mp4", 3), "short.mp4");
+        assert_eq!(cut_name("no extension at all", 4), "no e…n at all");
+        assert_eq!(cut_name("clip.unusually-long-ext", 4), "clip…long-ext");
+    }
 }

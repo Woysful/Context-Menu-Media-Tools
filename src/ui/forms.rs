@@ -3,8 +3,8 @@
 use super::dropdown::{build_groups, codec_combo, dropdown, need_id, Col, Group};
 use super::scale_field::ScaleField;
 use super::widgets::{
-    button_row, card, chars_fitting, field, file_name, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button, segmented,
-    short, slider_row, text_width, title, window, MARGIN,
+    button_row, card, field, file_name, fit_name, fit_name_in, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button,
+    segmented, slider_row, text_width, title, window, MARGIN,
 };
 use super::Env;
 use crate::action::Action;
@@ -538,9 +538,14 @@ fn result_row(ui: &mut egui::Ui, env: &Env, req: Option<&Request>) {
     let more = env.files.len().saturating_sub(1);
     form_row(ui, env.t.result, |ui| {
         ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTROL_H), Layout::left_to_right(Align::Center), |ui| {
+            let font = egui::TextStyle::Body.resolve(ui.style());
             let text = match first {
-                Some(n) if more > 0 => format!("{n}  (+{more})"),
-                Some(n) => n,
+                Some(n) if more > 0 => {
+                    let suffix = format!("  (+{more})");
+                    let room = ui.available_width() - 2.0 - text_width(ui.ctx(), &suffix, font.clone());
+                    format!("{}{suffix}", fit_name_in(ui.ctx(), &n, font, room))
+                }
+                Some(n) => fit_name(ui, &n, font),
                 None => "—".into(),
             };
             ui.add(egui::Label::new(RichText::new(text).color(c().text)).truncate());
@@ -556,13 +561,13 @@ fn header(ui: &mut egui::Ui, env: &Env) {
     }
     card(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 3.0;
-        let max = chars_fitting(ui);
+        let font = FontId::new(13.0, theme::bold_family());
         for (i, f) in env.files.iter().take(3).enumerate() {
             if i > 0 {
                 ui.add_space(6.0);
             }
             let name = file_name(f);
-            ui.label(bold(short(&name, max), 13.0));
+            ui.label(bold(fit_name(ui, &name, font.clone()), 13.0));
             let about = env.infos.iter().find(|x| x.name == name).map(|x| media::describe(x, env.t.audio_word)).unwrap_or_default();
             if !about.is_empty() {
                 ui.label(RichText::new(about).small().color(muted()));
@@ -584,9 +589,10 @@ fn results(ui: &mut egui::Ui, env: &Env, req: &Request) {
     ui.add_space(4.0);
     field(ui, env.t.result, |ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
-        let max = chars_fitting(ui).saturating_sub(2);
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let room = ui.available_width() - 2.0 - text_width(ui.ctx(), "→ ", font.clone());
         for n in &names {
-            ui.label(RichText::new(format!("→ {}", short(n, max))).color(muted()));
+            ui.label(RichText::new(format!("→ {}", fit_name_in(ui.ctx(), n, font.clone(), room))).color(muted()));
         }
     });
 }
@@ -677,7 +683,7 @@ fn measured_forms(env: &Env) -> Vec<Form> {
 }
 
 /// Lay the form out once in an invisible context and return the size the window needs.
-/// The width follows the names of the files, the height follows the content.
+/// The height follows the content.
 pub fn measure(env: &Env) -> (f32, f32) {
     let ctx = egui::Context::default();
     theme::install_fonts(&ctx);
@@ -690,10 +696,8 @@ pub fn measure(env: &Env) -> (f32, f32) {
         (Action::Webp, false) => 480.0,
         _ => 440.0,
     };
-    let name_font = FontId::new(13.0, theme::bold_family());
-    let names = env.files.iter().take(3).map(|f| text_width(&ctx, &file_name(f), name_font.clone()));
-    let about = env.infos.iter().map(|i| text_width(&ctx, &media::describe(i, env.t.audio_word), FontId::proportional(11.5)));
-    let text_w = names.chain(about).fold(0.0, f32::max);
+    // long names are cut to the width, only the line about the file widens the window
+    let text_w = env.infos.iter().map(|i| text_width(&ctx, &media::describe(i, env.t.audio_word), FontId::proportional(11.5))).fold(0.0, f32::max);
     // the card adds its margins and border
     let width = (text_w + 2.0 * MARGIN + 2.0 * 13.0 + 6.0).clamp(min_w, 960.0_f32.max(min_w));
 

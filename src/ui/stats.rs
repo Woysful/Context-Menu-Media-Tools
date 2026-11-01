@@ -1,7 +1,7 @@
 //! The Stats window: what is in each file, from ffprobe. The overview is made of the numbers
 //! that matter and one section per stream; the full text of ffprobe is one click away.
 
-use super::widgets::{button_row, caption, card, file_name, muted, primary_button, secondary_button, title, window};
+use super::widgets::{button_row, caption, card, file_name, fit_name_in, muted, primary_button, secondary_button, title, window};
 use super::Env;
 use crate::engine;
 use crate::media;
@@ -90,7 +90,9 @@ impl Stats {
                                 ui.add_space(6.0);
                                 ui.add(egui::Separator::default().spacing(14.0));
                             }
-                            ui.label(bold(f.name.as_str(), 14.0));
+                            // clear of the scroll bar
+                            let name = fit_name_in(ui.ctx(), &f.name, egui::FontId::new(14.0, crate::theme::bold_family()), ui.available_width() - 14.0);
+                            ui.label(bold(name, 14.0));
                             ui.add_space(6.0);
                             match (&f.report, raw) {
                                 (Some(r), false) => overview(ui, i, r),
