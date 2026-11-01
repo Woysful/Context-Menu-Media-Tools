@@ -81,12 +81,15 @@ impl Stats {
                     });
                     return;
                 };
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    for (i, f) in list.iter().enumerate() {
-                        if i > 0 {
-                            ui.add_space(10.0);
-                        }
-                        card(ui, |ui| {
+                // the frame stays, the files scroll inside it (a frame that scrolls is cut at the edges)
+                let h = (ui.available_height() - 22.0).max(60.0);
+                card(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(h).auto_shrink([false, false]).show(ui, |ui| {
+                        for (i, f) in list.iter().enumerate() {
+                            if i > 0 {
+                                ui.add_space(6.0);
+                                ui.add(egui::Separator::default().spacing(14.0));
+                            }
                             ui.label(bold(f.name.as_str(), 14.0));
                             ui.add_space(6.0);
                             match (&f.report, raw) {
@@ -95,8 +98,8 @@ impl Stats {
                                     ui.add(egui::Label::new(RichText::new(&f.text).monospace().size(12.0)).wrap());
                                 }
                             }
-                        });
-                    }
+                        }
+                    });
                 });
             },
         );

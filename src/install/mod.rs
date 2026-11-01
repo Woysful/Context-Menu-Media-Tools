@@ -246,13 +246,14 @@ pub fn install(opts: &Options) -> (i32, Vec<String>) {
         if opts.path {
             out.extend(terminal_command(&exe));
         }
-        // an integrated AppImage has its menu entry already: a second one would show twice in the launcher
+        // an integrated AppImage has its menu entry already: a second one would show twice in the
+        // launcher, so ours is hidden (it still gives the windows their icon)
         match paths::appimage().and_then(|image| linux::integrated_entry(&linux::applications_dir(), &image)) {
             Some(entry) => {
-                linux::launcher_uninstall();
                 out.push(format!("application menu: the AppImage has its entry already ({})", entry.display()));
+                out.extend(linux::launcher_install(&exe, true));
             }
-            None => out.extend(linux::launcher_install(&exe)),
+            None => out.extend(linux::launcher_install(&exe, false)),
         }
     }
     if paths::find_tool("ffmpeg", &cfg.settings.ffmpeg).is_none() || paths::find_tool("ffprobe", &cfg.settings.ffprobe).is_none() {

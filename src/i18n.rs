@@ -242,7 +242,7 @@ static EN: T = T {
     merge_kept: "Merge the kept tracks into one",
     del_merge_hint: "They are mixed and encoded as one track; the video is still copied.",
     original: "Original",
-    delete_after: "Delete it when done",
+    delete_after: "Delete original file",
     delete_original: "Delete the original when done",
     to_trash: "to the trash",
     for_good: "permanently, without the trash",

@@ -115,8 +115,9 @@ pub fn run(l: Launch) -> Result<(), String> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([w * scale, h * scale])
             .with_min_inner_size([360.0 * scale, 160.0 * scale])
-            .with_title(format!("Media Tools — {}", env.title))
+            .with_title("Media Tools")
             .with_app_id("cmmt")
+            .with_icon(icon())
             .with_transparent(transparent),
         centered: true,
         ..Default::default()
@@ -132,13 +133,20 @@ pub fn run(l: Launch) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// The icon of the window (X11, Windows). Wayland takes it from the desktop file named like
+/// the app id: cmmt.desktop (see install::linux).
+fn icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../../assets/cmmt.png")).unwrap_or_default()
+}
+
 fn initial_size(env: &Env, start: &Start, direct: bool) -> (f32, f32) {
     match start {
         Start::Settings => (820.0, 620.0),
         Start::Message { .. } => (640.0, 300.0),
         Start::Normal if env.tools.is_none() => (520.0, 230.0),
         Start::Normal if env.is_stats() => (780.0, 560.0),
-        Start::Normal if direct => (560.0, 380.0),
+        // the progress window fits its content on its first frame
+        Start::Normal if direct => (560.0, 200.0),
         Start::Normal => forms::measure(env),
     }
 }

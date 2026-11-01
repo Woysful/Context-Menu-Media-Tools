@@ -16,7 +16,19 @@ pub struct Running {
     worker: Option<JoinHandle<()>>,
     close_at: Option<Instant>,
     keep_open: bool,
+    /// the height the window was last given: as high as its content, or `LOG_H` once the
+    /// messages do not fit (they scroll then)
+    sized: Option<Size>,
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum Size {
+    Fit(u32),
+    Log,
+}
+
+/// The height of the window once there are messages
+const LOG_H: f32 = 380.0;
 
 impl Running {
     pub fn start(env: &Env, ctx: &egui::Context, req: Request, delete_original: bool) -> Running {
@@ -26,7 +38,7 @@ impl Running {
         let job = Job { cfg: env.cfg.clone(), ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe, prog: prog.clone(), delete_original };
         let files = env.files.clone();
         let worker = std::thread::spawn(move || engine::run(&job, &req, &files));
-        Running { prog, worker: Some(worker), close_at: None, keep_open: false }
+        Running { prog, worker: Some(worker), close_at: None, keep_open: false, sized: None }
     }
 
     /// Cancel the job and wait until it has stopped (the window is closing)
@@ -65,7 +77,8 @@ impl Running {
 
         let prog = &self.prog;
         let keep_open = &mut self.keep_open;
-        window(
+        let mut overflow = false;
+        let (_, needed) = window(
             ctx,
             false,
             |ui| {
@@ -95,10 +108,28 @@ impl Running {
                     ui.add_space(10.0);
                 }
                 if !s.lines.is_empty() {
-                    log(ui, &s.lines);
+                    overflow = log(ui, &s.lines);
                 }
             },
         );
+        // No empty space under the content. The log is shown whole while it fits; once it does
+        // not, the window gets taller and stays so until the job ends.
+        let fit = Size::Fit(needed.ceil() as u32 + 2);
+        let want = match (overflow, self.sized) {
+            (true, _) => Size::Log,
+            (false, Some(Size::Log)) if !s.finished => Size::Log,
+            _ => fit,
+        };
+        if self.sized != Some(want) {
+            let h = match want {
+                Size::Fit(h) => h as f32,
+                Size::Log => LOG_H,
+            };
+            let z = ctx.zoom_factor();
+            let w = ctx.screen_rect().width().max(560.0);
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w * z, h * z)));
+            self.sized = Some(want);
+        }
         close || (s.finished && ctx.input(|i| i.key_pressed(egui::Key::Escape)))
     }
 }
@@ -135,13 +166,14 @@ fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
     });
 }
 
-/// The messages of the job; fills the rest of the window
-fn log(ui: &mut egui::Ui, lines: &[Line]) {
+/// The messages of the job: as high as they are, at most the rest of the window. Returns
+/// true when they do not fit.
+fn log(ui: &mut egui::Ui, lines: &[Line]) -> bool {
     let k = c();
     // the card adds its margins and border to the height of the list
-    let h = (ui.available_height() - 22.0).max(60.0);
+    let h = (ui.available_height() - 22.0).max(20.0);
     card(ui, |ui| {
-        egui::ScrollArea::vertical().max_height(h).auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
+        let out = egui::ScrollArea::vertical().max_height(h).auto_shrink([false, true]).stick_to_bottom(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 5.0;
             for l in lines {
                 let (prefix, col) = match l.kind {
@@ -153,5 +185,6 @@ fn log(ui: &mut egui::Ui, lines: &[Line]) {
                 ui.label(RichText::new(format!("{prefix}{}", l.text)).size(12.0).color(col));
             }
         });
-    });
+        out.content_size.y > out.inner_rect.height() + 2.0
+    })
 }

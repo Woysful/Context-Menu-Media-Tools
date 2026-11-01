@@ -187,6 +187,8 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
         s.spacing.interact_size.y = CONTROL_H;
         s.spacing.combo_height = 380.0;
         s.spacing.slider_rail_height = 3.0;
+        // between a checkbox and its text
+        s.spacing.icon_spacing = 8.0;
         s.text_styles.insert(TextStyle::Body, FontId::proportional(13.5));
         s.text_styles.insert(TextStyle::Button, FontId::proportional(13.5));
         s.text_styles.insert(TextStyle::Heading, FontId::new(18.0, bold_family()));

@@ -3,8 +3,8 @@
 use super::dropdown::{build_groups, codec_combo, dropdown, need_id, Col, Group};
 use super::scale_field::ScaleField;
 use super::widgets::{
-    button_row, card, chars_fitting, field, file_name, form_row, hint, line_edit, muted, number_field, one_line, option_grid, primary_button, secondary_button,
-    segmented, short, slider_row, text_width, title, window, MARGIN,
+    button_row, card, chars_fitting, field, file_name, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button, segmented,
+    short, slider_row, text_width, title, window, MARGIN,
 };
 use super::Env;
 use crate::action::Action;
@@ -138,8 +138,8 @@ impl Fields {
                 let fps = parse_in(&f.fps_text, 1, 120);
                 let (r_size, r_fps) = ui.columns(2, |cols| {
                     (
-                        field(&mut cols[0], t.webp_size, |ui| number_field(ui, &mut f.size_text, size.is_some(), "px")),
-                        field(&mut cols[1], t.webp_fps, |ui| number_field(ui, &mut f.fps_text, fps.is_some(), "")),
+                        field(&mut cols[0], t.webp_size, |ui| small_number(ui, &mut f.size_text, size.is_some(), "px")),
+                        field(&mut cols[1], t.webp_fps, |ui| small_number(ui, &mut f.fps_text, fps.is_some(), "")),
                     )
                 });
                 hint(ui, t.webp_size_hint);
@@ -248,6 +248,18 @@ impl DeleteForm {
             _ => Some(Request::DeleteAudio { remove: Some(remove), merge }),
         }
     }
+}
+
+/// A number field as high as the other controls, like "Size limit … MB" of Compress Video
+fn small_number(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &str) -> egui::Response {
+    ui.horizontal(|ui| {
+        let r = ui.add(line_edit(text, 64.0, valid));
+        if !suffix.is_empty() {
+            ui.label(RichText::new(suffix).color(muted()));
+        }
+        r
+    })
+    .inner
 }
 
 fn bool_text(on: bool) -> &'static str {

@@ -127,7 +127,8 @@ impl eframe::App for App {
         let k = c();
         let t = self.env.t;
         let mut close = false;
-        let mut next: Option<(Stage, f32, f32)> = None;
+        // the new stage and the size of the window for it (None: the stage sizes the window itself)
+        let mut next: Option<(Stage, Option<(f32, f32)>)> = None;
 
         match &mut self.stage {
             Stage::Settings(st) => {
@@ -135,7 +136,7 @@ impl eframe::App for App {
                     match settings::run_command(st, cmd, t) {
                         After::Stay => {}
                         After::Close => close = true,
-                        After::Report { title, lines, ok } => next = Some((Stage::Message { title, lines, ok }, 640.0, 300.0)),
+                        After::Report { title, lines, ok } => next = Some((Stage::Message { title, lines, ok }, Some((640.0, 300.0)))),
                     }
                 }
             }
@@ -148,7 +149,7 @@ impl eframe::App for App {
                 let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
                 if shown.start || enter {
                     if let Some(req) = self.valid.clone() {
-                        next = Some((Stage::Running(Running::start(&self.env, ctx, req, shown.delete_original)), 560.0, 380.0));
+                        next = Some((Stage::Running(Running::start(&self.env, ctx, req, shown.delete_original)), None));
                     }
                 }
                 close = shown.cancel || (ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()));
@@ -175,9 +176,12 @@ impl eframe::App for App {
             }
         }
 
-        if let Some((stage, w, h)) = next {
+        if let Some((stage, size)) = next {
             self.stage = stage;
-            Self::resize_to(ctx, w, h);
+            if let Some((w, h)) = size {
+                Self::resize_to(ctx, w, h);
+            }
+            ctx.request_repaint();
         }
         if close {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
