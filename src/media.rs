@@ -74,7 +74,6 @@ pub struct Info {
     /// the video bitrate was derived from the file size (MKV / WebM store none)
     pub bitrate_estimated: bool,
     pub audio_bps: Option<f64>,
-    pub has_audio: bool,
     pub audio: Vec<AudioTrack>,
 }
 
@@ -136,7 +135,7 @@ pub fn parse_probe(name: &str, json: &str) -> Option<Info> {
     let is_cover = |s: &Value| s.get("disposition").is_some_and(|d| num(d.get("attached_pic")).unwrap_or(0.0) != 0.0);
     let video = streams.iter().find(|s| s["codec_type"] == "video" && !is_cover(s));
     let audio = streams.iter().find(|s| s["codec_type"] == "audio");
-    let mut info = Info { name: name.to_string(), has_audio: audio.is_some(), ..Default::default() };
+    let mut info = Info { name: name.to_string(), ..Default::default() };
     info.duration = num(fmt.and_then(|f| f.get("duration"))).or_else(|| num(video.and_then(|v| v.get("duration"))));
     info.audio_bps = audio.and_then(|a| num(a.get("bit_rate")));
     info.audio = streams
@@ -225,7 +224,7 @@ mod tests {
         assert_eq!((i.width, i.height), (1920, 1080));
         assert_eq!(i.fps, Some(30.0));
         assert_eq!(i.duration, Some(6.0));
-        assert!(i.has_audio);
+        assert!(!i.audio.is_empty());
         assert_eq!(i.audio.len(), 1);
         assert_eq!(i.audio[0].describe(), "AAC · stereo · eng · Commentary");
         assert_eq!(AudioTrack { codec: "pcm_s16le".into(), channels: 6, language: "und".into(), ..Default::default() }.describe(), "PCM (s16le) · 6 ch");
@@ -239,7 +238,7 @@ mod tests {
         let i = parse_probe("a.mkv", json).unwrap();
         assert!(i.bitrate_estimated);
         assert_eq!(i.video_bps, Some(1_000_000.0));
-        assert!(!i.has_audio);
+        assert!(i.audio.is_empty());
     }
 
     #[test]
@@ -248,7 +247,7 @@ mod tests {
             {"codec_type":"video","width":500,"height":500,"disposition":{"attached_pic":1}}],"format":{"duration":"10"}}"#;
         let i = parse_probe("a.mp3", json).unwrap();
         assert_eq!(i.width, 0);
-        assert!(i.has_audio);
+        assert!(!i.audio.is_empty());
     }
 
     #[test]

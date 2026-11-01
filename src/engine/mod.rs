@@ -21,6 +21,15 @@ use output::short_name;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// The audio tracks of Compress Video that go into the result
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Tracks {
+    /// numbers of the tracks to keep, from 0 (None = all of them)
+    pub keep: Option<Vec<usize>>,
+    /// mix the kept tracks into one
+    pub merge: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum Request {
     CompressPreset {
@@ -29,6 +38,7 @@ pub enum Request {
         scale: ScaleMode,
         /// key of [compress_audio]
         audio: String,
+        tracks: Tracks,
     },
     CompressLimit {
         mb: f64,
@@ -36,6 +46,7 @@ pub enum Request {
         scale: ScaleMode,
         twopass: bool,
         audio: String,
+        tracks: Tracks,
     },
     Convert {
         what: ConvertKind,
@@ -154,15 +165,15 @@ fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<String> {
     let info = media::probe(&job.ffprobe, file).unwrap_or_else(|| Info { name: short_name(file), ..Default::default() });
     let unknown = |key: &str| Failure::Error(format!("{} {key}", t.unknown_codec));
     match req {
-        Request::CompressPreset { level, codec, scale, audio } => {
+        Request::CompressPreset { level, codec, scale, audio, tracks } => {
             let c = job.cfg.compress_codec(codec).ok_or_else(|| unknown(codec))?;
             // "auto" only exists in the size limit mode
             let mode = if *scale == ScaleMode::Auto { ScaleMode::Orig } else { *scale };
-            compress::preset(job, file, &info, *level, c, mode, audio)
+            compress::preset(job, file, &info, *level, c, mode, audio, tracks)
         }
-        Request::CompressLimit { mb, codec, scale, twopass, audio } => {
+        Request::CompressLimit { mb, codec, scale, twopass, audio, tracks } => {
             let c = job.cfg.limit_codec(codec).ok_or_else(|| unknown(codec))?;
-            compress::limit(job, file, &info, c, *mb, *scale, *twopass, audio)
+            compress::limit(job, file, &info, c, *mb, *scale, *twopass, audio, tracks)
         }
         Request::Convert { what, format } => {
             let f = job.cfg.format(*what, format).ok_or_else(|| unknown(format))?;

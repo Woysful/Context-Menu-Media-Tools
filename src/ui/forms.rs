@@ -9,7 +9,7 @@ use super::widgets::{
 use super::Env;
 use crate::action::Action;
 use crate::config::{Codec, ConvertKind};
-use crate::engine::{self, Request};
+use crate::engine::{self, Request, Tracks};
 use crate::i18n::T;
 use crate::media;
 use crate::scale::ScaleMode;
@@ -30,6 +30,9 @@ pub struct CompressForm {
     twopass: bool,
     p_audio: String,
     l_audio: String,
+    /// the audio tracks of the files (shown from two on) and whether each one is kept
+    tracks: Vec<(String, bool)>,
+    merge: bool,
 }
 
 pub struct FormatForm {
@@ -85,6 +88,8 @@ impl Form {
                 twopass: false,
                 p_audio: cfg.default_audio().to_string(),
                 l_audio: cfg.default_audio().to_string(),
+                tracks: track_list(env),
+                merge: false,
             })),
             Action::Webp => Form::Webp(WebpForm {
                 size_text: cfg.webp.size.to_string(),
@@ -135,18 +140,21 @@ impl Form {
     }
 }
 
+/// The audio tracks of the files, all ticked. Track N is described by the first file that has it.
+fn track_list(env: &Env) -> Vec<(String, bool)> {
+    let count = env.infos.iter().map(|i| i.audio.len()).max().unwrap_or(0);
+    (0..count)
+        .map(|n| {
+            let about = env.infos.iter().find_map(|i| i.audio.get(n)).map(|a| a.describe()).unwrap_or_default();
+            let label = if about.is_empty() { format!("{} {}", env.t.del_track, n + 1) } else { format!("{} {} — {about}", env.t.del_track, n + 1) };
+            (label, true)
+        })
+        .collect()
+}
+
 impl DeleteForm {
-    /// Track N is described by the first file that has it; all of them are ticked (kept)
     fn new(env: &Env) -> DeleteForm {
-        let count = env.infos.iter().map(|i| i.audio.len()).max().unwrap_or(0);
-        let tracks = (0..count)
-            .map(|n| {
-                let about = env.infos.iter().find_map(|i| i.audio.get(n)).map(|a| a.describe()).unwrap_or_default();
-                let label = if about.is_empty() { format!("{} {}", env.t.del_track, n + 1) } else { format!("{} {} — {about}", env.t.del_track, n + 1) };
-                (label, true)
-            })
-            .collect();
-        DeleteForm { tracks }
+        DeleteForm { tracks: track_list(env) }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
@@ -204,12 +212,52 @@ impl CompressForm {
         form_row(ui, t.codec, |ui| codec_combo(ui, "p_codec", &self.p_groups, &mut self.p_codec, t));
         form_row(ui, t.resolution, |ui| self.p_scale.ui(ui, "p_scale", t, false, &env.infos));
         form_row(ui, t.audio, |ui| audio_combo(ui, "p_audio", env, &mut self.p_audio));
-        (!self.p_scale.invalid).then(|| Request::CompressPreset {
-            level: self.level,
-            codec: self.p_codec.clone(),
-            scale: self.p_scale.mode,
-            audio: self.p_audio.clone(),
-        })
+        let tracks = self.tracks_row(ui, env, &self.p_audio.clone());
+        if self.p_scale.invalid {
+            return None;
+        }
+        Some(Request::CompressPreset { level: self.level, codec: self.p_codec.clone(), scale: self.p_scale.mode, audio: self.p_audio.clone(), tracks: tracks? })
+    }
+
+    /// The audio tracks to keep and "merge into one" (for files with several tracks). None: no
+    /// track is ticked.
+    fn tracks_row(&mut self, ui: &mut egui::Ui, env: &Env, audio: &str) -> Option<Tracks> {
+        let t = env.t;
+        if self.tracks.len() < 2 {
+            return Some(Tracks::default());
+        }
+        let removes = env.cfg.audio_codec(audio).is_some_and(|a| a.removes());
+        let kept: Vec<usize> = self.tracks.iter().enumerate().filter(|(_, (_, on))| *on).map(|(i, _)| i).collect();
+        form_row(ui, t.tracks, |ui| {
+            ui.add_enabled_ui(!removes, |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                for (label, on) in &mut self.tracks {
+                    ui.checkbox(on, label.as_str());
+                }
+                ui.add_space(2.0);
+                ui.add_enabled(kept.len() > 1, egui::Checkbox::new(&mut self.merge, t.merge_tracks));
+            });
+            let (note, color) = if removes {
+                (t.tracks_hint, muted())
+            } else if kept.is_empty() {
+                (t.tracks_tick, c().err)
+            } else if self.merge && kept.len() > 1 {
+                (t.merge_hint, muted())
+            } else if env.files.len() > 1 {
+                (t.del_by_number, muted())
+            } else {
+                (t.tracks_hint, muted())
+            };
+            one_line(ui, note, color);
+        });
+        if removes {
+            return Some(Tracks::default());
+        }
+        if kept.is_empty() {
+            return None;
+        }
+        let keep = (kept.len() < self.tracks.len()).then_some(kept.clone());
+        Some(Tracks { keep, merge: self.merge && kept.len() > 1 })
     }
 
     fn limit_rows(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
@@ -246,6 +294,7 @@ impl CompressForm {
         form_row(ui, t.codec, |ui| codec_combo(ui, "l_codec", &self.l_groups, &mut self.l_codec, t));
         form_row(ui, t.resolution, |ui| self.l_scale.ui(ui, "l_scale", t, true, &env.infos));
         form_row(ui, t.audio, |ui| audio_combo(ui, "l_audio", env, &mut self.l_audio));
+        let tracks = self.tracks_row(ui, env, &self.l_audio.clone());
         if self.l_scale.invalid {
             return None;
         }
@@ -255,6 +304,7 @@ impl CompressForm {
             scale: self.l_scale.mode,
             twopass: self.twopass && twopass_ok,
             audio: self.l_audio.clone(),
+            tracks: tracks?,
         })
     }
 }

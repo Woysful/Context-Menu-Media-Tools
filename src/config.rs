@@ -119,6 +119,19 @@ impl AudioCodec {
     pub fn removes(&self) -> bool {
         crate::cmdline::split(&self.args).is_ok_and(|w| w.iter().any(|x| x == "-an"))
     }
+
+    /// The tracks are copied, not encoded
+    pub fn copies(&self) -> bool {
+        crate::cmdline::split(&self.args).is_ok_and(|w| w.iter().any(|x| x == "copy"))
+    }
+}
+
+/// "Merge into one track" of Compress Video
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct AudioMerge {
+    /// the filter that mixes the tracks; {count} = their number
+    pub filter: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -192,6 +205,7 @@ pub struct Config {
     pub compress: Vec<(String, Codec)>,
     pub limit: Vec<(String, Codec)>,
     pub audio: Vec<(String, AudioCodec)>,
+    pub audio_merge: AudioMerge,
     formats: [Formats; 6],
     pub delete_audio: DeleteAudio,
     pub webp: WebpAnim,
@@ -343,6 +357,7 @@ impl Config {
             compress: section(&root, "compress", &mut warnings),
             limit: section(&root, "limit", &mut warnings),
             audio: section(&root, "compress_audio", &mut warnings),
+            audio_merge: single(&root, "compress_audio_merge", &mut warnings),
             formats: ConvertKind::ALL.map(|k| section(&root, k.section(), &mut warnings)),
             delete_audio: single(&root, "delete_audio", &mut warnings),
             webp: single(&root, "webp_anim", &mut warnings),
@@ -436,6 +451,8 @@ mod tests {
         assert!(!c.audio_codec("copy").unwrap().has_bitrate() && c.audio_codec("aac").unwrap().has_bitrate());
         assert!(c.audio_codec(&c.audio_codec("copy").unwrap().fallback).is_some());
         assert!(c.compress.iter().all(|(_, e)| e.command.contains("{audio}")));
+        assert!(c.audio_codec("copy").unwrap().copies() && !c.audio_codec("aac").unwrap().copies());
+        assert!(c.audio_merge.filter.contains("{count}"));
     }
 
     #[test]

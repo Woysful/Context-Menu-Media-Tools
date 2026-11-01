@@ -3,7 +3,7 @@
 use super::budget::{self, bitrates, chunk_target, plan_chunks, AudioSize};
 use super::output::{new_file_ext, short_name};
 use super::runner::{run_ffmpeg, run_template, value_after, TempDir, Track};
-use super::{Failure, Job, Outcome};
+use super::{Failure, Job, Outcome, Tracks};
 use crate::cmdline::{self, Val};
 use crate::config::{AudioCodec, Codec};
 use crate::gpu;
@@ -95,20 +95,73 @@ fn find_audio<'a>(job: &'a Job, key: &str) -> Outcome<&'a AudioCodec> {
     job.cfg.audio_codec(key).ok_or_else(|| Failure::Error(format!("{} {key}", i18n::t().unknown_codec)))
 }
 
+/// The audio tracks of one file that go into the result
+struct Selection {
+    /// numbers of the tracks of the file, from 0
+    kept: Vec<usize>,
+    /// the options that pick them (after the video): -map, or a -filter_complex that mixes them
+    maps: Vec<String>,
+    /// they are mixed into one
+    merged: bool,
+}
+
+impl Selection {
+    /// The number of audio tracks of the result
+    fn count(&self) -> usize {
+        if self.merged {
+            1
+        } else {
+            self.kept.len()
+        }
+    }
+}
+
+/// The tracks of `tracks` this file has (a track it does not have is left out)
+fn select(job: &Job, file: &Path, info: &Info, tracks: &Tracks) -> Selection {
+    let all = info.audio.len();
+    let kept: Vec<usize> = match &tracks.keep {
+        None => (0..all).collect(),
+        Some(k) => k.iter().copied().filter(|i| *i < all).collect(),
+    };
+    if kept.is_empty() && all > 0 {
+        job.prog.info(format!("{}: {}", short_name(file), i18n::t().tracks_none));
+    }
+    let merged = tracks.merge && kept.len() > 1;
+    let maps = if merged {
+        let inputs: String = kept.iter().map(|i| format!("[0:a:{i}]")).collect();
+        let filter = job.cfg.audio_merge.filter.replace("{count}", &kept.len().to_string());
+        vec![s("-filter_complex"), format!("{inputs}{filter}[mix]"), s("-map"), s("[mix]")]
+    } else if kept.len() == all {
+        vec![s("-map"), s("0:a")]
+    } else {
+        kept.iter().flat_map(|i| [s("-map"), format!("0:a:{i}")]).collect()
+    };
+    Selection { kept, maps, merged }
+}
+
 /// The audio entry for this file: the chosen one, or its fallback when a track cannot be copied
-/// into the result
-fn audio_entry<'a>(job: &'a Job, file: &Path, info: &Info, chosen: &'a AudioCodec, output: &Path) -> Outcome<&'a AudioCodec> {
+/// into the result (or the tracks are mixed, which needs an encoder)
+fn audio_entry<'a>(job: &'a Job, file: &Path, info: &Info, chosen: &'a AudioCodec, output: &Path, sel: &Selection) -> Outcome<&'a AudioCodec> {
     let t = i18n::t();
+    let fallback = || match find_audio(job, &chosen.fallback) {
+        Ok(f) => Ok(f),
+        Err(_) => Err(Failure::Error(format!("{}: {}", short_name(file), t.merge_no_copy))),
+    };
+    if sel.merged && chosen.copies() {
+        let f = fallback()?;
+        job.prog.info(format!("{}: {} {}", short_name(file), t.merge_encoded, f.label));
+        return Ok(f);
+    }
     let ext = output.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     if chosen.fallback.is_empty() || !matches!(ext.as_str(), "mp4" | "m4v" | "mov") {
         return Ok(chosen);
     }
     let allowed = |c: &str| MP4_AUDIO.contains(&c) || (ext == "mov" && c.starts_with("pcm_"));
-    match info.audio.iter().map(|a| a.codec.as_str()).find(|c| !allowed(c)) {
+    match sel.kept.iter().filter_map(|i| info.audio.get(*i)).map(|a| a.codec.as_str()).find(|c| !allowed(c)) {
         Some(bad) => {
-            let fallback = find_audio(job, &chosen.fallback)?;
-            job.prog.info(format!("{}: {bad} {} {}", short_name(file), t.audio_no_copy, fallback.label));
-            Ok(fallback)
+            let f = fallback()?;
+            job.prog.info(format!("{}: {bad} {} {}", short_name(file), t.audio_no_copy, f.label));
+            Ok(f)
         }
         None => Ok(chosen),
     }
@@ -119,13 +172,14 @@ fn audio_args(a: &AudioCodec, bitrate: &str) -> Result<Vec<String>, String> {
     cmdline::expand(&a.args, &[("bitrate", Val::s(bitrate))])
 }
 
-/// {audio} of a command: the video and every audio track, with the options of the audio entry
-/// (-an for a result without audio)
-fn audio_val(has_audio: bool, args: &[String]) -> Val {
+/// {audio} of a command: the video and the chosen audio tracks, with the options of the audio
+/// entry (-an for a result without audio)
+fn audio_val(has_audio: bool, maps: &[String], args: &[String]) -> Val {
     if !has_audio {
         return no_audio();
     }
-    let mut v = vec![s("-map"), s("0:v:0"), s("-map"), s("0:a")];
+    let mut v = vec![s("-map"), s("0:v:0")];
+    v.extend(maps.iter().cloned());
     v.extend(args.iter().cloned());
     Val::L(v)
 }
@@ -143,10 +197,11 @@ fn with_audio(command: &str) -> String {
     }
 }
 
-/// Only the audio tracks of the file, with `args`, into `out`; returns its size
-fn encode_audio(job: &Job, file: &Path, args: &[String], out: &Path) -> Outcome<f64> {
+/// Only the chosen audio tracks of the file (`maps`), with `args`, into `out`; returns its size
+fn encode_audio(job: &Job, file: &Path, maps: &[String], args: &[String], out: &Path) -> Outcome<f64> {
     job.prog.set_step(i18n::t().audio_track);
-    let mut all = vec![s("-y"), s("-i"), file.to_string_lossy().to_string(), s("-vn"), s("-map"), s("0:a")];
+    let mut all = vec![s("-y"), s("-i"), file.to_string_lossy().to_string(), s("-vn")];
+    all.extend(maps.iter().cloned());
     all.extend(args.iter().cloned());
     all.push(out.to_string_lossy().to_string());
     run_ffmpeg(job, &all, Track::at(0.0), None)?;
@@ -155,14 +210,17 @@ fn encode_audio(job: &Job, file: &Path, args: &[String], out: &Path) -> Outcome<
 
 // ------------------------------------------------------------------ presets
 
-pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &Codec, mode: ScaleMode, audio: &str) -> Outcome<String> {
+#[allow(clippy::too_many_arguments)]
+pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &Codec, mode: ScaleMode, audio: &str, tracks: &Tracks) -> Outcome<String> {
     let node = render_node(i18n::t(), codec)?;
     let (chain, _) = scale_chain(job, file, info, mode, 30.0, 0.0, 0.0);
     let chosen = find_audio(job, audio)?;
     let output = new_file_ext(&codec.output, file, &[], &chosen.ext);
-    let a = audio_entry(job, file, info, chosen, &output)?;
+    let has_audio = !chosen.removes();
+    let sel = select(job, file, info, tracks);
+    let a = if has_audio { audio_entry(job, file, info, chosen, &output, &sel)? } else { chosen };
     let audio_opts = audio_args(a, &a.bitrate)?;
-    let has_audio = info.has_audio && !a.removes();
+    let has_audio = has_audio && !sel.kept.is_empty();
     let mut vars = vec![
         ("input", path_val(file)),
         ("output", path_val(&output)),
@@ -170,7 +228,7 @@ pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &
         ("scale", scale_val(&chain)),
         ("q", Val::S(Codec::pick(&codec.q, level))),
         ("p", Val::S(Codec::pick(&codec.p, level))),
-        ("audio", audio_val(has_audio, &audio_opts)),
+        ("audio", audio_val(has_audio, &sel.maps, &audio_opts)),
     ];
     push_node(&mut vars, &node);
     run_template(job, &with_audio(&codec.command), &vars, !chain.is_empty(), Track::whole(info.duration), None)?;
@@ -187,6 +245,8 @@ struct Plan<'a> {
     node: Option<String>,
     /// software filters (scaling)
     chain: Vec<String>,
+    /// the options that pick the audio tracks
+    maps: Vec<String>,
     /// options of the audio tracks (codec, bitrate)
     audio: Vec<String>,
     /// the audio, already made (copied / lossless tracks, whose size must be known first)
@@ -226,7 +286,7 @@ impl Plan<'_> {
     }
 
     fn audio_val(&self) -> Val {
-        audio_val(self.has_audio, &self.audio)
+        audio_val(self.has_audio, &self.maps, &self.audio)
     }
 }
 
@@ -235,7 +295,17 @@ fn no_audio() -> Val {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn limit(job: &Job, file: &Path, info: &Info, codec: &Codec, mb: f64, mode: ScaleMode, want_twopass: bool, audio: &str) -> Outcome<String> {
+pub(super) fn limit(
+    job: &Job,
+    file: &Path,
+    info: &Info,
+    codec: &Codec,
+    mb: f64,
+    mode: ScaleMode,
+    want_twopass: bool,
+    audio: &str,
+    tracks: &Tracks,
+) -> Outcome<String> {
     let t = i18n::t();
     if mb.is_nan() || mb <= 0.0 {
         return Err(format!("{} {mb}", t.invalid_limit).into());
@@ -261,8 +331,9 @@ pub(super) fn limit(job: &Job, file: &Path, info: &Info, codec: &Codec, mb: f64,
     let chosen = find_audio(job, audio)?;
     let output = new_file_ext(&codec.output, file, &[("mb", mb_text.clone())], &chosen.ext);
     // Audio without a bitrate of its own (copied, lossless) is made first: the video gets what is left
-    let a = audio_entry(job, file, info, chosen, &output)?;
-    let has_audio = info.has_audio && !a.removes();
+    let sel = select(job, file, info, tracks);
+    let a = if chosen.removes() { chosen } else { audio_entry(job, file, info, chosen, &output, &sel)? };
+    let has_audio = !a.removes() && !sel.kept.is_empty();
     let work = TempDir::new()?;
     let (audio_file, audio_size) = if !has_audio {
         (None, AudioSize::None)
@@ -270,7 +341,7 @@ pub(super) fn limit(job: &Job, file: &Path, info: &Info, codec: &Codec, mb: f64,
         (None, AudioSize::Rate)
     } else {
         let path = work.path().join("audio.mka");
-        let bytes = encode_audio(job, file, &audio_args(a, "")?, &path)?;
+        let bytes = encode_audio(job, file, &sel.maps, &audio_args(a, "")?, &path)?;
         (Some(path), AudioSize::Bytes(bytes))
     };
     let br = bitrates(mb, dur, fps, audio_size, aim, twopass || chunked);
@@ -281,9 +352,9 @@ pub(super) fn limit(job: &Job, file: &Path, info: &Info, codec: &Codec, mb: f64,
     // Resolution; "auto" walks down a ladder until the picture gets enough bits per pixel
     let (chain, scale_note) = scale_chain(job, file, info, mode, fps, br.video as f64, codec.bpp_min);
     // the audio bitrate is shared by the tracks
-    let tracks = info.audio.len().max(1) as u64;
-    let audio_opts = audio_args(a, &(br.audio / tracks).to_string())?;
-    let plan = Plan { file, codec, mb, node, chain, audio: audio_opts, audio_file, dur, fps, has_audio, aim };
+    let count = sel.count().max(1) as u64;
+    let audio_opts = audio_args(a, &(br.audio / count).to_string())?;
+    let plan = Plan { file, codec, mb, node, chain, maps: sel.maps, audio: audio_opts, audio_file, dur, fps, has_audio, aim };
 
     let mode_note = if chunked {
         " | chunked"
@@ -379,7 +450,7 @@ fn encode_chunked(job: &Job, output: &Path, plan: &Plan, work: &TempDir) -> Outc
     if plan.has_audio {
         audio_bytes = match &plan.audio_file {
             Some(p) => file_size(p) as f64,
-            None => encode_audio(job, file, &plan.audio, &audio_path)?,
+            None => encode_audio(job, file, &plan.maps, &plan.audio, &audio_path)?,
         };
     }
 
@@ -464,8 +535,36 @@ mod tests {
     }
 
     #[test]
-    fn audio_maps_every_track() {
-        assert_eq!(audio_val(true, &[s("-c:a"), s("copy")]), Val::l(["-map", "0:v:0", "-map", "0:a", "-c:a", "copy"]));
-        assert_eq!(audio_val(false, &[s("-c:a"), s("copy")]), Val::l(["-an"]));
+    fn audio_maps_the_chosen_tracks() {
+        let copy = [s("-c:a"), s("copy")];
+        assert_eq!(audio_val(true, &[s("-map"), s("0:a")], &copy), Val::l(["-map", "0:v:0", "-map", "0:a", "-c:a", "copy"]));
+        assert_eq!(audio_val(false, &[s("-map"), s("0:a")], &copy), Val::l(["-an"]));
+    }
+
+    fn job_and_info(tracks: usize) -> (Job, Info) {
+        let cfg = std::sync::Arc::new(crate::config::Config::defaults());
+        let prog = super::super::Progress::new(Box::new(|| {}), false);
+        let job = Job { cfg, ffmpeg: PathBuf::new(), ffprobe: PathBuf::new(), prog };
+        let info = Info { audio: vec![Default::default(); tracks], ..Default::default() };
+        (job, info)
+    }
+
+    #[test]
+    fn tracks_are_kept_or_mixed() {
+        let (job, info) = job_and_info(3);
+        let f = Path::new("a.mkv");
+        let all = select(&job, f, &info, &Tracks::default());
+        assert_eq!((all.maps.clone(), all.count()), (vec![s("-map"), s("0:a")], 3));
+        let some = select(&job, f, &info, &Tracks { keep: Some(vec![0, 2, 7]), merge: false });
+        assert_eq!(some.maps, ["-map", "0:a:0", "-map", "0:a:2"]);
+        assert_eq!(some.count(), 2);
+        let mixed = select(&job, f, &info, &Tracks { keep: Some(vec![0, 2]), merge: true });
+        assert_eq!(mixed.maps, ["-filter_complex", "[0:a:0][0:a:2]amix=inputs=2:duration=longest:normalize=0[mix]", "-map", "[mix]"]);
+        assert_eq!(mixed.count(), 1);
+        // one track is not mixed
+        let one = select(&job, f, &info, &Tracks { keep: Some(vec![1]), merge: true });
+        assert!(!one.merged && one.maps == ["-map", "0:a:1"]);
+        let (job, info) = job_and_info(1);
+        assert!(select(&job, f, &info, &Tracks { keep: Some(vec![4]), merge: false }).kept.is_empty());
     }
 }

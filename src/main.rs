@@ -58,7 +58,9 @@ Options:
   --scale S          compress: orig | auto | 720p | 50% | x0.5 ...
   --twopass          compress with --limit: two-pass encoding (CPU H.264 / HEVC)
   --audio A          compress: copy | none | aac | opus | mp3 | ac3 | eac3 | flac | alac | pcm16 | pcm24
-  --tracks 2,3       delete-audio: only these audio tracks (counted from 1; default: all)
+  --tracks 2,3       compress: keep only these audio tracks; delete-audio: remove only these
+                     (counted from 1; default: all)
+  --merge            compress: mix the audio tracks that are kept into one
   --size N --fps N --quality N --compression N          webp
 ";
 
@@ -127,6 +129,15 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
     if cfg.audio_codec(&audio).is_none() {
         return Err(format!("bad --audio: {audio}"));
     }
+    // --tracks 2,3: numbers from 1, kept as numbers from 0
+    let track_list = match cli.opt("tracks") {
+        Some(list) => {
+            let numbers: Option<Vec<usize>> = list.split(',').map(|n| n.trim().parse::<usize>().ok().filter(|n| *n > 0).map(|n| n - 1)).collect();
+            Some(numbers.filter(|v| !v.is_empty()).ok_or_else(|| format!("bad --tracks: {list}"))?)
+        }
+        None => None,
+    };
+    let tracks = engine::Tracks { keep: track_list.clone(), merge: cli.flag("merge") };
     if let Some(what) = action.convert_kind(first_kind) {
         let format = cli.opt("format").or_else(|| cfg.default_format(what)).ok_or("no formats")?;
         return Ok(Request::Convert { what, format: format.to_string() });
@@ -135,7 +146,7 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
         Action::Compress => match cli.opt("limit") {
             Some(l) => {
                 let mb = units::parse_decimal(l).filter(|v| *v > 0.0).ok_or_else(|| format!("bad --limit: {l}"))?;
-                Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass"), audio }
+                Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass"), audio, tracks }
             }
             None => {
                 let level = match cli.opt("level").unwrap_or("medium") {
@@ -144,19 +155,10 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
                     "high" => 2,
                     other => return Err(format!("bad --level: {other}")),
                 };
-                Request::CompressPreset { level, codec, scale, audio }
+                Request::CompressPreset { level, codec, scale, audio, tracks }
             }
         },
-        Action::DeleteAudio => {
-            let remove = match cli.opt("tracks") {
-                Some(list) => {
-                    let numbers: Option<Vec<usize>> = list.split(',').map(|n| n.trim().parse::<usize>().ok().filter(|n| *n > 0).map(|n| n - 1)).collect();
-                    Some(numbers.filter(|v| !v.is_empty()).ok_or_else(|| format!("bad --tracks: {list}"))?)
-                }
-                None => None,
-            };
-            Request::DeleteAudio { remove }
-        }
+        Action::DeleteAudio => Request::DeleteAudio { remove: track_list },
         Action::Webp => Request::Webp {
             size: num("size", cfg.webp.size),
             fps: num("fps", cfg.webp.fps),

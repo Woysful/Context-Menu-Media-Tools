@@ -447,6 +447,14 @@ group = "lossless"
 args = '-c:a pcm_s24le'
 ext = "mov"
 
+# "Merge into one track" of Compress Video: the filter that mixes the ticked audio tracks into
+# one ({count} = their number). normalize=0 keeps the volume of every track (the sum can get
+# louder); duration=longest lasts as long as the longest track. Merged tracks are always
+# encoded: Copy uses its fallback.
+
+[compress_audio_merge]
+filter = 'amix=inputs={count}:duration=longest:normalize=0'
+
 # ------------------------------------------------------------------ Convert Video
 # One entry per output format: `text` is the name the window shows, `hint` a few words next to it,
 # `default = true` preselects it.
