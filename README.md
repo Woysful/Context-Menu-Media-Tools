@@ -10,7 +10,7 @@ Works with Windows, KDE (Dolphin), GNOME (Files), XFCE (Thunar), on x86 and ARM.
 **Linux**
 
 1. Install `ffmpeg` with your package manager.
-2. [Download app](https://github.com/woysful/context-menu-media-tools/release) the for your machine. 
+2. [Download app](https://github.com/Woysful/Context-Menu-Media-Tools/releases) the for your machine. 
 3. Make it executable (you can install AppImage with GearLever), start it and press **Install** in the window that opens.
 
    Or do it in a terminal:
@@ -25,7 +25,7 @@ Works with Windows, KDE (Dolphin), GNOME (Files), XFCE (Thunar), on x86 and ARM.
 4. Restart file manager.
 
 **Windows**
-1. [Download app](https://github.com/woysful/context-menu-media-tools/releases/latest/download/cmmt-windows-x86_64.exe) and place it where you like. For example `C:\Program Files\cmmt\`
+1. [Download app](https://github.com/Woysful/Context-Menu-Media-Tools/releases) and place it where you like. For example `C:\Program Files\cmmt\`
 2. Download ffmpeg and put `ffmpeg.exe` with `ffprobe.exe` next to `cmmt.exe`.
    
    Or instead you can add them to `PATH`.
