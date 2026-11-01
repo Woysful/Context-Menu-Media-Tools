@@ -1,4 +1,4 @@
-# Media Tools
+# [<img src="assets/cmmt.png" width="3.5%" alt="cmmt">](https://github.com/Woysful/FFcut/releases) Media Tools
 
 Adds ffmpeg actions to the context menu of your file manager: compress, convert, extract audio and more.
 Works with Windows, KDE (Dolphin), GNOME (Files), XFCE (Thunar), on x86 and ARM.
