@@ -117,9 +117,9 @@ mod tests {
     #[test]
     fn follow_the_settings() {
         let mut s = with_custom();
-        s.set_enabled(Action::DeleteSound, false);
+        s.set_enabled(Action::DeleteAudio, false);
         let a = actions("/bin/cmmt", &s);
-        assert!(!a.contains("cmmt-delete-sound"));
+        assert!(!a.contains("cmmt-delete-audio"));
         assert!(a.contains("<unique-id>cmmt-custom-gif</unique-id>") && a.contains("<command>/bin/cmmt run gif %F</command>"));
         assert!(a.contains("<unique-id>cmmt-stats</unique-id>\n\t<command>/bin/cmmt stats %F</command>\n\t<description>Stats</description>\n\t<patterns>*</patterns>\n\t<audio-files/>\n\t<image-files/>\n\t<video-files/>\n"));
     }

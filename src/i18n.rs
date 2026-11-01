@@ -15,7 +15,7 @@ pub struct T {
     pub t_webp: &'static str,
     pub t_stats: &'static str,
     pub t_convert_image: &'static str,
-    pub t_delete_sound: &'static str,
+    pub t_delete_audio: &'static str,
     // forms
     pub tab_presets: &'static str,
     pub tab_limit: &'static str,
@@ -59,7 +59,7 @@ pub struct T {
     pub format: &'static str,
     pub result: &'static str,
     pub command: &'static str,
-    pub delete_sound_text: &'static str,
+    pub delete_audio_text: &'static str,
     pub del_tracks: &'static str,
     pub del_track: &'static str,
     pub del_by_number: &'static str,
@@ -148,7 +148,7 @@ static EN: T = T {
     t_webp: "Convert to WebP anim",
     t_stats: "Stats",
     t_convert_image: "Convert Image",
-    t_delete_sound: "Delete sound",
+    t_delete_audio: "Delete Audio",
     tab_presets: "Presets",
     tab_limit: "Size limit",
     tab_presets_text: "Constant quality, the file size depends on the video.",
@@ -191,7 +191,7 @@ static EN: T = T {
     format: "Output format",
     result: "Result",
     command: "Command",
-    delete_sound_text:
+    delete_audio_text:
         "Makes a copy of the video without the audio tracks you untick. Everything else is copied as it is: fast and without any loss of quality.",
     del_tracks: "Audio tracks to keep",
     del_track: "Track",

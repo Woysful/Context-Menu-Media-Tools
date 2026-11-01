@@ -1,5 +1,5 @@
 //! The actions that run one command per file: Convert *, Extract Audio, frames, Delete
-//! sound, WebP animation and the own items.
+//! Audio, WebP animation and the own items.
 
 use super::output::{base_of, ensure_parent, named, new_file, short_name, unique_path};
 use super::runner::{run_template, Track};
@@ -46,8 +46,8 @@ pub(super) fn format(job: &Job, file: &Path, info: &Info, what: ConvertKind, key
 }
 
 /// `remove`: the audio tracks to remove (None = all); a track the file does not have is left out
-pub(super) fn delete_sound(job: &Job, file: &Path, info: &Info, remove: Option<&[usize]>) -> Outcome<String> {
-    let d = &job.cfg.delete_sound;
+pub(super) fn delete_audio(job: &Job, file: &Path, info: &Info, remove: Option<&[usize]>) -> Outcome<String> {
+    let d = &job.cfg.delete_audio;
     let count = info.audio.len();
     let chosen: Option<Vec<usize>> = remove.map(|r| r.iter().copied().filter(|i| *i < count).collect());
     match chosen {

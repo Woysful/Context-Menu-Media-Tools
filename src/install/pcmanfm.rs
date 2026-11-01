@@ -67,9 +67,9 @@ mod tests {
     #[test]
     fn follow_the_settings() {
         let mut s = with_custom();
-        s.set_enabled(Action::DeleteSound, false);
+        s.set_enabled(Action::DeleteAudio, false);
         let p = files("/bin/cmmt", &s);
         assert!(p.iter().any(|(n, _)| n == "cmmt-custom-gif.desktop"));
-        assert!(!p.iter().any(|(n, _)| n == "cmmt-05_deleteSound.desktop"));
+        assert!(!p.iter().any(|(n, _)| n == "cmmt-05_deleteAudio.desktop"));
     }
 }

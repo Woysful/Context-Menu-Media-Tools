@@ -736,12 +736,13 @@ ext = "tga"
 command = 'ffmpeg -n -i {input} {output}'
 output = "{base}.{ext}"
 
-# ------------------------------------------------------------------ Delete sound
+# ------------------------------------------------------------------ Delete Audio
 
 # command / output: every audio track goes. tracks_command / tracks_output: only the tracks
 # unticked in the window; {remove} = "-map -0:a:N" for each of them (N counts from 0).
+# (A user file may still call this table [delete_sound], its name before 1.2.)
 
-[delete_sound]
+[delete_audio]
 command = 'ffmpeg -n -i {input} -an -c copy {output}'
 output = "{base} (no audio).{srcext}"
 tracks_command = 'ffmpeg -n -i {input} -map 0 -map -0:d? {remove} -c copy {output}'

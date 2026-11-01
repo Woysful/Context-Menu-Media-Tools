@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn reg_follows_the_settings() {
         let mut s = with_custom();
-        s.set_enabled(Action::DeleteSound, false);
+        s.set_enabled(Action::DeleteAudio, false);
         let t = reg_text("x.exe", false, &s);
         assert!(!t.contains(r"\.mp4\shell\cmmt_05]")); // numbering stays stable, the item is gone
         assert!(t.contains(r"\.mp4\shell\cmmt_06]"));

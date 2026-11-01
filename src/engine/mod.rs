@@ -41,7 +41,7 @@ pub enum Request {
         what: ConvertKind,
         format: String,
     },
-    DeleteSound {
+    DeleteAudio {
         /// numbers of the audio tracks to remove, from 0 (None = all of them)
         remove: Option<Vec<usize>>,
     },
@@ -82,8 +82,8 @@ pub fn result_name(cfg: &Config, req: &Request, file: &Path) -> Option<String> {
             let f = cfg.format(*what, format)?;
             name(&f.output, &[("ext", f.extension(format).to_string()), ("fmt", format.clone())])
         }
-        Request::DeleteSound { remove: None } => name(&cfg.delete_sound.output, &[]),
-        Request::DeleteSound { remove: Some(_) } => name(&cfg.delete_sound.tracks_output, &[]),
+        Request::DeleteAudio { remove: None } => name(&cfg.delete_audio.output, &[]),
+        Request::DeleteAudio { remove: Some(_) } => name(&cfg.delete_audio.tracks_output, &[]),
         Request::Webp { .. } => name(&cfg.webp.output, &[]),
         Request::Custom { id } => name(&cfg.settings.custom(id)?.output, &[]),
     })
@@ -168,7 +168,7 @@ fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<String> {
             let f = job.cfg.format(*what, format).ok_or_else(|| unknown(format))?;
             convert::format(job, file, &info, *what, format, f)
         }
-        Request::DeleteSound { remove } => convert::delete_sound(job, file, &info, remove.as_deref()),
+        Request::DeleteAudio { remove } => convert::delete_audio(job, file, &info, remove.as_deref()),
         Request::Webp { size, fps, quality, compression } => convert::webp(job, file, &info, *size, *fps, *quality, *compression),
         Request::Custom { id } => {
             let c = job.cfg.settings.custom(id).ok_or_else(|| unknown(id))?;

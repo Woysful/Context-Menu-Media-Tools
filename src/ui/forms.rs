@@ -53,7 +53,7 @@ pub enum Form {
     Compress(Box<CompressForm>),
     Format(FormatForm),
     Webp(WebpForm),
-    DeleteSound(DeleteForm),
+    DeleteAudio(DeleteForm),
     /// Nothing to choose (own items)
     Confirm(Request),
 }
@@ -92,7 +92,7 @@ impl Form {
                 quality: cfg.webp.quality,
                 compression: cfg.webp.compression,
             }),
-            _ => Form::DeleteSound(DeleteForm::new(env)),
+            _ => Form::DeleteAudio(DeleteForm::new(env)),
         }
     }
 
@@ -122,7 +122,7 @@ impl Form {
                 });
                 Some(Request::Webp { size: size?, fps: fps?, quality: f.quality, compression: f.compression })
             }
-            Form::DeleteSound(f) => f.ui(ui, env),
+            Form::DeleteAudio(f) => f.ui(ui, env),
             Form::Confirm(req) => {
                 if let Request::Custom { id } = &*req {
                     if let Some(item) = env.cfg.settings.custom(id) {
@@ -151,12 +151,12 @@ impl DeleteForm {
 
     fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
         let t = env.t;
-        ui.label(t.delete_sound_text);
+        ui.label(t.delete_audio_text);
         ui.add_space(10.0);
         if self.tracks.is_empty() {
             hint(ui, t.del_no_tracks);
             ui.add_space(4.0);
-            return Some(Request::DeleteSound { remove: None });
+            return Some(Request::DeleteAudio { remove: None });
         }
         field(ui, t.del_tracks, |ui| {
             card(ui, |ui| {
@@ -175,8 +175,8 @@ impl DeleteForm {
                 hint(ui, t.del_untick);
                 None
             }
-            n if n == self.tracks.len() => Some(Request::DeleteSound { remove: None }),
-            _ => Some(Request::DeleteSound { remove: Some(remove) }),
+            n if n == self.tracks.len() => Some(Request::DeleteAudio { remove: None }),
+            _ => Some(Request::DeleteAudio { remove: Some(remove) }),
         }
     }
 }
@@ -385,12 +385,12 @@ pub fn show(ctx: &egui::Context, env: &Env, form: &mut Form, valid: bool) -> Sho
 
 /// The forms the window has to be tall enough for (both tabs of Compress Video, the longest hints)
 fn measured_forms(env: &Env) -> Vec<Form> {
-    if let Form::DeleteSound(mut f) = Form::new(env) {
+    if let Form::DeleteAudio(mut f) = Form::new(env) {
         // the names of the results appear once a track is unticked
         if let Some(first) = f.tracks.first_mut() {
             first.1 = false;
         }
-        return vec![Form::new(env), Form::DeleteSound(f)];
+        return vec![Form::new(env), Form::DeleteAudio(f)];
     }
     let Form::Compress(_) = Form::new(env) else { return vec![Form::new(env)] };
     let mut out = Vec::new();

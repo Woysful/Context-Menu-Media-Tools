@@ -11,7 +11,7 @@ pub enum Action {
     /// Audio files: convert the file. Video files: re-encode the audio tracks.
     ConvertAudio,
     ExtractAudio,
-    DeleteSound,
+    DeleteAudio,
     Frames,
     Webp,
     ConvertImage,
@@ -25,7 +25,7 @@ impl Action {
         Action::ConvertVideo,
         Action::ConvertAudio,
         Action::ExtractAudio,
-        Action::DeleteSound,
+        Action::DeleteAudio,
         Action::Frames,
         Action::Webp,
         Action::ConvertImage,
@@ -33,6 +33,8 @@ impl Action {
     ];
 
     pub fn from_cli(name: &str) -> Option<Action> {
+        // the menus of an install before the rename call the old name until the next install
+        let name = if name == "delete-sound" { "delete-audio" } else { name };
         Action::ALL.into_iter().find(|a| a.cli_name() == name)
     }
 
@@ -42,7 +44,7 @@ impl Action {
             Action::ConvertVideo => "convert-video",
             Action::ConvertAudio => "convert-audio",
             Action::ExtractAudio => "extract-audio",
-            Action::DeleteSound => "delete-sound",
+            Action::DeleteAudio => "delete-audio",
             Action::Frames => "frames",
             Action::Webp => "webp",
             Action::ConvertImage => "convert-image",
@@ -71,7 +73,7 @@ impl Action {
             Action::ConvertVideo => t.t_convert_video,
             Action::ConvertAudio => t.t_convert_audio,
             Action::ExtractAudio => t.t_extract_audio,
-            Action::DeleteSound => t.t_delete_sound,
+            Action::DeleteAudio => t.t_delete_audio,
             Action::Frames => t.t_frames,
             Action::Webp => t.t_webp,
             Action::ConvertImage => t.t_convert_image,
@@ -90,5 +92,6 @@ mod tests {
             assert_eq!(Action::from_cli(a.cli_name()), Some(a));
         }
         assert_eq!(Action::from_cli("nope"), None);
+        assert_eq!(Action::from_cli("delete-sound"), Some(Action::DeleteAudio));
     }
 }

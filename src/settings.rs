@@ -98,7 +98,10 @@ impl Settings {
         let path = paths::settings_file();
         match std::fs::read_to_string(&path) {
             Ok(text) => match toml::from_str::<Settings>(&text) {
-                Ok(s) => (s, None),
+                Ok(mut s) => {
+                    s.renamed_items();
+                    (s, None)
+                }
                 Err(e) => (Settings::default(), Some(format!("{}: {}", path.display(), e.message()))),
             },
             Err(_) => (Settings::default(), None),
@@ -110,6 +113,15 @@ impl Settings {
         let body = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
         let text = format!("# Settings of Media Tools (cmmt). The Settings window (run `cmmt settings`) writes this file; you can edit it, too.\n\n{body}");
         write_creating_dir(&path, text.as_bytes())
+    }
+
+    /// Delete Audio was called Delete sound (cli name delete-sound)
+    fn renamed_items(&mut self) {
+        for d in &mut self.menu.disabled {
+            if d == "delete-sound" {
+                *d = "delete-audio".into();
+            }
+        }
     }
 
     pub fn enabled(&self, action: crate::action::Action) -> bool {
@@ -206,12 +218,12 @@ mod tests {
     #[test]
     fn settings_roundtrip_through_toml() {
         let mut s = Settings { theme: "dark".into(), ..Default::default() };
-        s.set_enabled(Action::DeleteSound, false);
+        s.set_enabled(Action::DeleteAudio, false);
         s.custom.push(Custom { id: "gif".into(), name: "GIF".into(), ..Default::default() });
         let text = toml::to_string_pretty(&s).unwrap();
         let back: Settings = toml::from_str(&text).unwrap();
         assert_eq!(s, back);
-        assert!(!back.enabled(Action::DeleteSound) && back.enabled(Action::Compress));
+        assert!(!back.enabled(Action::DeleteAudio) && back.enabled(Action::Compress));
         // an old / partial file is fine
         let partial: Settings = toml::from_str("theme = \"light\"\n").unwrap();
         assert_eq!(partial.theme, "light");

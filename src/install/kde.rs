@@ -125,12 +125,12 @@ mod tests {
     #[test]
     fn switched_off_items_and_own_items() {
         let mut s = with_custom();
-        for a in [Action::DeleteSound, Action::ConvertImage, Action::Stats] {
+        for a in [Action::DeleteAudio, Action::ConvertImage, Action::Stats] {
             s.set_enabled(a, false);
         }
         let files = files("/bin/cmmt", &s);
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(!names.contains(&"cmmt-05_deleteSound.desktop"));
+        assert!(!names.contains(&"cmmt-05_deleteAudio.desktop"));
         assert!(!names.contains(&"cmmt-08_stats.desktop"));
         assert!(!names.contains(&"cmmt-image.desktop")); // no formats and no stats: no submenu at all
         assert!(names.contains(&"cmmt-audio.desktop"));

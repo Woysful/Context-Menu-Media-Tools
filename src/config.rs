@@ -123,7 +123,7 @@ impl AudioCodec {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
-pub struct DeleteSound {
+pub struct DeleteAudio {
     pub command: String,
     pub output: String,
     /// only some audio tracks: {remove} = the -map options that drop them
@@ -193,7 +193,7 @@ pub struct Config {
     pub limit: Vec<(String, Codec)>,
     pub audio: Vec<(String, AudioCodec)>,
     formats: [Formats; 6],
-    pub delete_sound: DeleteSound,
+    pub delete_audio: DeleteAudio,
     pub webp: WebpAnim,
     /// Problems found in the user's files (shown in the window; a broken file is ignored)
     pub warnings: Vec<String>,
@@ -322,7 +322,13 @@ impl Config {
         let mut root: Table = defaults.parse().expect("the built-in presets.toml is valid");
         if let Some((path, text)) = user {
             match text.parse::<Table>() {
-                Ok(over) => merge(&mut root, &over),
+                Ok(mut over) => {
+                    // Delete Audio was called Delete sound
+                    if let (Some(old), false) = (over.remove("delete_sound"), over.contains_key("delete_audio")) {
+                        over.insert("delete_audio".into(), old);
+                    }
+                    merge(&mut root, &over);
+                }
                 Err(e) => warnings.push(format!("{}: {}", path.display(), e.message())),
             }
         }
@@ -338,7 +344,7 @@ impl Config {
             limit: section(&root, "limit", &mut warnings),
             audio: section(&root, "compress_audio", &mut warnings),
             formats: ConvertKind::ALL.map(|k| section(&root, k.section(), &mut warnings)),
-            delete_sound: single(&root, "delete_sound", &mut warnings),
+            delete_audio: single(&root, "delete_audio", &mut warnings),
             webp: single(&root, "webp_anim", &mut warnings),
             warnings,
         };
@@ -365,8 +371,8 @@ impl Config {
                 check_command(&format!("[{}.{k}]", kind.section()), &f.command, &mut w);
             }
         }
-        check_command("[delete_sound]", &self.delete_sound.command, &mut w);
-        check_command("[delete_sound] tracks_command", &self.delete_sound.tracks_command, &mut w);
+        check_command("[delete_audio]", &self.delete_audio.command, &mut w);
+        check_command("[delete_audio] tracks_command", &self.delete_audio.tracks_command, &mut w);
         check_command("[webp_anim]", &self.webp.command, &mut w);
         self.warnings.extend(w);
     }
@@ -501,6 +507,14 @@ mod tests {
         let user = "[compress.h264_cpu]\ncommand = \"ffmpeg -n -i {input} -c:v libx264\"\n";
         let c = Config::from_sources(DEFAULT_PRESETS, Some((Path::new("u.toml"), user)), Settings::default());
         assert!(c.warnings.iter().any(|w| w.contains("compress.h264_cpu") && w.contains("{output}")), "{:?}", c.warnings);
+    }
+
+    #[test]
+    fn the_old_name_of_delete_audio_is_read() {
+        let user = "[delete_sound]\noutput = \"{base} quiet.{srcext}\"\n";
+        let c = Config::from_sources(DEFAULT_PRESETS, Some((Path::new("u.toml"), user)), Settings::default());
+        assert_eq!(c.delete_audio.output, "{base} quiet.{srcext}");
+        assert!(c.delete_audio.command.contains("-an"));
     }
 
     #[test]

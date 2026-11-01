@@ -39,7 +39,7 @@ cmmt - Media Tools: ffmpeg front end for the file manager context menu
 Usage: cmmt <action> [options] [files...]
 
 Actions:
-  compress  convert-video  convert-audio  extract-audio  delete-sound
+  compress  convert-video  convert-audio  extract-audio  delete-audio
   frames  webp  convert-image  stats
   settings                                               the Settings window (also: run cmmt without arguments)
   run <id> [files...]                                    an own menu item of the Settings window
@@ -58,7 +58,7 @@ Options:
   --scale S          compress: orig | auto | 720p | 50% | x0.5 ...
   --twopass          compress with --limit: two-pass encoding (CPU H.264 / HEVC)
   --audio A          compress: copy | none | aac | opus | mp3 | ac3 | eac3 | flac | alac | pcm16 | pcm24
-  --tracks 2,3       delete-sound: only these audio tracks (counted from 1; default: all)
+  --tracks 2,3       delete-audio: only these audio tracks (counted from 1; default: all)
   --size N --fps N --quality N --compression N          webp
 ";
 
@@ -147,7 +147,7 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
                 Request::CompressPreset { level, codec, scale, audio }
             }
         },
-        Action::DeleteSound => {
+        Action::DeleteAudio => {
             let remove = match cli.opt("tracks") {
                 Some(list) => {
                     let numbers: Option<Vec<usize>> = list.split(',').map(|n| n.trim().parse::<usize>().ok().filter(|n| *n > 0).map(|n| n - 1)).collect();
@@ -155,7 +155,7 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
                 }
                 None => None,
             };
-            Request::DeleteSound { remove }
+            Request::DeleteAudio { remove }
         }
         Action::Webp => Request::Webp {
             size: num("size", cfg.webp.size),

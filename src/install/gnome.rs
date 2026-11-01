@@ -78,9 +78,9 @@ mod tests {
     #[test]
     fn follow_the_settings() {
         let mut s = with_custom();
-        s.set_enabled(Action::DeleteSound, false);
+        s.set_enabled(Action::DeleteAudio, false);
         let g = files("/bin/cmmt", &s);
-        assert!(g.iter().all(|(n, _)| n != "Delete sound"));
+        assert!(g.iter().all(|(n, _)| n != "Delete Audio"));
         assert!(g.iter().any(|(n, c)| n == "Make GIF" && c.contains("run 'gif'")));
     }
 }
