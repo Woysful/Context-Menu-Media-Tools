@@ -8,11 +8,13 @@ use super::widgets::{
 };
 use super::Env;
 use crate::action::Action;
-use crate::config::{Codec, ConvertKind};
+use crate::config::{Codec, Config, ConvertKind};
+use crate::defaults::{self as dv, LEVELS};
 use crate::engine::{self, Request, Tracks};
 use crate::i18n::T;
 use crate::media;
 use crate::scale::ScaleMode;
+use crate::settings;
 use crate::theme::{self, bold, c, CONTROL_H};
 use crate::units;
 use eframe::egui::{self, pos2, vec2, Align, FontId, Layout, Rect, RichText};
@@ -71,31 +73,33 @@ impl Form {
         if let Some(id) = &env.custom_id {
             return Form::Confirm(Request::Custom { id: id.clone() });
         }
+        // every field starts with its own default value (settings.toml) or the standard one
+        let d = |key: &str| dv::value(cfg, key);
         if let Some(what) = env.action.convert_kind(env.first_kind) {
-            return Form::Format(FormatForm { what, selected: cfg.default_format(what).unwrap_or_default().to_string() });
+            return Form::Format(FormatForm { what, selected: d(&dv::format_key(what)) });
         }
         match env.action {
             Action::Compress => Form::Compress(Box::new(CompressForm {
-                tab: 0,
-                level: 1,
+                tab: usize::from(d(dv::MODE) == "limit"),
+                level: dv::level_index(&d(dv::LEVEL)),
                 p_groups: build_groups(&cfg.compress, env.t, cfg),
-                p_codec: "h264_cpu".into(),
-                p_scale: ScaleField::new(),
+                p_codec: d(dv::CODEC),
+                p_scale: ScaleField::from_code(&d(dv::RESOLUTION)),
                 l_groups: build_groups(&cfg.limit, env.t, cfg),
-                l_codec: "h264_cpu".into(),
-                l_scale: ScaleField::new(),
-                mb_text: "20".into(),
-                twopass: false,
-                p_audio: cfg.default_audio().to_string(),
-                l_audio: cfg.default_audio().to_string(),
+                l_codec: d(dv::LIMIT_CODEC),
+                l_scale: ScaleField::from_code(&d(dv::LIMIT_RESOLUTION)),
+                mb_text: d(dv::LIMIT_SIZE),
+                twopass: dv::flag(cfg, dv::TWO_PASS),
+                p_audio: d(dv::AUDIO),
+                l_audio: d(dv::LIMIT_AUDIO),
                 tracks: track_list(env),
-                merge: false,
+                merge: dv::flag(cfg, dv::MERGE),
             })),
             Action::Webp => Form::Webp(WebpForm {
-                size_text: cfg.webp.size.to_string(),
-                fps_text: cfg.webp.fps.to_string(),
-                quality: cfg.webp.quality,
-                compression: cfg.webp.compression,
+                size_text: d(dv::WEBP_SIZE),
+                fps_text: d(dv::WEBP_FPS),
+                quality: d(dv::WEBP_QUALITY).parse().unwrap_or(cfg.webp.quality),
+                compression: d(dv::WEBP_COMPRESSION).parse().unwrap_or(cfg.webp.compression),
             }),
             _ => Form::DeleteAudio(DeleteForm::new(env)),
         }
@@ -108,23 +112,42 @@ impl Form {
             Form::Compress(f) => f.ui(ui, env),
             Form::Format(f) => {
                 let options: Vec<(&str, &str, &str)> = env.cfg.formats(f.what).iter().map(|(k, fmt)| (k.as_str(), fmt.label(k), fmt.hint.as_str())).collect();
-                field(ui, t.format, |ui| option_grid(ui, &mut f.selected, &options));
+                let r = field(ui, t.format, |ui| option_grid(ui, &mut f.selected, &options));
+                if let Some(v) = default_menu(&r, env, &dv::format_key(f.what), Some(&f.selected)) {
+                    f.selected = v;
+                }
                 Some(Request::Convert { what: f.what, format: f.selected.clone() })
             }
             Form::Webp(f) => {
                 let size = parse_in(&f.size_text, 64, 4320);
                 let fps = parse_in(&f.fps_text, 1, 120);
-                ui.columns(2, |cols| {
-                    field(&mut cols[0], t.webp_size, |ui| number_field(ui, &mut f.size_text, size.is_some(), "px"));
-                    field(&mut cols[1], t.webp_fps, |ui| number_field(ui, &mut f.fps_text, fps.is_some(), ""));
+                let (r_size, r_fps) = ui.columns(2, |cols| {
+                    (
+                        field(&mut cols[0], t.webp_size, |ui| number_field(ui, &mut f.size_text, size.is_some(), "px")),
+                        field(&mut cols[1], t.webp_fps, |ui| number_field(ui, &mut f.fps_text, fps.is_some(), "")),
+                    )
                 });
                 hint(ui, t.webp_size_hint);
                 ui.add_space(10.0);
-                field(ui, t.webp_quality, |ui| slider_row(ui, &mut f.quality, 0..=100));
-                field(ui, t.webp_compression, |ui| {
-                    slider_row(ui, &mut f.compression, 0..=6);
+                let r_quality = field(ui, t.webp_quality, |ui| slider_row(ui, &mut f.quality, 0..=100));
+                let r_compression = field(ui, t.webp_compression, |ui| {
+                    let r = slider_row(ui, &mut f.compression, 0..=6);
                     hint(ui, t.webp_compression_hint);
+                    r
                 });
+                if let Some(v) = default_menu(&r_size, env, dv::WEBP_SIZE, size.map(|v| v.to_string()).as_deref()) {
+                    f.size_text = v;
+                }
+                if let Some(v) = default_menu(&r_fps, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
+                    f.fps_text = v;
+                }
+                if let Some(v) = default_menu(&r_quality, env, dv::WEBP_QUALITY, Some(&f.quality.to_string())) {
+                    f.quality = v.parse().unwrap_or(f.quality);
+                }
+                if let Some(v) = default_menu(&r_compression, env, dv::WEBP_COMPRESSION, Some(&f.compression.to_string())) {
+                    f.compression = v.parse().unwrap_or(f.compression);
+                }
+                let (size, fps) = (parse_in(&f.size_text, 64, 4320), parse_in(&f.fps_text, 1, 120));
                 Some(Request::Webp { size: size?, fps: fps?, quality: f.quality, compression: f.compression })
             }
             Form::DeleteAudio(f) => f.ui(ui, env),
@@ -194,7 +217,10 @@ impl CompressForm {
     /// the result), so the window fits either of them without empty space
     fn ui(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
         let t = env.t;
-        segmented(ui, &[t.tab_presets, t.tab_limit], &mut self.tab);
+        let r = segmented(ui, &[t.tab_presets, t.tab_limit], &mut self.tab);
+        if let Some(v) = default_menu(&r, env, dv::MODE, Some(["presets", "limit"][self.tab.min(1)])) {
+            self.tab = usize::from(v == "limit");
+        }
         ui.add_space(2.0);
         one_line(ui, if self.tab == 0 { t.tab_presets_text } else { t.tab_limit_text }, muted());
         ui.add_space(14.0);
@@ -205,13 +231,26 @@ impl CompressForm {
 
     fn quality_rows(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<Request> {
         let t = env.t;
-        form_row(ui, t.level, |ui| {
-            segmented(ui, &[t.level_low, t.level_medium, t.level_high], &mut self.level);
+        let r = form_row(ui, t.level, |ui| {
+            let r = segmented(ui, &[t.level_low, t.level_medium, t.level_high], &mut self.level);
             one_line(ui, [t.level_low_hint, t.level_medium_hint, t.level_high_hint][self.level.min(2)], muted());
+            r
         });
-        form_row(ui, t.codec, |ui| codec_combo(ui, "p_codec", &self.p_groups, &mut self.p_codec, t));
-        form_row(ui, t.resolution, |ui| self.p_scale.ui(ui, "p_scale", t, false, &env.infos));
-        form_row(ui, t.audio, |ui| audio_combo(ui, "p_audio", env, &mut self.p_audio));
+        if let Some(v) = default_menu(&r, env, dv::LEVEL, Some(LEVELS[self.level.min(2)])) {
+            self.level = dv::level_index(&v);
+        }
+        let r = form_row(ui, t.codec, |ui| codec_combo(ui, "p_codec", &self.p_groups, &mut self.p_codec, t));
+        if let Some(v) = default_menu(&r, env, dv::CODEC, Some(&self.p_codec)) {
+            self.p_codec = v;
+        }
+        let r = form_row(ui, t.resolution, |ui| self.p_scale.ui(ui, "p_scale", t, false, &env.infos));
+        if let Some(v) = default_menu(&r, env, dv::RESOLUTION, self.p_scale.code().as_deref()) {
+            self.p_scale = ScaleField::from_code(&v);
+        }
+        let r = form_row(ui, t.audio, |ui| audio_combo(ui, "p_audio", t, &env.cfg, &mut self.p_audio));
+        if let Some(v) = default_menu(&r, env, dv::AUDIO, Some(&self.p_audio)) {
+            self.p_audio = v;
+        }
         let tracks = self.tracks_row(ui, env, &self.p_audio.clone());
         if self.p_scale.invalid {
             return None;
@@ -228,15 +267,17 @@ impl CompressForm {
         }
         let removes = env.cfg.audio_codec(audio).is_some_and(|a| a.removes());
         let kept: Vec<usize> = self.tracks.iter().enumerate().filter(|(_, (_, on))| *on).map(|(i, _)| i).collect();
-        form_row(ui, t.tracks, |ui| {
-            ui.add_enabled_ui(!removes, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                for (label, on) in &mut self.tracks {
-                    ui.checkbox(on, label.as_str());
-                }
-                ui.add_space(2.0);
-                ui.add_enabled(kept.len() > 1, egui::Checkbox::new(&mut self.merge, t.merge_tracks));
-            });
+        let merge = form_row(ui, t.tracks, |ui| {
+            let merge = ui
+                .add_enabled_ui(!removes, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for (label, on) in &mut self.tracks {
+                        ui.checkbox(on, label.as_str());
+                    }
+                    ui.add_space(2.0);
+                    ui.add_enabled(kept.len() > 1, egui::Checkbox::new(&mut self.merge, t.merge_tracks))
+                })
+                .inner;
             let (note, color) = if removes {
                 (t.tracks_hint, muted())
             } else if kept.is_empty() {
@@ -244,12 +285,16 @@ impl CompressForm {
             } else if self.merge && kept.len() > 1 {
                 (t.merge_hint, muted())
             } else if env.files.len() > 1 {
-                (t.del_by_number, muted())
+                (t.tracks_by_number, muted())
             } else {
                 (t.tracks_hint, muted())
             };
             one_line(ui, note, color);
+            merge
         });
+        if let Some(v) = default_menu(&merge, env, dv::MERGE, Some(if self.merge { "true" } else { "false" })) {
+            self.merge = v == "true";
+        }
         if removes {
             return Some(Tracks::default());
         }
@@ -269,19 +314,25 @@ impl CompressForm {
             self.mb_text = units::fmt_float(l);
         }
         let mb = units::parse_decimal(&self.mb_text).filter(|v| *v > 0.0);
-        form_row(ui, t.limit, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(fixed_limit.is_none(), |ui| {
-                    ui.add(line_edit(&mut self.mb_text, 48.0, mb.is_some()));
-                    ui.label(RichText::new("MB").color(muted()));
-                });
-                ui.add_space(18.0);
-                if twopass_ok {
-                    ui.checkbox(&mut self.twopass, t.two_pass);
-                } else {
-                    ui.add_enabled(false, egui::Checkbox::new(&mut false, t.two_pass));
-                }
-            });
+        let (r_mb, r_twopass) = form_row(ui, t.limit, |ui| {
+            let rows = ui
+                .horizontal(|ui| {
+                    let r_mb = ui
+                        .add_enabled_ui(fixed_limit.is_none(), |ui| {
+                            let r = ui.add(line_edit(&mut self.mb_text, 48.0, mb.is_some()));
+                            ui.label(RichText::new("MB").color(muted()));
+                            r
+                        })
+                        .inner;
+                    ui.add_space(18.0);
+                    let r_twopass = if twopass_ok {
+                        ui.checkbox(&mut self.twopass, t.two_pass)
+                    } else {
+                        ui.add_enabled(false, egui::Checkbox::new(&mut false, t.two_pass))
+                    };
+                    (r_mb, r_twopass)
+                })
+                .inner;
             let note = if fixed_limit.is_some() {
                 t.limit_fixed
             } else if twopass_ok {
@@ -290,10 +341,28 @@ impl CompressForm {
                 t.two_pass_na
             };
             one_line(ui, note, muted());
+            rows
         });
-        form_row(ui, t.codec, |ui| codec_combo(ui, "l_codec", &self.l_groups, &mut self.l_codec, t));
-        form_row(ui, t.resolution, |ui| self.l_scale.ui(ui, "l_scale", t, true, &env.infos));
-        form_row(ui, t.audio, |ui| audio_combo(ui, "l_audio", env, &mut self.l_audio));
+        // the size of a preset with its own limit is not a value of the field
+        let own_mb = if fixed_limit.is_none() { mb.map(units::fmt_float) } else { None };
+        if let Some(v) = default_menu(&r_mb, env, dv::LIMIT_SIZE, own_mb.as_deref()) {
+            self.mb_text = v;
+        }
+        if let Some(v) = default_menu(&r_twopass, env, dv::TWO_PASS, Some(if self.twopass { "true" } else { "false" })) {
+            self.twopass = v == "true";
+        }
+        let r = form_row(ui, t.codec, |ui| codec_combo(ui, "l_codec", &self.l_groups, &mut self.l_codec, t));
+        if let Some(v) = default_menu(&r, env, dv::LIMIT_CODEC, Some(&self.l_codec)) {
+            self.l_codec = v;
+        }
+        let r = form_row(ui, t.resolution, |ui| self.l_scale.ui(ui, "l_scale", t, true, &env.infos));
+        if let Some(v) = default_menu(&r, env, dv::LIMIT_RESOLUTION, self.l_scale.code().as_deref()) {
+            self.l_scale = ScaleField::from_code(&v);
+        }
+        let r = form_row(ui, t.audio, |ui| audio_combo(ui, "l_audio", t, &env.cfg, &mut self.l_audio));
+        if let Some(v) = default_menu(&r, env, dv::LIMIT_AUDIO, Some(&self.l_audio)) {
+            self.l_audio = v;
+        }
         let tracks = self.tracks_row(ui, env, &self.l_audio.clone());
         if self.l_scale.invalid {
             return None;
@@ -309,11 +378,44 @@ impl CompressForm {
     }
 }
 
-/// The Audio list of Compress Video ([compress_audio] of presets.toml), a column per group
-fn audio_combo(ui: &mut egui::Ui, id: &str, env: &Env, selected: &mut String) {
+/// Right click on a field: "Save as default" (`value`; None = the field is not valid now) or
+/// "Reset to standard". Returns the standard value when that was chosen.
+fn default_menu(resp: &egui::Response, env: &Env, key: &str, value: Option<&str>) -> Option<String> {
     let t = env.t;
+    let mut reset = None;
+    resp.context_menu(|ui| {
+        if ui.add_enabled(value.is_some(), egui::Button::new(t.save_default)).clicked() {
+            if let Some(v) = value {
+                set_note(ui.ctx(), t, settings::store_default(key, Some(v)), t.default_saved);
+            }
+            ui.close_menu();
+        }
+        if ui.button(t.reset_default).clicked() {
+            set_note(ui.ctx(), t, settings::store_default(key, None), t.default_reset);
+            reset = Some(dv::standard(&env.cfg, key));
+            ui.close_menu();
+        }
+    });
+    reset
+}
+
+/// What became of the last "Save as default" / "Reset to standard": (text, ok)
+fn note_id() -> egui::Id {
+    egui::Id::new("cmmt_default_note")
+}
+
+fn set_note(ctx: &egui::Context, t: &T, result: Result<(), String>, done: &str) {
+    let note = match result {
+        Ok(()) => (done.to_string(), true),
+        Err(e) => (format!("{} {e}", t.default_failed), false),
+    };
+    ctx.data_mut(|d| d.insert_temp(note_id(), note));
+}
+
+/// The Audio list of Compress Video ([compress_audio] of presets.toml), a column per group
+pub fn audio_combo(ui: &mut egui::Ui, id: &str, t: &T, cfg: &Config, selected: &mut String) -> egui::Response {
     let mut cols: Vec<(String, Col)> = Vec::new();
-    for (key, a) in &env.cfg.audio {
+    for (key, a) in &cfg.audio {
         let label = if a.label.is_empty() { key.clone() } else { a.label.clone() };
         match cols.iter_mut().find(|(g, _)| *g == a.group) {
             Some((_, col)) => col.items.push((key.clone(), label)),
@@ -331,7 +433,7 @@ fn audio_combo(ui: &mut egui::Ui, id: &str, env: &Env, selected: &mut String) {
     }
     let cols: Vec<Col> = cols.into_iter().map(|(_, c)| c).collect();
     let shown = cols.iter().flat_map(|c| &c.items).find(|(k, _)| k == selected).map_or_else(|| selected.clone(), |(_, l)| l.clone());
-    dropdown(ui, id, &shown, &cols, selected);
+    dropdown(ui, id, &shown, &cols, selected)
 }
 
 /// The name of the result in one row of the form (of the first file; the others are counted)
@@ -411,9 +513,14 @@ fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
 /// (Start pressed, Cancel pressed)
 fn buttons(ui: &mut egui::Ui, t: &T, valid: bool) -> (bool, bool) {
     let mut pressed = (false, false);
+    let note = ui.ctx().data(|d| d.get_temp::<(String, bool)>(note_id()));
     button_row(ui, |ui| {
         pressed.0 = ui.add_enabled(valid, primary_button(t.start)).clicked();
         pressed.1 = ui.add(secondary_button(t.cancel)).clicked();
+        if let Some((text, ok)) = note {
+            ui.add_space(6.0);
+            ui.add(egui::Label::new(RichText::new(text).small().color(if ok { c().ok } else { c().err })).truncate());
+        }
     });
     pressed
 }

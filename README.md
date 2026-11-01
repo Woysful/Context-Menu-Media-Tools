@@ -37,7 +37,7 @@ On Windows 11 the items are under *Show more options*.
 
 | Item | What it does |
 |---|---|
-| Compress Video | quality level or a size limit in MB (e.g. Discord), codec on CPU or GPU (Nvidia, AMD, Intel, Raspberry Pi), resolution, audio (copy, none, AAC, Opus, MP3, AC-3, E-AC-3, FLAC, ALAC, PCM) |
+| Compress Video | quality level or a size limit in MB (e.g. Discord), codec on CPU or GPU (Nvidia, AMD, Intel, Raspberry Pi), resolution, audio (copy, none, AAC, Opus, MP3, AC-3, E-AC-3, FLAC, ALAC, PCM); for files with several audio tracks, which tracks to keep and whether to merge them into one |
 | Convert Video | MP4, AVI, MOV, MKV, M4V, WebM |
 | Convert Audio | WAV, MP3, FLAC, AAC, OGG, WMA, M4A, Opus; for videos, only the audio tracks are converted |
 | Extract Audio | MP3, AAC, Opus, WAV, M4A, MKA |
@@ -49,11 +49,15 @@ On Windows 11 the items are under *Show more options*.
 
 Existing files are never overwritten: the result gets a name like `clip_compressed (1).mp4`.
 
+Right-click a field of an option window to make its current value the default (**Save as default**)
+or to go back to the built-in value (**Reset to standard**).
+
 ## Settings
 
 Start `cmmt` without arguments or open **Media Tools** from the application menu.
 Here you set the theme, accent colour and interface scale, turn off menu items you don't need, add your own items
-with any ffmpeg command, and set the paths to ffmpeg / ffprobe.
+with any ffmpeg command, and set the paths to ffmpeg / ffprobe. The *Defaults* page lists the default values you saved:
+change or remove them, or export them to a file as a backup and import them again.
 
 Once a day the Settings window checks GitHub for a newer release (with `curl`).
 If there is one, a dot and a link appear above the version number. You can turn this off under *General → Updates*.

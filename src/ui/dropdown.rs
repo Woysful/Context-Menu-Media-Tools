@@ -27,13 +27,14 @@ pub fn need_id() -> egui::Id {
 
 /// A drop-down list. The list is a set of columns (groups side by side), so it is short enough to
 /// open completely inside the window: no scrolling, and it never covers its own button. It opens
-/// below the button, or above it when there is no room below. Returns true when an item was chosen.
-pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: &[Col], selected: &mut String) -> bool {
+/// below the button, or above it when there is no room below. The response of the button is
+/// "changed" when an item was chosen.
+pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: &[Col], selected: &mut String) -> egui::Response {
     let k = c();
     let ctx = ui.ctx().clone();
     let id = ui.make_persistent_id(id);
     let width = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(vec2(width, CONTROL_H), Sense::click());
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, CONTROL_H), Sense::click());
     let open = ui.memory(|m| m.is_popup_open(id));
 
     // the button
@@ -150,7 +151,10 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
             ui.memory_mut(|mem| mem.close_popup());
         }
     }
-    chosen
+    if chosen {
+        resp.mark_changed();
+    }
+    resp
 }
 
 /// The codecs of one kind of hardware (or the presets of the size limit tab)
@@ -202,7 +206,7 @@ pub fn build_groups(list: &[(String, Codec)], t: &T, cfg: &Config) -> Vec<Group>
     groups
 }
 
-pub fn codec_combo(ui: &mut egui::Ui, id: &str, groups: &[Group], selected: &mut String, t: &T) {
+pub fn codec_combo(ui: &mut egui::Ui, id: &str, groups: &[Group], selected: &mut String, t: &T) -> egui::Response {
     let preset_label = group_label(t, "preset");
     let shown = groups
         .iter()
@@ -211,5 +215,5 @@ pub fn codec_combo(ui: &mut egui::Ui, id: &str, groups: &[Group], selected: &mut
         })
         .unwrap_or_else(|| selected.clone());
     let cols: Vec<Col> = groups.iter().map(|g| Col { title: Some(g.label.clone()), items: g.items.clone() }).collect();
-    dropdown(ui, id, &shown, &cols, selected);
+    dropdown(ui, id, &shown, &cols, selected)
 }

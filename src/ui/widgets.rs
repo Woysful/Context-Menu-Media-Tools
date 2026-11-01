@@ -90,17 +90,19 @@ pub fn secondary_button(text: &str) -> egui::Button<'static> {
 }
 
 /// One of several values as one control split into equal parts (the window width or the
-/// width of a form row); returns true when another part was chosen
-pub fn segmented(ui: &mut egui::Ui, labels: &[&str], current: &mut usize) -> bool {
+/// width of a form row); the response is "changed" when another part was chosen
+pub fn segmented(ui: &mut egui::Ui, labels: &[&str], current: &mut usize) -> egui::Response {
     let k = c();
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), CONTROL_H), Sense::hover());
     let painter = ui.painter().clone();
     painter.rect(rect, 4.0, k.surface, Stroke::new(1.0_f32, k.border));
     let seg_w = rect.width() / labels.len().max(1) as f32;
     let mut changed = false;
+    let mut all = resp.clone();
     for (i, label) in labels.iter().enumerate() {
         let r = Rect::from_min_size(pos2(rect.left() + seg_w * i as f32, rect.top()), vec2(seg_w, CONTROL_H));
         let part = ui.interact(r, resp.id.with(i), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        all = all.union(part.clone());
         let selected = *current == i;
         if selected {
             painter.rect_filled(r.shrink(3.0), 3.0, k.accent);
@@ -118,7 +120,10 @@ pub fn segmented(ui: &mut egui::Ui, labels: &[&str], current: &mut usize) -> boo
             changed = true;
         }
     }
-    changed
+    if changed {
+        all.mark_changed();
+    }
+    all
 }
 
 /// The width of the names in front of the controls of a form
@@ -177,7 +182,7 @@ pub fn choice(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &str)])
 
 /// One of several values as a grid of equal cells, two in a row: the name and a few words
 /// about it, the words of all cells starting at the same place. Options: (value, name, hint)
-pub fn option_grid(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &str, &str)]) {
+pub fn option_grid(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &str, &str)]) -> egui::Response {
     const COLS: usize = 2;
     const GAP: f32 = 6.0;
     let k = c();
@@ -187,12 +192,13 @@ pub fn option_grid(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &s
     let cell_w = (width - GAP * (COLS - 1) as f32) / COLS as f32;
     let name_w = options.iter().map(|(_, n, _)| text_width(ui.ctx(), n, name_font.clone())).fold(0.0, f32::max);
     let rows = options.len().div_ceil(COLS);
-    let (area, _) = ui.allocate_exact_size(vec2(width, rows as f32 * (CONTROL_H + GAP) - GAP), Sense::hover());
+    let (area, mut all) = ui.allocate_exact_size(vec2(width, rows as f32 * (CONTROL_H + GAP) - GAP), Sense::hover());
     let painter = ui.painter().clone();
     for (i, (value, name, hint)) in options.iter().enumerate() {
         let at = vec2((i % COLS) as f32 * (cell_w + GAP), (i / COLS) as f32 * (CONTROL_H + GAP));
         let r = Rect::from_min_size(area.min + at, vec2(cell_w, CONTROL_H));
         let resp = ui.interact(r, ui.id().with(("option", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+        all = all.union(resp.clone());
         let selected = current == value;
         let (fill, stroke, text_c, hint_c) = if selected {
             (k.accent, Stroke::NONE, k.on_accent, k.on_accent.gamma_multiply(0.8))
@@ -208,32 +214,44 @@ pub fn option_grid(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &s
         }
         if resp.clicked() {
             *current = value.to_string();
+            all.mark_changed();
         }
     }
+    all
 }
 
 /// A text field for a number, red when it is not valid
-pub fn number_field(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &str) {
+pub fn number_field(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &str) -> egui::Response {
     ui.horizontal(|ui| {
         let w = (ui.available_width() - if suffix.is_empty() { 0.0 } else { 36.0 }).max(40.0);
         let mut edit = egui::TextEdit::singleline(text).desired_width(w).horizontal_align(Align::Center);
         if !valid {
             edit = edit.text_color(c().err);
         }
-        ui.add(edit);
+        let r = ui.add(edit);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(muted()));
         }
-    });
+        r
+    })
+    .inner
 }
 
 /// A slider with its value written at the right
-pub fn slider_row(ui: &mut egui::Ui, value: &mut u32, range: std::ops::RangeInclusive<u32>) {
+pub fn slider_row(ui: &mut egui::Ui, value: &mut u32, range: std::ops::RangeInclusive<u32>) -> egui::Response {
     ui.horizontal(|ui| {
         ui.spacing_mut().slider_width = (ui.available_width() - 48.0).max(80.0);
-        ui.add(egui::Slider::new(value, range).show_value(false));
+        let before = *value;
+        let r = ui.add(egui::Slider::new(value, range).show_value(false));
+        // a slider follows every mouse button: the right one opens the context menu instead
+        let secondary = ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary) || i.pointer.button_released(egui::PointerButton::Secondary));
+        if secondary {
+            *value = before;
+        }
         ui.label(RichText::new(value.to_string()).monospace());
-    });
+        r
+    })
+    .inner
 }
 
 /// The layout of the job windows: the buttons at the bottom, the content above them.

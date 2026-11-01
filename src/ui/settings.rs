@@ -1,13 +1,18 @@
 //! The Settings window.
 
+use super::dropdown::{build_groups, codec_combo, dropdown, Col, Group};
+use super::forms::audio_combo;
+use super::scale_field::{label_of, ScaleField};
 use super::widgets::{button_row, choice, field, muted, number_field, primary_button, secondary_button, MARGIN};
 use crate::action::Action;
-use crate::config;
+use crate::config::{self, Config, ConvertKind};
+use crate::defaults::{self as dv, Kind};
 use crate::i18n::T;
 use crate::i18n_settings as si;
 use crate::install::{self, Options};
 use crate::paths;
 use crate::proc;
+use crate::scale::ScaleMode;
 use crate::settings::{self, Custom, Settings};
 use crate::syspal::{self, Palette};
 use crate::theme::{self, bold, c, CONTROL_H};
@@ -15,6 +20,7 @@ use crate::units;
 use crate::update;
 use eframe::egui::{self, pos2, vec2, Align, Color32, FontId, Layout, Margin, Rect, RichText, Sense, Stroke};
 use std::path::Path;
+use std::sync::Arc;
 
 pub struct SettingsState {
     /// what the window shows (and previews)
@@ -31,13 +37,24 @@ pub struct SettingsState {
     /// the interface scale while its slider is dragged
     scale_draft: Option<f64>,
     update: update::Checker,
+    /// the lists of the Defaults page
+    cfg: Arc<Config>,
+    p_groups: Vec<Group>,
+    l_groups: Vec<Group>,
+    defaults_path: String,
 }
 
 impl SettingsState {
-    pub fn new(s: Settings) -> Self {
+    pub fn new(cfg: Arc<Config>) -> Self {
+        let t = crate::i18n::t();
+        let s = cfg.settings.clone();
         let mut st = SettingsState {
             saved: s.clone(),
             auto_close_text: units::fmt_float(s.auto_close),
+            p_groups: build_groups(&cfg.compress, t, &cfg),
+            l_groups: build_groups(&cfg.limit, t, &cfg),
+            defaults_path: paths::home_dir().join("cmmt-defaults.toml").display().to_string(),
+            cfg,
             s,
             tab: 0,
             status: String::new(),
@@ -247,7 +264,7 @@ pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Comm
     egui::SidePanel::left("s_nav").exact_width(190.0).resizable(false).frame(egui::Frame::none().fill(k.surface).inner_margin(Margin::same(12.0))).show(
         ctx,
         |ui| {
-            for (i, label) in [ts.tab_general, ts.tab_look, ts.tab_menu].iter().enumerate() {
+            for (i, label) in [ts.tab_general, ts.tab_look, ts.tab_menu, ts.tab_defaults].iter().enumerate() {
                 if nav_item(ui, label, st.tab == i) {
                     st.tab = i;
                 }
@@ -277,7 +294,8 @@ pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Comm
                 match st.tab {
                     0 => general_page(ui, st, &mut pressed),
                     1 => look_page(ui, st),
-                    _ => menu_page(ui, st, t),
+                    2 => menu_page(ui, st, t),
+                    _ => defaults_page(ui, st, t),
                 }
             });
         },
@@ -302,7 +320,9 @@ fn update_notice(ui: &mut egui::Ui, r: &update::Release) {
 fn general_page(ui: &mut egui::Ui, st: &mut SettingsState, pressed: &mut Option<Command>) {
     let ts = si::s();
     let close_ok = units::parse_decimal(&st.auto_close_text).filter(|v| (0.0..=3600.0).contains(v));
-    setting_row(ui, ts.auto_close, ts.auto_close_hint, |ui| number_field(ui, &mut st.auto_close_text, close_ok.is_some(), "s"));
+    setting_row(ui, ts.auto_close, ts.auto_close_hint, |ui| {
+        number_field(ui, &mut st.auto_close_text, close_ok.is_some(), "s");
+    });
     if let Some(v) = close_ok {
         st.s.auto_close = v;
     }
@@ -477,6 +497,196 @@ fn import(st: &mut SettingsState) {
         Ok(items) => {
             st.set_status(ts.imported.replace("{}", &items.len().to_string()), true);
             st.s.custom.extend(items);
+        }
+        Err(e) => st.set_status(format!("{} {e}", ts.import_failed), false),
+    }
+}
+
+/// The name of a field of the option windows and where it is: ("Video codec", "Compress Video · Presets")
+fn field_names(t: &T, key: &str) -> (String, String) {
+    let ts = si::s();
+    let presets = format!("{} · {}", t.t_compress, t.tab_presets);
+    let limit = format!("{} · {}", t.t_compress, t.tab_limit);
+    let (name, place) = match key {
+        dv::MODE => (ts.field_tab, t.t_compress.to_string()),
+        dv::LEVEL => (t.level, presets),
+        dv::CODEC => (t.codec, presets),
+        dv::RESOLUTION => (t.resolution, presets),
+        dv::AUDIO => (t.audio, presets),
+        dv::MERGE => (t.merge_tracks, t.t_compress.to_string()),
+        dv::LIMIT_SIZE => (t.limit, limit),
+        dv::TWO_PASS => (t.two_pass, limit),
+        dv::LIMIT_CODEC => (t.codec, limit),
+        dv::LIMIT_RESOLUTION => (t.resolution, limit),
+        dv::LIMIT_AUDIO => (t.audio, limit),
+        dv::WEBP_SIZE => (t.webp_size, t.t_webp.to_string()),
+        dv::WEBP_FPS => (t.webp_fps, t.t_webp.to_string()),
+        dv::WEBP_QUALITY => (t.webp_quality, t.t_webp.to_string()),
+        dv::WEBP_COMPRESSION => (t.webp_compression, t.t_webp.to_string()),
+        _ => match dv::kind_of(key) {
+            Some(Kind::Format(k)) => {
+                let action = match k {
+                    ConvertKind::Video => t.t_convert_video.to_string(),
+                    ConvertKind::VideoAudio => format!("{} · {}", t.t_convert_audio, ts.kind_video),
+                    ConvertKind::Extract => t.t_extract_audio.to_string(),
+                    ConvertKind::Frames => t.t_frames.to_string(),
+                    ConvertKind::AudioFile => t.t_convert_audio.to_string(),
+                    ConvertKind::Image => t.t_convert_image.to_string(),
+                };
+                (t.format, action)
+            }
+            _ => return (key.to_string(), String::new()),
+        },
+    };
+    (name.to_string(), place)
+}
+
+/// A value as the field shows it ("H.264 — CPU" for h264_cpu)
+fn shown_value(cfg: &Config, t: &T, key: &str, value: &str) -> String {
+    let ts = si::s();
+    let named = |label: &str| if label.is_empty() { value.to_string() } else { label.to_string() };
+    match dv::kind_of(key) {
+        Some(Kind::Mode) => (if value == "limit" { t.tab_limit } else { t.tab_presets }).to_string(),
+        Some(Kind::Level) => [t.level_low, t.level_medium, t.level_high][dv::level_index(value)].to_string(),
+        Some(Kind::Codec { limit }) => {
+            let c = if limit { cfg.limit_codec(value) } else { cfg.compress_codec(value) };
+            c.map_or_else(|| value.to_string(), |c| named(&c.label))
+        }
+        Some(Kind::Audio) => cfg.audio_codec(value).map_or_else(|| value.to_string(), |a| named(&a.label)),
+        Some(Kind::Resolution { .. }) => ScaleMode::from_code(value).map_or_else(|| value.to_string(), |m| label_of(m, t)),
+        Some(Kind::Flag) => (if value == "true" { ts.tr_on } else { ts.tr_off }).to_string(),
+        Some(Kind::Format(k)) => cfg.format(k, value).map_or_else(|| value.to_string(), |f| f.label(value).to_string()),
+        Some(Kind::Megabytes) => format!("{value} MB"),
+        Some(Kind::Number { .. }) if key == dv::WEBP_SIZE => format!("{value} px"),
+        _ => value.to_string(),
+    }
+}
+
+/// The control of one default value: the same kind of control as in the option window
+fn value_control(ui: &mut egui::Ui, key: &str, value: &mut String, cfg: &Config, groups: (&[Group], &[Group]), t: &T) {
+    let ts = si::s();
+    let id = ("default", key.to_string());
+    match dv::kind_of(key) {
+        Some(Kind::Mode) => choice(ui, value, &[("presets", t.tab_presets), ("limit", t.tab_limit)]),
+        Some(Kind::Level) => choice(ui, value, &[("low", t.level_low), ("medium", t.level_medium), ("high", t.level_high)]),
+        Some(Kind::Codec { limit }) => {
+            codec_combo(ui, &format!("default_{key}"), if limit { groups.1 } else { groups.0 }, value, t);
+        }
+        Some(Kind::Audio) => {
+            audio_combo(ui, &format!("default_{key}"), t, cfg, value);
+        }
+        Some(Kind::Resolution { auto }) => {
+            let mut field = ScaleField::from_code(value);
+            if field.list(ui, &format!("default_{key}"), t, auto).changed() {
+                *value = field.mode.code();
+            }
+        }
+        Some(Kind::Flag) => {
+            let mut on = value == "true";
+            if ui.checkbox(&mut on, ts.tr_on).changed() {
+                *value = on.to_string();
+            }
+        }
+        Some(Kind::Format(k)) => {
+            let items: Vec<(String, String)> = cfg.formats(k).iter().map(|(key, f)| (key.clone(), f.label(key).to_string())).collect();
+            let shown = shown_value(cfg, t, key, value);
+            dropdown(ui, id, &shown, &[Col { title: None, items }], value);
+        }
+        Some(kind @ (Kind::Number { .. } | Kind::Megabytes)) => {
+            let suffix = match key {
+                dv::LIMIT_SIZE => "MB",
+                dv::WEBP_SIZE => "px",
+                _ => "",
+            };
+            number_field(ui, value, dv::valid(cfg, kind, value), suffix);
+        }
+        None => {
+            ui.add(egui::TextEdit::singleline(value).desired_width(f32::INFINITY));
+        }
+    }
+}
+
+/// A small square button with a cross
+fn remove_button(ui: &mut egui::Ui) -> egui::Response {
+    let k = c();
+    let (rect, resp) = ui.allocate_exact_size(vec2(CONTROL_H, CONTROL_H), Sense::click());
+    let color = if resp.hovered() { k.err } else { k.muted };
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 3.0, k.hover);
+    }
+    let (m, d) = (rect.center(), 4.5);
+    let stroke = Stroke::new(1.5_f32, color);
+    ui.painter().line_segment([m + vec2(-d, -d), m + vec2(d, d)], stroke);
+    ui.painter().line_segment([m + vec2(-d, d), m + vec2(d, -d)], stroke);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn defaults_page(ui: &mut egui::Ui, st: &mut SettingsState, t: &T) {
+    let ts = si::s();
+    wide_row(ui, ts.defaults, ts.defaults_hint, |ui| {
+        if st.s.defaults.is_empty() {
+            ui.label(RichText::new(ts.defaults_empty).color(muted()));
+        }
+    });
+    // in the order of the windows; keys this version does not know come last
+    let mut keys: Vec<String> = dv::fields().into_iter().map(|(k, _)| k).filter(|k| st.s.defaults.contains_key(k)).collect();
+    keys.extend(st.s.defaults.keys().filter(|k| dv::kind_of(k).is_none()).cloned());
+    let mut remove: Option<String> = None;
+    for key in keys {
+        let (name, place) = field_names(t, &key);
+        let standard = shown_value(&st.cfg, t, &key, &dv::standard(&st.cfg, &key));
+        let about = if place.is_empty() { String::new() } else { format!("{place}\n{}: {standard}", ts.standard_value) };
+        let Some(value) = st.s.defaults.get_mut(&key) else { continue };
+        setting_row(ui, &name, &about, |ui| {
+            ui.horizontal(|ui| {
+                let w = CONTROL_W - CONTROL_H - ui.spacing().item_spacing.x;
+                ui.allocate_ui_with_layout(vec2(w, CONTROL_H), Layout::top_down(Align::Min), |ui| {
+                    ui.set_width(w);
+                    value_control(ui, &key, value, &st.cfg, (&st.p_groups, &st.l_groups), t);
+                });
+                if remove_button(ui).on_hover_text(ts.remove).clicked() {
+                    remove = Some(key.clone());
+                }
+            });
+        });
+    }
+    if let Some(k) = remove {
+        st.s.defaults.remove(&k);
+    }
+
+    wide_row(ui, ts.transfer, ts.defaults_transfer_hint, |ui| {
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 2.0 * 96.0 - 2.0 * ui.spacing().item_spacing.x).max(120.0);
+            ui.add(egui::TextEdit::singleline(&mut st.defaults_path).desired_width(w));
+            if ui.add(secondary_button(ts.export)).clicked() {
+                export_defaults(st);
+            }
+            if ui.add(secondary_button(ts.import)).clicked() {
+                import_defaults(st);
+            }
+        });
+    });
+}
+
+fn export_defaults(st: &mut SettingsState) {
+    let ts = si::s();
+    if st.s.defaults.is_empty() {
+        st.set_status(ts.no_values, false);
+        return;
+    }
+    let path = st.defaults_path.trim().to_string();
+    match settings::export_defaults(&st.s.defaults, Path::new(&path)) {
+        Ok(n) => st.set_status(format!("{} {path}", ts.exported_values.replace("{}", &n.to_string())), true),
+        Err(e) => st.set_status(e, false),
+    }
+}
+
+fn import_defaults(st: &mut SettingsState) {
+    let ts = si::s();
+    match settings::import_defaults(Path::new(st.defaults_path.trim())) {
+        Ok(values) => {
+            st.set_status(ts.imported_values.replace("{}", &values.len().to_string()), true);
+            st.s.defaults.extend(values);
         }
         Err(e) => st.set_status(format!("{} {e}", ts.import_failed), false),
     }

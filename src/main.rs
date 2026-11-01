@@ -5,6 +5,7 @@ mod action;
 mod batch;
 mod cmdline;
 mod config;
+mod defaults;
 mod effects;
 mod engine;
 mod gpu;

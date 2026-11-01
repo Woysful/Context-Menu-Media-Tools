@@ -13,6 +13,15 @@ pub enum ScaleMode {
 }
 
 impl ScaleMode {
+    pub fn code(self) -> String {
+        match self {
+            ScaleMode::Orig => "orig".into(),
+            ScaleMode::Auto => "auto".into(),
+            ScaleMode::Height(h) => format!("h{h}"),
+            ScaleMode::Factor(f) => format!("s{f}"),
+        }
+    }
+
     /// The codes of `--scale` (the same the shell scripts used): orig, auto, h720, s0.5
     pub fn from_code(code: &str) -> Option<ScaleMode> {
         match code {

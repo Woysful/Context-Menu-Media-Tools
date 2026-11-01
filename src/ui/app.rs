@@ -44,7 +44,7 @@ pub struct App {
 impl App {
     pub fn new(env: Env, start: Start, request: Option<Request>, ctx: &egui::Context, transparent: bool) -> App {
         let stage = match start {
-            Start::Settings => Stage::Settings(Box::new(SettingsState::new(env.cfg.settings.clone()))),
+            Start::Settings => Stage::Settings(Box::new(SettingsState::new(env.cfg.clone()))),
             Start::Message { title, lines, ok } => Stage::Message { title, lines, ok },
             Start::Normal if env.tools.is_none() => Stage::Missing,
             Start::Normal if env.is_stats() => Stage::Stats(Stats::spawn(&env, ctx)),
