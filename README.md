@@ -33,7 +33,7 @@ Works with Windows, KDE (Dolphin), GNOME (Files), XFCE (Thunar), on x86 and ARM.
 
    > The **Install** button doesn't install the app itself, it creates items inside context menu. So, don't forget to uninstall those items before deleting the app.
 
-4. Restart windows explorer process of log out/in.
+4. Restart windows explorer process or log out/in.
 
 
 On Windows 11 the items are under *Show more options*.
