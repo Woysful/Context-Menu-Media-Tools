@@ -4,7 +4,7 @@ use crate::config::{Codec, Config};
 use crate::gpu;
 use crate::i18n::T;
 use crate::theme::{self, c, CONTROL_H};
-use eframe::egui::{self, pos2, vec2, Align, Align2, FontId, Layout, Margin, Sense, Stroke};
+use eframe::egui::{self, pos2, vec2, Align, Align2, FontId, Layout, Margin, Rect, Sense, Stroke};
 
 use super::widgets::text_width;
 
@@ -38,32 +38,39 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
     let open = ui.memory(|m| m.is_popup_open(id));
 
     // the button
-    let stroke = if open || resp.hovered() { Stroke::new(1.0_f32, k.accent) } else { Stroke::new(1.0_f32, k.border) };
+    let hot = open || resp.hovered();
+    let stroke = if hot { Stroke::new(2.0_f32, k.accent) } else { Stroke::new(1.0_f32, k.border) };
     let painter = ui.painter();
-    painter.rect(rect, 3.0, k.surface, stroke);
-    // centred between two margins as wide as the arrow, so it stays clear of it
-    let clip = rect.shrink2(vec2(28.0, 0.0));
-    painter.with_clip_rect(clip).text(rect.center(), Align2::CENTER_CENTER, shown, FontId::proportional(13.5), k.text);
-    let m = pos2(rect.right() - 15.0, rect.center().y);
+    painter.rect(rect, 0.0, k.surface, stroke);
+    // the arrow sits in a square cell of its own at the right
+    let cell = Rect::from_min_max(pos2(rect.right() - CONTROL_H, rect.top()), rect.max);
+    if open {
+        painter.rect_filled(cell, 0.0, k.accent);
+    }
+    painter.line_segment([cell.left_top(), cell.left_bottom()], Stroke::new(1.0_f32, if hot { k.accent } else { k.border }));
+    // centred between two margins as wide as the arrow cell, so it stays clear of it
+    let clip = rect.shrink2(vec2(CONTROL_H + 4.0, 0.0));
+    painter.with_clip_rect(clip).text(rect.center(), Align2::CENTER_CENTER, shown, FontId::proportional(13.0), k.text);
+    let m = cell.center();
     let tri = if open {
-        vec![pos2(m.x - 4.0, m.y + 2.0), pos2(m.x + 4.0, m.y + 2.0), pos2(m.x, m.y - 3.0)]
+        vec![pos2(m.x - 5.0, m.y + 3.0), pos2(m.x + 5.0, m.y + 3.0), pos2(m.x, m.y - 3.0)]
     } else {
-        vec![pos2(m.x - 4.0, m.y - 2.0), pos2(m.x + 4.0, m.y - 2.0), pos2(m.x, m.y + 3.0)]
+        vec![pos2(m.x - 5.0, m.y - 3.0), pos2(m.x + 5.0, m.y - 3.0), pos2(m.x, m.y + 3.0)]
     };
-    painter.add(egui::Shape::convex_polygon(tri, k.muted, Stroke::NONE));
+    painter.add(egui::Shape::convex_polygon(tri, if open { k.on_accent } else { k.text }, Stroke::NONE));
     if resp.clicked() {
         ui.memory_mut(|mem| mem.toggle_popup(id));
     }
 
     // the size of the list
-    let font = FontId::proportional(13.5);
-    let title_font = FontId::proportional(10.5);
+    let font = FontId::proportional(13.0);
+    let title_font = FontId::new(10.0, theme::bold_family());
     let screen = ctx.screen_rect();
     let max_w = (screen.width() - 16.0).max(160.0);
     let natural: Vec<f32> = cols
         .iter()
         .map(|col| {
-            let title_w = col.title.as_ref().map_or(0.0, |t| text_width(&ctx, &t.to_uppercase(), title_font.clone()));
+            let title_w = col.title.as_ref().map_or(0.0, |t| text_width(&ctx, &format!("// {}", t.to_uppercase()), title_font.clone()));
             col.items.iter().map(|(_, label)| text_width(&ctx, label, font.clone())).fold(title_w, f32::max) + 28.0
         })
         .collect();
@@ -118,22 +125,27 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
                                 ui.spacing_mut().item_spacing.y = 0.0;
                                 if let Some(title) = &col.title {
                                     let (r, _) = ui.allocate_exact_size(vec2(w, TITLE_H), Sense::hover());
-                                    ui.painter().text(
-                                        pos2(r.left() + 10.0, r.center().y),
-                                        Align2::LEFT_CENTER,
-                                        title.to_uppercase(),
-                                        title_font.clone(),
-                                        k.muted,
-                                    );
+                                    if !title.is_empty() {
+                                        ui.painter().text(
+                                            pos2(r.left() + 10.0, r.center().y),
+                                            Align2::LEFT_CENTER,
+                                            format!("// {}", title.to_uppercase()),
+                                            title_font.clone(),
+                                            k.accent,
+                                        );
+                                    }
                                 }
                                 for (key, label) in &col.items {
                                     let (r, resp) = ui.allocate_exact_size(vec2(w, ITEM_H), Sense::click());
-                                    if key == selected {
-                                        ui.painter().rect_filled(r, 3.0, theme::mix(k.surface, k.accent, 0.45));
+                                    let chosen_here = key == selected;
+                                    if chosen_here {
+                                        ui.painter().rect_filled(r, 0.0, k.accent);
                                     } else if resp.hovered() {
-                                        ui.painter().rect_filled(r, 3.0, k.hover);
+                                        ui.painter().rect_filled(r, 0.0, k.hover);
+                                        ui.painter().rect_filled(Rect::from_min_size(r.left_top(), vec2(3.0, r.height())), 0.0, k.accent);
                                     }
-                                    ui.painter().text(pos2(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, label, font.clone(), k.text);
+                                    let color = if chosen_here { k.on_accent } else { k.text };
+                                    ui.painter().text(pos2(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, label, font.clone(), color);
                                     if resp.clicked() {
                                         selected.clone_from(key);
                                         chosen = true;

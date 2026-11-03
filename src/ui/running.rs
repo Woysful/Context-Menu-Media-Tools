@@ -1,12 +1,12 @@
 //! The progress of a job, then its result.
 
-use super::widgets::{button_row, caption, card, fit_name, primary_button, secondary_button, title, window};
+use super::widgets::{button_row, fit_name, primary_button, secondary_button, spaced, tagged_card, title, window};
 use super::Env;
 use crate::engine::{self, Job, Line, LineKind, Progress, Request, State};
 use crate::media;
-use crate::theme::{bold, c};
+use crate::theme::{bold, bold_family, c};
 use crate::units::fmt_duration;
-use eframe::egui::{self, RichText};
+use eframe::egui::{self, pos2, text::LayoutJob, vec2, Align2, FontId, Rect, RichText, Sense, Stroke, TextFormat};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -134,35 +134,74 @@ impl Running {
     }
 }
 
+/// A bar of separate blocks, like the level meter of a device
+fn blocks(ui: &mut egui::Ui, done: f32, height: f32) {
+    let k = c();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    let p = ui.painter();
+    p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, k.border));
+    let inner = rect.shrink(3.0);
+    const W: f32 = 6.0;
+    const GAP: f32 = 2.0;
+    let n = ((inner.width() + GAP) / (W + GAP)).floor().max(1.0) as usize;
+    let w = (inner.width() + GAP) / n as f32 - GAP;
+    let lit = (done.clamp(0.0, 1.0) * n as f32).round() as usize;
+    for i in 0..n {
+        let r = Rect::from_min_size(pos2(inner.left() + i as f32 * (w + GAP), inner.top()), vec2(w, inner.height()));
+        p.rect_filled(r, 0.0, if i < lit { k.accent } else { k.rule });
+    }
+}
+
+/// A readout: the name in small capitals over the value
+fn readout(ui: &mut egui::Ui, name: &str, value: &str) {
+    let k = c();
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 1.0;
+        ui.label(spaced(&name.to_uppercase(), FontId::proportional(9.5), k.muted, 1.0));
+        ui.label(bold(value, 12.5).color(k.text));
+    });
+}
+
 /// The file being processed, its progress and the numbers about it
 fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
     let t = env.t;
     let k = c();
-    card(ui, |ui| {
+    let note = if s.file_count > 1 {
+        t.file_of.replacen("{}", &(s.file_index + 1).to_string(), 1).replacen("{}", &s.file_count.to_string(), 1)
+    } else {
+        String::new()
+    };
+    tagged_card(ui, "process", &note, |ui| {
         ui.spacing_mut().item_spacing.y = 4.0;
-        if s.file_count > 1 {
-            caption(ui, &t.file_of.replacen("{}", &(s.file_index + 1).to_string(), 1).replacen("{}", &s.file_count.to_string(), 1));
-        }
         if !s.file_name.is_empty() {
-            ui.label(bold(fit_name(ui, &s.file_name, egui::FontId::new(13.0, crate::theme::bold_family())), 13.0));
+            ui.label(bold(fit_name(ui, &s.file_name, FontId::new(13.0, bold_family())), 13.0));
             if let Some(info) = env.infos.iter().find(|i| i.name == s.file_name) {
-                ui.label(RichText::new(media::describe(info, t.audio_word)).small().color(k.muted));
+                ui.label(RichText::new(media::describe(info, t.audio_word).replace(" · ", " / ")).small().color(k.muted));
             }
         }
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         let overall = s.overall();
-        ui.add(egui::ProgressBar::new(overall as f32).desired_height(6.0).rounding(3.0).fill(k.accent));
-        let mut parts = vec![format!("{:.0}%", overall * 100.0)];
-        if !s.step.is_empty() {
-            parts.push(s.step.clone());
-        }
-        if let Some(speed) = s.speed {
-            parts.push(format!("{} {speed:.2}×", t.speed));
-        }
-        if let Some(left) = s.remaining() {
-            parts.push(format!("{} {}", fmt_duration(left), t.remaining));
-        }
-        ui.label(RichText::new(parts.join("  ·  ")).small().color(k.muted));
+        ui.horizontal(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(78.0, 30.0), Sense::hover());
+            ui.painter().text(r.left_center(), Align2::LEFT_CENTER, format!("{:.0}%", overall * 100.0), FontId::new(28.0, bold_family()), k.text);
+            ui.vertical(|ui| {
+                ui.add_space(6.0);
+                blocks(ui, overall as f32, 18.0);
+            });
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 26.0;
+            if !s.step.is_empty() {
+                readout(ui, "step", &s.step);
+            }
+            if let Some(speed) = s.speed {
+                readout(ui, t.speed, &format!("{speed:.2}×"));
+            }
+            if let Some(left) = s.remaining() {
+                readout(ui, t.remaining, &fmt_duration(left));
+            }
+        });
     });
 }
 
@@ -171,18 +210,21 @@ fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
 fn log(ui: &mut egui::Ui, lines: &[Line]) -> bool {
     let k = c();
     // the card adds its margins and border to the height of the list
-    let h = (ui.available_height() - 22.0).max(20.0);
-    card(ui, |ui| {
+    let h = (ui.available_height() - 40.0).max(20.0);
+    tagged_card(ui, "log", &format!("{:03}", lines.len()), |ui| {
         let out = egui::ScrollArea::vertical().max_height(h).auto_shrink([false, true]).stick_to_bottom(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 5.0;
             for l in lines {
-                let (prefix, col) = match l.kind {
-                    LineKind::Info => ("", k.muted),
-                    LineKind::Warn => ("⚠ ", k.warn),
-                    LineKind::Error => ("✖ ", k.err),
-                    LineKind::Result => ("✔ ", k.ok),
+                let (tag, col, body) = match l.kind {
+                    LineKind::Info => ("[ -- ]", k.muted, k.muted),
+                    LineKind::Warn => ("[WARN]", k.warn, k.warn),
+                    LineKind::Error => ("[FAIL]", k.err, k.err),
+                    LineKind::Result => ("[ OK ]", k.ok, k.text),
                 };
-                ui.label(RichText::new(format!("{prefix}{}", l.text)).size(12.0).color(col));
+                let mut job = LayoutJob::default();
+                job.append(tag, 0.0, TextFormat { font_id: FontId::new(11.5, bold_family()), color: col, ..Default::default() });
+                job.append(&l.text, 8.0, TextFormat { font_id: FontId::monospace(11.5), color: body, ..Default::default() });
+                ui.add(egui::Label::new(job).wrap());
             }
         });
         out.content_size.y > out.inner_rect.height() + 2.0

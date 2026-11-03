@@ -1,5 +1,6 @@
-//! Look of the windows: JetBrains Mono, a strict flat style, colours from the settings
-//! (dark / light / the system palette) and one accent colour.
+//! Look of the windows: technical brutalism. JetBrains Mono, square corners, hard lines and
+//! offset shadows, colours from the settings (dark / light / the system palette) and one loud
+//! accent colour.
 
 use crate::settings::Settings;
 use crate::syspal::Palette;
@@ -15,7 +16,12 @@ pub struct Colors {
     pub bg: Color32,
     pub surface: Color32,
     pub hover: Color32,
+    /// the strong lines: frames of the controls and the cards
     pub border: Color32,
+    /// the faint lines between the rows of a form
+    pub rule: Color32,
+    /// the hard shadow under buttons and lists
+    pub shadow: Color32,
     pub text: Color32,
     pub muted: Color32,
     pub accent: Color32,
@@ -56,9 +62,9 @@ pub fn to_hex(c: Color32) -> String {
 
 pub fn default_accent(dark: bool) -> Color32 {
     if dark {
-        Color32::from_rgb(0x4c, 0x8d, 0xff)
+        Color32::from_rgb(0xd4, 0xff, 0x00)
     } else {
-        Color32::from_rgb(0x2f, 0x6b, 0xed)
+        Color32::from_rgb(0xff, 0x4a, 0x00)
     }
 }
 
@@ -78,8 +84,8 @@ pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>
     };
     let (bg, surface, text) = match &pal {
         Some(p) => (rgb(p.bg), rgb(p.surface), rgb(p.text)),
-        None if dark => (Color32::from_rgb(0x0f, 0x11, 0x15), Color32::from_rgb(0x17, 0x1a, 0x21), Color32::from_rgb(0xe6, 0xe8, 0xee)),
-        None => (Color32::from_rgb(0xf4, 0xf5, 0xf7), Color32::WHITE, Color32::from_rgb(0x14, 0x17, 0x1f)),
+        None if dark => (Color32::from_rgb(0x0c, 0x0c, 0x0c), Color32::from_rgb(0x16, 0x16, 0x16), Color32::from_rgb(0xee, 0xec, 0xe5)),
+        None => (Color32::from_rgb(0xe7, 0xe5, 0xde), Color32::from_rgb(0xf4, 0xf3, 0xee), Color32::from_rgb(0x0c, 0x0c, 0x0c)),
     };
     let accent = match &pal {
         Some(p) => rgb(p.accent),
@@ -90,15 +96,18 @@ pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>
         dark,
         bg,
         surface,
-        hover: mix(surface, toward, 0.07),
-        border: mix(bg, text, 0.20),
+        hover: mix(surface, toward, 0.08),
+        border: mix(bg, text, 0.62),
+        rule: mix(bg, text, 0.2),
+        // a light shadow on black would glow, so the dark theme takes a grey one
+        shadow: if dark { mix(bg, text, 0.3) } else { text },
         text,
-        muted: mix(text, bg, 0.45),
+        muted: mix(text, bg, 0.42),
         accent,
         on_accent: if luma(accent) > 0.6 { Color32::BLACK } else { Color32::WHITE },
-        ok: Color32::from_rgb(0x3f, 0xb9, 0x6b),
-        warn: Color32::from_rgb(0xe0, 0xa1, 0x3a),
-        err: Color32::from_rgb(0xe5, 0x5b, 0x5b),
+        ok: if dark { Color32::from_rgb(0x3a, 0xe0, 0x7a) } else { Color32::from_rgb(0x0b, 0x8f, 0x43) },
+        warn: if dark { Color32::from_rgb(0xff, 0xb0, 0x20) } else { Color32::from_rgb(0xb8, 0x6e, 0x00) },
+        err: if dark { Color32::from_rgb(0xff, 0x45, 0x45) } else { Color32::from_rgb(0xd0, 0x22, 0x22) },
     }
 }
 
@@ -139,46 +148,52 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
     ctx.set_theme(if colors.dark { egui::ThemePreference::Dark } else { egui::ThemePreference::Light });
     let k = colors;
     let mut v = if k.dark { egui::Visuals::dark() } else { egui::Visuals::light() };
-    let r = Rounding::same(3.0);
-    let stroke = |c: Color32| Stroke::new(1.0_f32, c);
+    let r = Rounding::ZERO;
+    let stroke = |w: f32, c: Color32| Stroke::new(w, c);
     v.panel_fill = Color32::from_rgba_unmultiplied(k.bg.r(), k.bg.g(), k.bg.b(), (alpha.clamp(0.0, 1.0) * 255.0) as u8);
     v.window_fill = k.surface;
     v.extreme_bg_color = k.surface;
     v.faint_bg_color = k.surface;
     v.code_bg_color = k.surface;
-    v.window_stroke = stroke(k.border);
-    v.window_rounding = Rounding::same(6.0);
-    v.menu_rounding = Rounding::same(4.0);
-    v.popup_shadow = egui::epaint::Shadow { offset: Vec2::new(0.0, 4.0), blur: 12.0, spread: 0.0, color: Color32::from_black_alpha(80) };
+    v.window_stroke = stroke(2.0, k.text);
+    v.window_rounding = r;
+    v.menu_rounding = r;
+    v.window_shadow = egui::epaint::Shadow { offset: Vec2::new(6.0, 6.0), blur: 0.0, spread: 0.0, color: k.shadow };
+    v.popup_shadow = egui::epaint::Shadow { offset: Vec2::new(5.0, 5.0), blur: 0.0, spread: 0.0, color: k.shadow };
     v.hyperlink_color = k.accent;
-    v.selection.bg_fill = mix(k.surface, k.accent, 0.55);
-    v.selection.stroke = stroke(k.text);
-    v.text_cursor.stroke = stroke(k.accent);
+    v.selection.bg_fill = k.accent;
+    v.selection.stroke = stroke(1.0, k.on_accent);
+    v.text_cursor.stroke = stroke(2.0, k.accent);
+    v.slider_trailing_fill = true;
+    v.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.45 };
+    v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = k.bg;
     w.noninteractive.weak_bg_fill = k.bg;
-    w.noninteractive.bg_stroke = stroke(k.border);
-    w.noninteractive.fg_stroke = stroke(k.text);
+    w.noninteractive.bg_stroke = stroke(1.0, k.rule);
+    w.noninteractive.fg_stroke = stroke(1.0, k.text);
     w.noninteractive.rounding = r;
     w.inactive.bg_fill = k.surface;
     w.inactive.weak_bg_fill = k.surface;
-    w.inactive.bg_stroke = stroke(k.border);
-    w.inactive.fg_stroke = stroke(k.text);
+    w.inactive.bg_stroke = stroke(1.0, k.border);
+    w.inactive.fg_stroke = stroke(2.0, k.text);
     w.inactive.rounding = r;
     w.hovered.bg_fill = k.hover;
     w.hovered.weak_bg_fill = k.hover;
-    w.hovered.bg_stroke = stroke(k.accent);
-    w.hovered.fg_stroke = stroke(k.text);
+    w.hovered.bg_stroke = stroke(2.0, k.accent);
+    w.hovered.fg_stroke = stroke(2.0, k.text);
     w.hovered.rounding = r;
-    w.active.bg_fill = mix(k.surface, k.accent, 0.35);
+    w.hovered.expansion = 0.0;
+    w.active.bg_fill = k.accent;
     w.active.weak_bg_fill = mix(k.surface, k.accent, 0.35);
-    w.active.bg_stroke = stroke(k.accent);
-    w.active.fg_stroke = stroke(k.text);
+    w.active.bg_stroke = stroke(2.0, k.accent);
+    w.active.fg_stroke = stroke(2.0, k.text);
     w.active.rounding = r;
+    w.active.expansion = 0.0;
     w.open.bg_fill = k.hover;
     w.open.weak_bg_fill = k.hover;
-    w.open.bg_stroke = stroke(k.accent);
-    w.open.fg_stroke = stroke(k.text);
+    w.open.bg_stroke = stroke(2.0, k.accent);
+    w.open.fg_stroke = stroke(2.0, k.text);
     w.open.rounding = r;
     ctx.set_visuals(v);
     ctx.style_mut(|s| {
@@ -186,13 +201,17 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
         s.spacing.button_padding = Vec2::new(12.0, 6.0);
         s.spacing.interact_size.y = CONTROL_H;
         s.spacing.combo_height = 380.0;
-        s.spacing.slider_rail_height = 3.0;
+        s.spacing.slider_rail_height = 4.0;
+        s.spacing.icon_width = 15.0;
+        s.spacing.icon_width_inner = 7.0;
         // between a checkbox and its text
-        s.spacing.icon_spacing = 8.0;
-        s.text_styles.insert(TextStyle::Body, FontId::proportional(13.5));
-        s.text_styles.insert(TextStyle::Button, FontId::proportional(13.5));
-        s.text_styles.insert(TextStyle::Heading, FontId::new(18.0, bold_family()));
-        s.text_styles.insert(TextStyle::Small, FontId::proportional(11.5));
+        s.spacing.icon_spacing = 9.0;
+        s.spacing.scroll = egui::style::ScrollStyle::solid();
+        s.spacing.scroll.bar_width = 6.0;
+        s.text_styles.insert(TextStyle::Body, FontId::proportional(13.0));
+        s.text_styles.insert(TextStyle::Button, FontId::proportional(13.0));
+        s.text_styles.insert(TextStyle::Heading, FontId::new(20.0, bold_family()));
+        s.text_styles.insert(TextStyle::Small, FontId::proportional(11.0));
         s.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.5));
     });
 }
