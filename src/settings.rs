@@ -49,6 +49,8 @@ impl Custom {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
+    /// classic | brutalist | y2k
+    pub style: String,
     /// auto | dark | light
     pub theme: String,
     /// take the colours of the system (KDE, GNOME, Windows) where they can be read
@@ -79,6 +81,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            style: "classic".into(),
             theme: "auto".into(),
             system_palette: false,
             accent: String::new(),

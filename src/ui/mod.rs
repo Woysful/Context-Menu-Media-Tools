@@ -9,6 +9,7 @@
 mod app;
 mod dropdown;
 mod forms;
+mod paint;
 mod running;
 mod scale_field;
 mod settings;

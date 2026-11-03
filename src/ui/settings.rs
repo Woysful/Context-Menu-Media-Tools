@@ -211,7 +211,7 @@ fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
 pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Command> {
     let ts = si::s();
     let k = c();
-    let fill = ctx.style().visuals.panel_fill;
+    let fill = super::widgets::backdrop(ctx);
     let mut pressed: Option<Command> = None;
 
     // top: the title and the menu buttons
@@ -261,7 +261,7 @@ pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Comm
         });
 
     // left: the pages
-    egui::SidePanel::left("s_nav").exact_width(190.0).resizable(false).frame(egui::Frame::none().fill(k.surface).inner_margin(Margin::same(12.0))).show(
+    egui::SidePanel::left("s_nav").exact_width(190.0).resizable(false).frame(egui::Frame::none().fill(k.glass).inner_margin(Margin::same(12.0))).show(
         ctx,
         |ui| {
             for (i, label) in [ts.tab_general, ts.tab_look, ts.tab_menu, ts.tab_defaults].iter().enumerate() {
@@ -362,6 +362,9 @@ fn general_page(ui: &mut egui::Ui, st: &mut SettingsState, pressed: &mut Option<
 fn look_page(ui: &mut egui::Ui, st: &mut SettingsState) {
     let ts = si::s();
     let k = c();
+    setting_row(ui, ts.style, ts.style_hint, |ui| {
+        choice(ui, &mut st.s.style, &[("classic", ts.style_classic), ("brutalist", ts.style_brutal), ("y2k", ts.style_y2k)]);
+    });
     setting_row(ui, ts.theme, ts.theme_hint, |ui| {
         choice(ui, &mut st.s.theme, &[("auto", ts.theme_auto), ("dark", ts.theme_dark), ("light", ts.theme_light)]);
     });
@@ -375,7 +378,7 @@ fn look_page(ui: &mut egui::Ui, st: &mut SettingsState) {
     setting_row(ui, ts.accent, ts.accent_hint, |ui| {
         ui.add_enabled_ui(!st.s.system_palette, |ui| {
             ui.horizontal(|ui| {
-                let current = theme::parse_hex(&st.s.accent).unwrap_or_else(|| theme::default_accent(k.dark));
+                let current = theme::parse_hex(&st.s.accent).unwrap_or_else(|| theme::default_accent(k.look, k.dark));
                 let mut rgb = [current.r(), current.g(), current.b()];
                 if ui.color_edit_button_srgb(&mut rgb).changed() {
                     st.s.accent = theme::to_hex(Color32::from_rgb(rgb[0], rgb[1], rgb[2]));

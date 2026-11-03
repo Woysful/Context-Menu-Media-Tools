@@ -3,9 +3,10 @@
 use crate::config::{Codec, Config};
 use crate::gpu;
 use crate::i18n::T;
-use crate::theme::{self, c, CONTROL_H};
+use crate::theme::{self, c, Look, CONTROL_H};
 use eframe::egui::{self, pos2, vec2, Align, Align2, FontId, Layout, Margin, Rect, Sense, Stroke};
 
+use super::paint;
 use super::widgets::text_width;
 
 /// One column of a drop-down list: items are (key, label)
@@ -39,38 +40,62 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
 
     // the button
     let hot = open || resp.hovered();
-    let stroke = if hot { Stroke::new(2.0_f32, k.accent) } else { Stroke::new(1.0_f32, k.border) };
     let painter = ui.painter();
-    painter.rect(rect, 0.0, k.surface, stroke);
-    // the arrow sits in a square cell of its own at the right
-    let cell = Rect::from_min_max(pos2(rect.right() - CONTROL_H, rect.top()), rect.max);
-    if open {
-        painter.rect_filled(cell, 0.0, k.accent);
+    let look = k.look;
+    match look {
+        Look::Classic => {
+            let stroke = if hot { Stroke::new(1.0_f32, k.accent) } else { Stroke::new(1.0_f32, k.border) };
+            painter.rect(rect, 3.0, k.surface, stroke);
+        }
+        Look::Brutal => {
+            let stroke = if hot { Stroke::new(2.0_f32, k.accent) } else { Stroke::new(1.0_f32, k.border) };
+            painter.rect(rect, 0.0, k.surface, stroke);
+        }
+        Look::Y2k => {
+            if hot {
+                paint::glow(painter, rect, rect.height() / 2.0, paint::alpha(k.shadow, 0.5), 12.0);
+            }
+            painter.rect(rect, rect.height() / 2.0, if hot { k.hover } else { k.glass }, Stroke::new(1.0_f32, if hot { k.accent } else { k.border }));
+        }
     }
-    painter.line_segment([cell.left_top(), cell.left_bottom()], Stroke::new(1.0_f32, if hot { k.accent } else { k.border }));
-    // centred between two margins as wide as the arrow cell, so it stays clear of it
-    let clip = rect.shrink2(vec2(CONTROL_H + 4.0, 0.0));
-    painter.with_clip_rect(clip).text(rect.center(), Align2::CENTER_CENTER, shown, FontId::proportional(13.0), k.text);
-    let m = cell.center();
-    let tri = if open {
-        vec![pos2(m.x - 5.0, m.y + 3.0), pos2(m.x + 5.0, m.y + 3.0), pos2(m.x, m.y - 3.0)]
-    } else {
-        vec![pos2(m.x - 5.0, m.y - 3.0), pos2(m.x + 5.0, m.y - 3.0), pos2(m.x, m.y + 3.0)]
+    // the arrow: at the right (Classic, Y2K) or in a square cell of its own (Brutalist)
+    let (m, arrow_c, margin) = match look {
+        Look::Brutal => {
+            let cell = Rect::from_min_max(pos2(rect.right() - CONTROL_H, rect.top()), rect.max);
+            if open {
+                painter.rect_filled(cell, 0.0, k.accent);
+            }
+            painter.line_segment([cell.left_top(), cell.left_bottom()], Stroke::new(1.0_f32, if hot { k.accent } else { k.border }));
+            (cell.center(), if open { k.on_accent } else { k.text }, CONTROL_H + 4.0)
+        }
+        Look::Classic => (pos2(rect.right() - 15.0, rect.center().y), k.muted, 28.0),
+        Look::Y2k => (pos2(rect.right() - 18.0, rect.center().y), k.accent, 32.0),
     };
-    painter.add(egui::Shape::convex_polygon(tri, if open { k.on_accent } else { k.text }, Stroke::NONE));
+    // centred between two margins as wide as the arrow, so it stays clear of it
+    let clip = rect.shrink2(vec2(margin, 0.0));
+    let text_size = if look == Look::Classic { 13.5 } else { 13.0 };
+    painter.with_clip_rect(clip).text(rect.center(), Align2::CENTER_CENTER, shown, FontId::proportional(text_size), k.text);
+    let (hw, hh) = if look == Look::Classic { (4.0, 2.5) } else { (5.0, 3.0) };
+    let tri = if open {
+        vec![pos2(m.x - hw, m.y + hh), pos2(m.x + hw, m.y + hh), pos2(m.x, m.y - hh)]
+    } else {
+        vec![pos2(m.x - hw, m.y - hh), pos2(m.x + hw, m.y - hh), pos2(m.x, m.y + hh)]
+    };
+    painter.add(egui::Shape::convex_polygon(tri, arrow_c, Stroke::NONE));
     if resp.clicked() {
         ui.memory_mut(|mem| mem.toggle_popup(id));
     }
 
     // the size of the list
-    let font = FontId::proportional(13.0);
-    let title_font = FontId::new(10.0, theme::bold_family());
+    let font = FontId::proportional(text_size);
+    let title_font = if look == Look::Classic { FontId::proportional(10.5) } else { FontId::new(10.0, theme::bold_family()) };
+    let title_text = |t: &str| if look == Look::Brutal { format!("// {}", t.to_uppercase()) } else { t.to_uppercase() };
     let screen = ctx.screen_rect();
     let max_w = (screen.width() - 16.0).max(160.0);
     let natural: Vec<f32> = cols
         .iter()
         .map(|col| {
-            let title_w = col.title.as_ref().map_or(0.0, |t| text_width(&ctx, &format!("// {}", t.to_uppercase()), title_font.clone()));
+            let title_w = col.title.as_ref().map_or(0.0, |t| text_width(&ctx, &title_text(t), title_font.clone()));
             col.items.iter().map(|(_, label)| text_width(&ctx, label, font.clone())).fold(title_w, f32::max) + 28.0
         })
         .collect();
@@ -126,25 +151,48 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
                                 if let Some(title) = &col.title {
                                     let (r, _) = ui.allocate_exact_size(vec2(w, TITLE_H), Sense::hover());
                                     if !title.is_empty() {
+                                        let color = match look {
+                                            Look::Classic => k.muted,
+                                            Look::Brutal => k.accent,
+                                            Look::Y2k => k.accent2,
+                                        };
                                         ui.painter().text(
                                             pos2(r.left() + 10.0, r.center().y),
                                             Align2::LEFT_CENTER,
-                                            format!("// {}", title.to_uppercase()),
+                                            title_text(title),
                                             title_font.clone(),
-                                            k.accent,
+                                            color,
                                         );
                                     }
                                 }
                                 for (key, label) in &col.items {
                                     let (r, resp) = ui.allocate_exact_size(vec2(w, ITEM_H), Sense::click());
                                     let chosen_here = key == selected;
-                                    if chosen_here {
-                                        ui.painter().rect_filled(r, 0.0, k.accent);
-                                    } else if resp.hovered() {
-                                        ui.painter().rect_filled(r, 0.0, k.hover);
-                                        ui.painter().rect_filled(Rect::from_min_size(r.left_top(), vec2(3.0, r.height())), 0.0, k.accent);
-                                    }
-                                    let color = if chosen_here { k.on_accent } else { k.text };
+                                    let p = ui.painter();
+                                    let color = match (look, chosen_here) {
+                                        (Look::Classic, true) => {
+                                            p.rect_filled(r, 3.0, theme::mix(k.surface, k.accent, 0.45));
+                                            k.text
+                                        }
+                                        (Look::Brutal, true) => {
+                                            p.rect_filled(r, 0.0, k.accent);
+                                            k.on_accent
+                                        }
+                                        (Look::Y2k, true) => {
+                                            paint::gradient(p, r, 8.0, k.accent, k.accent2, true);
+                                            paint::gloss(p, r, 8.0, 0.7);
+                                            k.on_accent
+                                        }
+                                        (_, false) => {
+                                            if resp.hovered() {
+                                                p.rect_filled(r, if look == Look::Brutal { 0.0 } else { 3.0 }, k.hover);
+                                                if look == Look::Brutal {
+                                                    p.rect_filled(Rect::from_min_size(r.left_top(), vec2(3.0, r.height())), 0.0, k.accent);
+                                                }
+                                            }
+                                            k.text
+                                        }
+                                    };
                                     ui.painter().text(pos2(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, label, font.clone(), color);
                                     if resp.clicked() {
                                         selected.clone_from(key);

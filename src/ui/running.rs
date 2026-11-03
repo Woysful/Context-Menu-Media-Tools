@@ -1,10 +1,11 @@
 //! The progress of a job, then its result.
 
-use super::widgets::{button_row, fit_name, primary_button, secondary_button, spaced, tagged_card, title, window};
+use super::paint;
+use super::widgets::{button_row, caption, card, fit_name, primary_button, secondary_button, spaced, tagged_card, title, window};
 use super::Env;
 use crate::engine::{self, Job, Line, LineKind, Progress, Request, State};
 use crate::media;
-use crate::theme::{bold, bold_family, c};
+use crate::theme::{bold, bold_family, c, Look};
 use crate::units::fmt_duration;
 use eframe::egui::{self, pos2, text::LayoutJob, vec2, Align2, FontId, Rect, RichText, Sense, Stroke, TextFormat};
 use std::sync::Arc;
@@ -134,11 +135,23 @@ impl Running {
     }
 }
 
-/// A bar of separate blocks, like the level meter of a device
+/// The bar of the progress: separate blocks like the level meter of a device (Brutalist) or a
+/// glowing gel tube (Y2K)
 fn blocks(ui: &mut egui::Ui, done: f32, height: f32) {
     let k = c();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let p = ui.painter();
+    if k.look == Look::Y2k {
+        let r = rect.height() / 2.0;
+        p.rect(rect, r, k.glass, Stroke::new(1.0_f32, k.border));
+        let inner = rect.shrink(3.0);
+        let w = (inner.width() * done.clamp(0.0, 1.0)).max(inner.height());
+        let fill = egui::Rect::from_min_size(inner.min, vec2(w, inner.height()));
+        paint::glow(p, fill, fill.height() / 2.0, paint::alpha(k.shadow, 0.8), 12.0);
+        paint::gradient(p, fill, fill.height() / 2.0, k.accent, k.accent2, true);
+        paint::gloss(p, fill, fill.height() / 2.0, 0.9);
+        return;
+    }
     p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, k.border));
     let inner = rect.shrink(3.0);
     const W: f32 = 6.0;
@@ -162,10 +175,47 @@ fn readout(ui: &mut egui::Ui, name: &str, value: &str) {
     });
 }
 
-/// The file being processed, its progress and the numbers about it
+/// The file being processed, its progress and the numbers about it (Classic: a thin bar and
+/// one line of numbers)
+fn classic_progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
+    let t = env.t;
+    let k = c();
+    card(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        if s.file_count > 1 {
+            caption(ui, &t.file_of.replacen("{}", &(s.file_index + 1).to_string(), 1).replacen("{}", &s.file_count.to_string(), 1));
+        }
+        if !s.file_name.is_empty() {
+            ui.label(bold(fit_name(ui, &s.file_name, FontId::new(13.0, bold_family())), 13.0));
+            if let Some(info) = env.infos.iter().find(|i| i.name == s.file_name) {
+                ui.label(RichText::new(media::describe(info, t.audio_word)).small().color(k.muted));
+            }
+        }
+        ui.add_space(6.0);
+        let overall = s.overall();
+        ui.add(egui::ProgressBar::new(overall as f32).desired_height(6.0).rounding(3.0).fill(k.accent));
+        let mut parts = vec![format!("{:.0}%", overall * 100.0)];
+        if !s.step.is_empty() {
+            parts.push(s.step.clone());
+        }
+        if let Some(speed) = s.speed {
+            parts.push(format!("{} {speed:.2}×", t.speed));
+        }
+        if let Some(left) = s.remaining() {
+            parts.push(format!("{} {}", fmt_duration(left), t.remaining));
+        }
+        ui.label(RichText::new(parts.join("  ·  ")).small().color(k.muted));
+    });
+}
+
+/// The file being processed, its progress and the numbers about it: a big percentage, the bar
+/// and readouts
 fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
     let t = env.t;
     let k = c();
+    if k.look == Look::Classic {
+        return classic_progress_card(ui, env, s);
+    }
     let note = if s.file_count > 1 {
         t.file_of.replacen("{}", &(s.file_index + 1).to_string(), 1).replacen("{}", &s.file_count.to_string(), 1)
     } else {
@@ -176,14 +226,23 @@ fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
         if !s.file_name.is_empty() {
             ui.label(bold(fit_name(ui, &s.file_name, FontId::new(13.0, bold_family())), 13.0));
             if let Some(info) = env.infos.iter().find(|i| i.name == s.file_name) {
-                ui.label(RichText::new(media::describe(info, t.audio_word).replace(" · ", " / ")).small().color(k.muted));
+                let about = media::describe(info, t.audio_word);
+                let about = if k.look == Look::Brutal { about.replace(" · ", " / ") } else { about };
+                ui.label(RichText::new(about).small().color(k.muted));
             }
         }
         ui.add_space(8.0);
         let overall = s.overall();
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(vec2(78.0, 30.0), Sense::hover());
-            ui.painter().text(r.left_center(), Align2::LEFT_CENTER, format!("{:.0}%", overall * 100.0), FontId::new(28.0, bold_family()), k.text);
+            let pct = format!("{:.0}%", overall * 100.0);
+            let font = FontId::new(28.0, bold_family());
+            if k.look == Look::Y2k {
+                // a chromatic fringe, like the title
+                ui.painter().text(r.left_center() + vec2(1.6, 1.0), Align2::LEFT_CENTER, &pct, font.clone(), paint::alpha(k.accent2, 0.75));
+                ui.painter().text(r.left_center() + vec2(-1.2, -0.6), Align2::LEFT_CENTER, &pct, font.clone(), paint::alpha(k.accent, 0.75));
+            }
+            ui.painter().text(r.left_center(), Align2::LEFT_CENTER, pct, font, k.text);
             ui.vertical(|ui| {
                 ui.add_space(6.0);
                 blocks(ui, overall as f32, 18.0);
@@ -210,11 +269,22 @@ fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
 fn log(ui: &mut egui::Ui, lines: &[Line]) -> bool {
     let k = c();
     // the card adds its margins and border to the height of the list
-    let h = (ui.available_height() - 40.0).max(20.0);
+    let look = k.look;
+    let h = (ui.available_height() - if look == Look::Classic { 22.0 } else { 40.0 }).max(20.0);
     tagged_card(ui, "log", &format!("{:03}", lines.len()), |ui| {
         let out = egui::ScrollArea::vertical().max_height(h).auto_shrink([false, true]).stick_to_bottom(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 5.0;
             for l in lines {
+                if look != Look::Brutal {
+                    let (prefix, col) = match l.kind {
+                        LineKind::Info => ("", k.muted),
+                        LineKind::Warn => ("⚠ ", k.warn),
+                        LineKind::Error => ("✖ ", k.err),
+                        LineKind::Result => ("✔ ", k.ok),
+                    };
+                    ui.label(RichText::new(format!("{prefix}{}", l.text)).size(12.0).color(col));
+                    continue;
+                }
                 let (tag, col, body) = match l.kind {
                     LineKind::Info => ("[ -- ]", k.muted, k.muted),
                     LineKind::Warn => ("[WARN]", k.warn, k.warn),

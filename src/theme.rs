@@ -1,6 +1,6 @@
-//! Look of the windows: technical brutalism. JetBrains Mono, square corners, hard lines and
-//! offset shadows, colours from the settings (dark / light / the system palette) and one loud
-//! accent colour.
+//! Look of the windows: JetBrains Mono and one of three styles (Classic: flat and quiet;
+//! Brutalist: square corners, hard lines and offset shadows; Y2K: glossy pills, gradients and
+//! glow), with colours from the settings (dark / light / the system palette) and an accent.
 
 use crate::settings::Settings;
 use crate::syspal::Palette;
@@ -10,21 +10,46 @@ use std::sync::RwLock;
 /// Height of every main control (buttons, drop-downs, text fields)
 pub const CONTROL_H: f32 = 30.0;
 
+/// The style of the windows (`style` of the settings)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Look {
+    Classic,
+    Brutal,
+    Y2k,
+}
+
+impl Look {
+    pub fn from_name(name: &str) -> Look {
+        match name {
+            "brutalist" => Look::Brutal,
+            "y2k" => Look::Y2k,
+            _ => Look::Classic,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Colors {
+    pub look: Look,
     pub dark: bool,
     pub bg: Color32,
+    /// the bottom of the background (Y2K: a gradient from `bg`; the same colour elsewhere)
+    pub bg2: Color32,
     pub surface: Color32,
+    /// the fill of cards: see-through in Y2K, `surface` elsewhere
+    pub glass: Color32,
     pub hover: Color32,
-    /// the strong lines: frames of the controls and the cards
+    /// the frames of the controls and the cards
     pub border: Color32,
-    /// the faint lines between the rows of a form
+    /// the faint lines between rows
     pub rule: Color32,
-    /// the hard shadow under buttons and lists
+    /// the shadow under buttons and lists (Brutalist: hard; Y2K: the colour of the glow)
     pub shadow: Color32,
     pub text: Color32,
     pub muted: Color32,
     pub accent: Color32,
+    /// the other end of the gradients of Y2K (`accent` elsewhere)
+    pub accent2: Color32,
     pub on_accent: Color32,
     pub ok: Color32,
     pub warn: Color32,
@@ -42,6 +67,10 @@ fn rgb(c: [u8; 3]) -> Color32 {
     Color32::from_rgb(c[0], c[1], c[2])
 }
 
+fn hex(v: u32) -> Color32 {
+    Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+}
+
 pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     let f = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgb(f(a.r(), b.r()), f(a.g(), b.g()), f(a.b(), b.b()))
@@ -53,19 +82,22 @@ pub fn parse_hex(text: &str) -> Option<Color32> {
         return None;
     }
     let v = u32::from_str_radix(t, 16).ok()?;
-    Some(Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
+    Some(hex(v))
 }
 
 pub fn to_hex(c: Color32) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
 }
 
-pub fn default_accent(dark: bool) -> Color32 {
-    if dark {
-        Color32::from_rgb(0xd4, 0xff, 0x00)
-    } else {
-        Color32::from_rgb(0xff, 0x4a, 0x00)
-    }
+pub fn default_accent(look: Look, dark: bool) -> Color32 {
+    hex(match (look, dark) {
+        (Look::Classic, true) => 0x4c8dff,
+        (Look::Classic, false) => 0x2f6bed,
+        (Look::Brutal, true) => 0xd4ff00,
+        (Look::Brutal, false) => 0xff4a00,
+        (Look::Y2k, true) => 0x3ce8ff,
+        (Look::Y2k, false) => 0x2f6bff,
+    })
 }
 
 fn luma(c: Color32) -> f32 {
@@ -75,6 +107,7 @@ fn luma(c: Color32) -> f32 {
 /// Colours from the settings. `system_dark`: what the system asks for (None = unknown);
 /// `palette`: the colours of the system when `system_palette` is switched on.
 pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>) -> Colors {
+    let look = Look::from_name(&s.style);
     let pal = if s.system_palette { palette } else { None };
     let dark = match (&pal, s.theme.as_str()) {
         (Some(p), _) => p.dark,
@@ -82,32 +115,75 @@ pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>
         (None, "light") => false,
         (None, _) => system_dark.unwrap_or(true),
     };
-    let (bg, surface, text) = match &pal {
-        Some(p) => (rgb(p.bg), rgb(p.surface), rgb(p.text)),
-        None if dark => (Color32::from_rgb(0x0c, 0x0c, 0x0c), Color32::from_rgb(0x16, 0x16, 0x16), Color32::from_rgb(0xee, 0xec, 0xe5)),
-        None => (Color32::from_rgb(0xe7, 0xe5, 0xde), Color32::from_rgb(0xf4, 0xf3, 0xee), Color32::from_rgb(0x0c, 0x0c, 0x0c)),
+    let (bg, surface, text) = match (&pal, look, dark) {
+        (Some(p), _, _) => (rgb(p.bg), rgb(p.surface), rgb(p.text)),
+        (None, Look::Classic, true) => (hex(0x0f1115), hex(0x171a21), hex(0xe6e8ee)),
+        (None, Look::Classic, false) => (hex(0xf4f5f7), Color32::WHITE, hex(0x14171f)),
+        (None, Look::Brutal, true) => (hex(0x0c0c0c), hex(0x161616), hex(0xeeece5)),
+        (None, Look::Brutal, false) => (hex(0xe7e5de), hex(0xf4f3ee), hex(0x0c0c0c)),
+        (None, Look::Y2k, true) => (hex(0x0b0d2b), hex(0x181c4a), hex(0xeaf0ff)),
+        (None, Look::Y2k, false) => (hex(0xdde6f8), hex(0xf6f8ff), hex(0x16183a)),
     };
     let accent = match &pal {
         Some(p) => rgb(p.accent),
-        None => parse_hex(&s.accent).unwrap_or_else(|| default_accent(dark)),
+        None => parse_hex(&s.accent).unwrap_or_else(|| default_accent(look, dark)),
     };
     let toward = if dark { Color32::WHITE } else { Color32::BLACK };
-    Colors {
+    let base = Colors {
+        look,
         dark,
         bg,
+        bg2: bg,
         surface,
-        hover: mix(surface, toward, 0.08),
-        border: mix(bg, text, 0.62),
-        rule: mix(bg, text, 0.2),
-        // a light shadow on black would glow, so the dark theme takes a grey one
-        shadow: if dark { mix(bg, text, 0.3) } else { text },
+        glass: surface,
+        hover: mix(surface, toward, 0.07),
+        border: mix(bg, text, 0.20),
+        rule: mix(bg, text, 0.20),
+        shadow: Color32::from_black_alpha(80),
         text,
-        muted: mix(text, bg, 0.42),
+        muted: mix(text, bg, 0.45),
         accent,
+        accent2: accent,
         on_accent: if luma(accent) > 0.6 { Color32::BLACK } else { Color32::WHITE },
-        ok: if dark { Color32::from_rgb(0x3a, 0xe0, 0x7a) } else { Color32::from_rgb(0x0b, 0x8f, 0x43) },
-        warn: if dark { Color32::from_rgb(0xff, 0xb0, 0x20) } else { Color32::from_rgb(0xb8, 0x6e, 0x00) },
-        err: if dark { Color32::from_rgb(0xff, 0x45, 0x45) } else { Color32::from_rgb(0xd0, 0x22, 0x22) },
+        ok: hex(0x3fb96b),
+        warn: hex(0xe0a13a),
+        err: hex(0xe55b5b),
+    };
+    match look {
+        Look::Classic => base,
+        Look::Brutal => Colors {
+            hover: mix(surface, toward, 0.08),
+            border: mix(bg, text, 0.62),
+            rule: mix(bg, text, 0.2),
+            // a light shadow on black would glow, so the dark theme takes a grey one
+            shadow: if dark { mix(bg, text, 0.3) } else { text },
+            muted: mix(text, bg, 0.42),
+            ok: hex(if dark { 0x3ae07a } else { 0x0b8f43 }),
+            warn: hex(if dark { 0xffb020 } else { 0xb86e00 }),
+            err: hex(if dark { 0xff4545 } else { 0xd02222 }),
+            ..base
+        },
+        Look::Y2k => {
+            // the second colour of the gradients: magenta, turned with the accent
+            let accent2 = if pal.is_none() && s.accent.is_empty() { hex(if dark { 0xff4fd8 } else { 0xe040c8 }) } else { mix(accent, hex(0xff4fd8), 0.6) };
+            let mid = mix(accent, accent2, 0.5);
+            let g = |a: u8| if dark { Color32::from_rgba_unmultiplied(160, 180, 255, a) } else { Color32::from_rgba_unmultiplied(255, 255, 255, a) };
+            Colors {
+                bg2: if pal.is_some() { mix(bg, accent2, 0.18) } else { hex(if dark { 0x26104c } else { 0xf5e3f5 }) },
+                glass: g(if dark { 16 } else { 150 }),
+                hover: mix(surface, accent, 0.14),
+                border: mix(bg, accent, if dark { 0.42 } else { 0.5 }),
+                rule: mix(bg, text, 0.12),
+                shadow: Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), if dark { 110 } else { 90 }),
+                muted: mix(text, bg, 0.40),
+                accent2,
+                on_accent: if luma(mid) > 0.55 { hex(0x0b0d2b) } else { Color32::WHITE },
+                ok: hex(if dark { 0x4dffb0 } else { 0x0f9d63 }),
+                warn: hex(if dark { 0xffd166 } else { 0xb97900 }),
+                err: hex(if dark { 0xff5c8a } else { 0xd6336c }),
+                ..base
+            }
+        }
     }
 }
 
@@ -148,71 +224,117 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
     ctx.set_theme(if colors.dark { egui::ThemePreference::Dark } else { egui::ThemePreference::Light });
     let k = colors;
     let mut v = if k.dark { egui::Visuals::dark() } else { egui::Visuals::light() };
-    let r = Rounding::ZERO;
     let stroke = |w: f32, c: Color32| Stroke::new(w, c);
     v.panel_fill = Color32::from_rgba_unmultiplied(k.bg.r(), k.bg.g(), k.bg.b(), (alpha.clamp(0.0, 1.0) * 255.0) as u8);
     v.window_fill = k.surface;
     v.extreme_bg_color = k.surface;
     v.faint_bg_color = k.surface;
     v.code_bg_color = k.surface;
-    v.window_stroke = stroke(2.0, k.text);
-    v.window_rounding = r;
-    v.menu_rounding = r;
-    v.window_shadow = egui::epaint::Shadow { offset: Vec2::new(6.0, 6.0), blur: 0.0, spread: 0.0, color: k.shadow };
-    v.popup_shadow = egui::epaint::Shadow { offset: Vec2::new(5.0, 5.0), blur: 0.0, spread: 0.0, color: k.shadow };
     v.hyperlink_color = k.accent;
-    v.selection.bg_fill = k.accent;
-    v.selection.stroke = stroke(1.0, k.on_accent);
-    v.text_cursor.stroke = stroke(2.0, k.accent);
-    v.slider_trailing_fill = true;
-    v.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.45 };
-    v.interact_cursor = Some(egui::CursorIcon::PointingHand);
+    v.text_cursor.stroke = stroke(1.0, k.accent);
+    // (rounding of the controls, stroke of the frames, stroke of hovered ones)
+    let (r, frame_w, hover_w) = match k.look {
+        Look::Classic => (Rounding::same(3.0), 1.0, 1.0),
+        Look::Brutal => (Rounding::ZERO, 1.0, 2.0),
+        Look::Y2k => (Rounding::same(9.0), 1.0, 1.5),
+    };
+    match k.look {
+        Look::Classic => {
+            v.window_stroke = stroke(1.0, k.border);
+            v.window_rounding = Rounding::same(6.0);
+            v.menu_rounding = Rounding::same(4.0);
+            v.popup_shadow = egui::epaint::Shadow { offset: Vec2::new(0.0, 4.0), blur: 12.0, spread: 0.0, color: Color32::from_black_alpha(80) };
+            v.selection.bg_fill = mix(k.surface, k.accent, 0.55);
+            v.selection.stroke = stroke(1.0, k.text);
+        }
+        Look::Brutal => {
+            v.window_stroke = stroke(2.0, k.text);
+            v.window_rounding = Rounding::ZERO;
+            v.menu_rounding = Rounding::ZERO;
+            v.window_shadow = egui::epaint::Shadow { offset: Vec2::new(6.0, 6.0), blur: 0.0, spread: 0.0, color: k.shadow };
+            v.popup_shadow = egui::epaint::Shadow { offset: Vec2::new(5.0, 5.0), blur: 0.0, spread: 0.0, color: k.shadow };
+            v.selection.bg_fill = k.accent;
+            v.selection.stroke = stroke(1.0, k.on_accent);
+            v.text_cursor.stroke = stroke(2.0, k.accent);
+            v.slider_trailing_fill = true;
+            v.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.45 };
+        }
+        Look::Y2k => {
+            v.window_stroke = stroke(1.0, k.border);
+            v.window_rounding = Rounding::same(14.0);
+            v.menu_rounding = Rounding::same(14.0);
+            v.window_shadow = egui::epaint::Shadow { offset: Vec2::ZERO, blur: 24.0, spread: 0.0, color: k.shadow };
+            v.popup_shadow = egui::epaint::Shadow { offset: Vec2::ZERO, blur: 22.0, spread: 0.0, color: k.shadow };
+            v.selection.bg_fill = mix(k.surface, k.accent, 0.5);
+            v.selection.stroke = stroke(1.0, k.text);
+            v.slider_trailing_fill = true;
+        }
+    }
+    if k.look != Look::Classic {
+        v.interact_cursor = Some(egui::CursorIcon::PointingHand);
+    }
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = k.bg;
     w.noninteractive.weak_bg_fill = k.bg;
-    w.noninteractive.bg_stroke = stroke(1.0, k.rule);
+    w.noninteractive.bg_stroke = stroke(1.0, if k.look == Look::Classic { k.border } else { k.rule });
     w.noninteractive.fg_stroke = stroke(1.0, k.text);
     w.noninteractive.rounding = r;
     w.inactive.bg_fill = k.surface;
     w.inactive.weak_bg_fill = k.surface;
-    w.inactive.bg_stroke = stroke(1.0, k.border);
-    w.inactive.fg_stroke = stroke(2.0, k.text);
+    w.inactive.bg_stroke = stroke(frame_w, k.border);
+    w.inactive.fg_stroke = stroke(if k.look == Look::Brutal { 2.0 } else { 1.0 }, k.text);
     w.inactive.rounding = r;
     w.hovered.bg_fill = k.hover;
     w.hovered.weak_bg_fill = k.hover;
-    w.hovered.bg_stroke = stroke(2.0, k.accent);
-    w.hovered.fg_stroke = stroke(2.0, k.text);
+    w.hovered.bg_stroke = stroke(hover_w, k.accent);
+    w.hovered.fg_stroke = stroke(if k.look == Look::Brutal { 2.0 } else { 1.0 }, k.text);
     w.hovered.rounding = r;
-    w.hovered.expansion = 0.0;
-    w.active.bg_fill = k.accent;
+    w.active.bg_fill = if k.look == Look::Brutal { k.accent } else { mix(k.surface, k.accent, 0.35) };
     w.active.weak_bg_fill = mix(k.surface, k.accent, 0.35);
-    w.active.bg_stroke = stroke(2.0, k.accent);
-    w.active.fg_stroke = stroke(2.0, k.text);
+    w.active.bg_stroke = stroke(hover_w, k.accent);
+    w.active.fg_stroke = stroke(if k.look == Look::Brutal { 2.0 } else { 1.0 }, k.text);
     w.active.rounding = r;
-    w.active.expansion = 0.0;
     w.open.bg_fill = k.hover;
     w.open.weak_bg_fill = k.hover;
-    w.open.bg_stroke = stroke(2.0, k.accent);
-    w.open.fg_stroke = stroke(2.0, k.text);
+    w.open.bg_stroke = stroke(hover_w, k.accent);
+    w.open.fg_stroke = stroke(1.0, k.text);
     w.open.rounding = r;
+    if k.look != Look::Classic {
+        w.hovered.expansion = 0.0;
+        w.active.expansion = 0.0;
+    }
     ctx.set_visuals(v);
+    let look = k.look;
     ctx.style_mut(|s| {
         s.spacing.item_spacing = Vec2::new(8.0, 7.0);
         s.spacing.button_padding = Vec2::new(12.0, 6.0);
         s.spacing.interact_size.y = CONTROL_H;
         s.spacing.combo_height = 380.0;
-        s.spacing.slider_rail_height = 4.0;
-        s.spacing.icon_width = 15.0;
-        s.spacing.icon_width_inner = 7.0;
         // between a checkbox and its text
-        s.spacing.icon_spacing = 9.0;
-        s.spacing.scroll = egui::style::ScrollStyle::solid();
-        s.spacing.scroll.bar_width = 6.0;
-        s.text_styles.insert(TextStyle::Body, FontId::proportional(13.0));
-        s.text_styles.insert(TextStyle::Button, FontId::proportional(13.0));
-        s.text_styles.insert(TextStyle::Heading, FontId::new(20.0, bold_family()));
-        s.text_styles.insert(TextStyle::Small, FontId::proportional(11.0));
+        s.spacing.icon_spacing = 8.0;
+        let (body, small) = if look == Look::Brutal { (13.0, 11.0) } else { (13.5, 11.5) };
+        s.text_styles.insert(TextStyle::Body, FontId::proportional(body));
+        s.text_styles.insert(TextStyle::Button, FontId::proportional(body));
+        s.text_styles.insert(TextStyle::Heading, FontId::new(18.0, bold_family()));
+        s.text_styles.insert(TextStyle::Small, FontId::proportional(small));
         s.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.5));
+        s.spacing.scroll = egui::style::ScrollStyle::default();
+        match look {
+            Look::Classic => s.spacing.slider_rail_height = 3.0,
+            Look::Brutal => {
+                s.spacing.slider_rail_height = 4.0;
+                s.spacing.icon_width = 15.0;
+                s.spacing.icon_width_inner = 7.0;
+                s.spacing.icon_spacing = 9.0;
+                s.spacing.scroll = egui::style::ScrollStyle::solid();
+                s.spacing.scroll.bar_width = 6.0;
+            }
+            Look::Y2k => {
+                s.spacing.slider_rail_height = 6.0;
+                s.spacing.icon_width = 16.0;
+                s.spacing.icon_width_inner = 8.0;
+            }
+        }
     });
 }
 
@@ -245,5 +367,18 @@ mod tests {
         s.system_palette = false;
         s.accent = "#ff0000".into();
         assert_eq!(compute(&s, None, None).accent, Color32::from_rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn styles() {
+        let mut s = Settings::default();
+        assert_eq!(compute(&s, None, None).look, Look::Classic);
+        s.style = "brutalist".into();
+        assert_eq!(compute(&s, None, None).accent, default_accent(Look::Brutal, true));
+        s.style = "y2k".into();
+        let k = compute(&s, None, None);
+        assert!(k.look == Look::Y2k && k.accent2 != k.accent && k.bg2 != k.bg);
+        s.style = "unknown".into();
+        assert_eq!(compute(&s, None, None).look, Look::Classic);
     }
 }

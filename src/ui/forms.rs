@@ -15,7 +15,7 @@ use crate::i18n::T;
 use crate::media;
 use crate::scale::ScaleMode;
 use crate::settings;
-use crate::theme::{self, bold, c, CONTROL_H};
+use crate::theme::{self, bold, c, Look, CONTROL_H};
 use crate::units;
 use eframe::egui::{self, pos2, vec2, Align, FontId, Layout, Rect, RichText};
 
@@ -548,7 +548,8 @@ fn result_row(ui: &mut egui::Ui, env: &Env, req: Option<&Request>) {
                 Some(n) => fit_name(ui, &n, font),
                 None => "—".into(),
             };
-            ui.add(egui::Label::new(bold(text, 13.0).color(c().text)).truncate());
+            let text = if c().look == Look::Classic { RichText::new(text) } else { bold(text, 13.0) };
+            ui.add(egui::Label::new(text.color(c().text)).truncate());
         });
     });
 }
@@ -560,12 +561,15 @@ fn header(ui: &mut egui::Ui, env: &Env) {
         return;
     }
     let count = env.files.len();
+    let look = c().look;
     let note = if count > 1 { format!("{count:02} files") } else { String::new() };
     tagged_card(ui, "input", &note, |ui| {
         ui.spacing_mut().item_spacing.y = 3.0;
         let font = FontId::new(13.0, theme::bold_family());
         for (i, f) in env.files.iter().take(3).enumerate() {
-            if i > 0 {
+            if i > 0 && look == Look::Classic {
+                ui.add_space(6.0);
+            } else if i > 0 {
                 ui.add_space(4.0);
                 ui.add(egui::Separator::default().spacing(6.0));
             }
@@ -573,7 +577,8 @@ fn header(ui: &mut egui::Ui, env: &Env) {
             ui.label(bold(fit_name(ui, &name, font.clone()), 13.0));
             let about = env.infos.iter().find(|x| x.name == name).map(|x| media::describe(x, env.t.audio_word)).unwrap_or_default();
             if !about.is_empty() {
-                ui.label(RichText::new(about.replace(" · ", " / ")).small().color(muted()));
+                let about = if look == Look::Brutal { about.replace(" · ", " / ") } else { about };
+                ui.label(RichText::new(about).small().color(muted()));
             }
         }
         if env.files.len() > 3 {

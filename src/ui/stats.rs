@@ -6,7 +6,7 @@ use super::Env;
 use crate::engine;
 use crate::media;
 use crate::report::{self, Report, Section};
-use crate::theme::{bold, c};
+use crate::theme::{bold, c, Look};
 use eframe::egui::{self, vec2, FontId, Margin, RichText, Sense, Stroke};
 use std::sync::{Arc, Mutex};
 
@@ -91,13 +91,21 @@ impl Stats {
                                 ui.add(egui::Separator::default().spacing(14.0));
                             }
                             let k = c();
-                            ui.horizontal(|ui| {
-                                let (r, _) = ui.allocate_exact_size(vec2(58.0, 18.0), Sense::hover());
-                                tag(ui, r.min, &format!("file {:02}", i + 1), k.text, k.bg);
+                            let name_line = |ui: &mut egui::Ui| {
                                 // clear of the scroll bar
                                 let name = fit_name_in(ui.ctx(), &f.name, FontId::new(14.0, crate::theme::bold_family()), ui.available_width() - 14.0);
                                 ui.label(bold(name, 14.0));
-                            });
+                            };
+                            if k.look == Look::Classic {
+                                name_line(ui);
+                            } else {
+                                ui.horizontal(|ui| {
+                                    let w = if k.look == Look::Y2k { 70.0 } else { 58.0 };
+                                    let (r, _) = ui.allocate_exact_size(vec2(w, 18.0), Sense::hover());
+                                    tag(ui, r.min, &format!("file {:02}", i + 1), k.text, k.bg);
+                                    name_line(ui);
+                                });
+                            }
                             ui.add_space(6.0);
                             match (&f.report, raw) {
                                 (Some(r), false) => overview(ui, i, r),
@@ -123,7 +131,17 @@ fn overview(ui: &mut egui::Ui, file: usize, r: &Report) {
         let k = c();
         ui.columns(r.metrics.len(), |cols| {
             for (col, (label, value)) in cols.iter_mut().zip(&r.metrics) {
-                egui::Frame::none().fill(k.bg).stroke(Stroke::new(1.0_f32, k.border)).inner_margin(Margin::symmetric(10.0, 8.0)).show(col, |col| {
+                if k.look == Look::Classic {
+                    col.spacing_mut().item_spacing.y = 2.0;
+                    caption(col, label);
+                    col.add(egui::Label::new(bold(value.as_str(), 15.0).color(k.text)).truncate());
+                    continue;
+                }
+                let frame = match k.look {
+                    Look::Y2k => egui::Frame::none().fill(k.glass).stroke(Stroke::new(1.0_f32, k.border)).rounding(10.0),
+                    _ => egui::Frame::none().fill(k.bg).stroke(Stroke::new(1.0_f32, k.border)),
+                };
+                frame.inner_margin(Margin::symmetric(10.0, 8.0)).show(col, |col| {
                     col.set_width(col.available_width());
                     col.spacing_mut().item_spacing.y = 3.0;
                     caption(col, label);
@@ -150,14 +168,27 @@ fn overview(ui: &mut egui::Ui, file: usize, r: &Report) {
 
 fn section(ui: &mut egui::Ui, id: (usize, usize, usize), s: &Section) {
     let k = c();
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::hover());
-    tag(ui, r.min, &s.title, k.accent, k.on_accent);
-    ui.add_space(4.0);
+    match k.look {
+        Look::Classic => {
+            ui.label(RichText::new(s.title.to_uppercase()).size(11.0).color(k.accent).strong());
+            ui.add_space(2.0);
+        }
+        _ => {
+            let h = if k.look == Look::Y2k { 20.0 } else { 18.0 };
+            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
+            tag(ui, r.min, &s.title, k.accent, k.on_accent);
+            ui.add_space(4.0);
+        }
+    }
     // rows as high as the text, not as the buttons
     ui.spacing_mut().interact_size.y = 16.0;
     egui::Grid::new(("stats", id)).num_columns(2).min_col_width(KEY_W).spacing(vec2(10.0, 5.0)).show(ui, |ui| {
         for (key, value) in &s.rows {
-            ui.label(spaced(&key.to_uppercase(), FontId::proportional(10.5), k.muted, 0.6));
+            if k.look == Look::Brutal {
+                ui.label(spaced(&key.to_uppercase(), FontId::proportional(10.5), k.muted, 0.6));
+            } else {
+                ui.label(RichText::new(key).color(k.muted));
+            }
             ui.add(egui::Label::new(RichText::new(value).color(c().text)).wrap());
             ui.end_row();
         }
