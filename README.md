@@ -66,7 +66,7 @@ or to go back to the built-in value (**Reset to standard**).
 ## Settings
 
 Start `cmmt` without arguments or open **Media Tools** from the application menu.
-Here you set the theme, accent colour and interface scale, turn off menu items you don't need, add your own items
+Here you choose the style of the windows (Classic, Brutalist or Y2K), set the theme, accent colour and interface scale, turn off menu items you don't need, add your own items
 with any ffmpeg command, and set the paths to ffmpeg / ffprobe. The *Defaults* page lists the default values you saved:
 change or remove them, or export them to a file as a backup and import them again.
 
