@@ -1,8 +1,8 @@
 //! The building blocks every window is made of, drawn in the style of the settings
 //! (`theme::Look`): Classic, Brutalist or Y2K.
 
-use super::paint::{self, alpha};
-use crate::theme::{bold, bold_family, c, Look, CONTROL_H};
+use super::paint::{self, DIAGONAL};
+use crate::theme::{bold, bold_family, c, display_family, mix, tech_family, Look, CONTROL_H};
 use eframe::egui::{
     self, pos2, text::LayoutJob, vec2, Align, Align2, Color32, FontId, Id, Layout, Margin, Rect, Response, RichText, Sense, Shape, Stroke, TextFormat, Vec2,
 };
@@ -13,7 +13,9 @@ pub const MARGIN: f32 = 20.0;
 const SHADOW: f32 = 3.0;
 /// What the corner of every window says (Brutalist, Y2K)
 const MARK: &str = concat!("CMMT/", env!("CARGO_PKG_VERSION"));
-const PILL: f32 = CONTROL_H / 2.0;
+/// How much of the corners of the cards and the buttons of Y2K is cut off
+const CUT: f32 = 10.0;
+const BUTTON_CUT: f32 = 8.0;
 
 pub fn muted() -> Color32 {
     c().muted
@@ -33,23 +35,26 @@ fn paint_job(ui: &egui::Ui, pos: egui::Pos2, align: Align2, job: LayoutJob) -> R
     rect
 }
 
-/// A gel surface of Y2K: the gradient of the accent with a shine and a glow (`on`), or glass
-fn gel(p: &egui::Painter, rect: Rect, radius: f32, on: bool, hovered: bool) {
+/// The fill, frame and text colour of a control of Y2K that can be chosen
+fn y2k_part(selected: bool, hovered: bool) -> (Color32, Stroke, Color32) {
     let k = c();
-    if on {
-        paint::glow(p, rect, radius, alpha(k.shadow, if hovered { 1.0 } else { 0.55 }), if hovered { 16.0 } else { 10.0 });
-        paint::gradient(p, rect, radius, k.accent, k.accent2, true);
-        paint::gloss(p, rect, radius, if k.dark { 0.8 } else { 1.0 });
-    } else {
-        if hovered {
-            paint::glow(p, rect, radius, alpha(k.shadow, 0.45), 10.0);
-        }
-        p.rect(rect, radius, if hovered { k.hover } else { k.glass }, Stroke::new(1.0_f32, if hovered { k.accent } else { k.border }));
+    match (selected, hovered) {
+        (true, _) => (k.accent, Stroke::NONE, k.on_accent),
+        (false, true) => (k.hover, Stroke::new(1.0_f32, k.accent), k.text),
+        (false, false) => (k.surface, Stroke::new(1.0_f32, k.border), k.text),
     }
 }
 
-/// A small label: `[ VIDEO ]` as a block of inverted text (Brutalist), a pill (Y2K) or
-/// coloured capitals (Classic). `fill` is the accent or the colour of the text.
+/// A frame with cut corners around what `add` puts in it (egui frames can only round them)
+pub fn cut_frame<R>(ui: &mut egui::Ui, margin: Margin, outline: impl FnOnce(Rect) -> Shape, add: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
+    let at = ui.painter().add(Shape::Noop);
+    let r = egui::Frame::none().inner_margin(margin).show(ui, add);
+    ui.painter().set(at, outline(r.response.rect));
+    r
+}
+
+/// A small label: `[ VIDEO ]` as a block of inverted text (Brutalist), a sticker with cut
+/// corners (Y2K) or coloured capitals (Classic). `fill` is the accent or the colour of the text.
 pub fn tag(ui: &egui::Ui, at: egui::Pos2, text: &str, fill: Color32, color: Color32) -> Rect {
     let k = c();
     let p = ui.painter();
@@ -69,15 +74,11 @@ pub fn tag(ui: &egui::Ui, at: egui::Pos2, text: &str, fill: Color32, color: Colo
         }
         Look::Y2k => {
             let on = fill == k.accent;
-            let galley = ui.fonts(|f| f.layout_job(spaced(&text.to_uppercase(), FontId::new(10.0, bold_family()), if on { k.on_accent } else { k.text }, 1.4)));
-            let rect = Rect::from_min_size(at, galley.size() + vec2(18.0, 6.0));
-            if on {
-                paint::gradient(p, rect, rect.height() / 2.0, k.accent, k.accent2, true);
-                paint::gloss(p, rect, rect.height() / 2.0, 0.7);
-            } else {
-                p.rect(rect, rect.height() / 2.0, k.glass, Stroke::new(1.0_f32, k.border));
-            }
-            p.galley(rect.min + vec2(9.0, 3.0), galley, Color32::WHITE);
+            let galley = ui.fonts(|f| f.layout_job(spaced(&text.to_uppercase(), FontId::new(10.5, tech_family()), if on { k.on_accent } else { k.text }, 1.2)));
+            let rect = Rect::from_min_size(at, galley.size() + vec2(16.0, 4.0));
+            let (fill, stroke) = if on { (k.accent, Stroke::NONE) } else { (Color32::TRANSPARENT, Stroke::new(1.0_f32, k.border)) };
+            paint::cut_rect(p, rect, 4.0, DIAGONAL, fill, stroke);
+            p.galley(rect.min + vec2(8.0, 2.0), galley, Color32::WHITE);
             rect
         }
     }
@@ -147,8 +148,8 @@ pub fn fit_name(ui: &egui::Ui, name: &str, font: FontId) -> String {
 }
 
 /// The title of a window. Brutalist: a block of colour, capitals, the mark of the app and a
-/// heavy rule with the ticks of a ruler. Y2K: capitals with a chromatic fringe, sparkles and a
-/// line of the gradient.
+/// heavy rule with the ticks of a ruler. Y2K: wide heavy capitals, the mark with a barcode and a
+/// star, a wire under them.
 pub fn title(ui: &mut egui::Ui, text: &str, color: Color32) {
     let k = c();
     match k.look {
@@ -184,27 +185,23 @@ pub fn title(ui: &mut egui::Ui, text: &str, color: Color32) {
         }
         Look::Y2k => {
             let w = ui.available_width();
-            let (rect, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
             let p = ui.painter();
-            let s = rect.right_center() - vec2(10.0, 0.0);
-            paint::glow(p, Rect::from_center_size(s, vec2(6.0, 6.0)), 3.0, alpha(k.shadow, 0.9), 14.0);
-            paint::sparkle(p, s, 9.0, k.accent);
-            paint::sparkle(p, s + vec2(-20.0, -7.0), 4.5, k.accent2);
-            paint::sparkle(p, s + vec2(-13.0, 8.0), 3.0, alpha(k.text, 0.8));
-            let mark = paint_job(ui, pos2(s.x - 36.0, s.y), Align2::RIGHT_CENTER, spaced(MARK, FontId::monospace(9.5), k.muted, 1.2));
-            let clip = Rect::from_min_max(rect.min, pos2(mark.left() - 10.0, rect.bottom()));
-            let font = FontId::new(19.0, bold_family());
+            let s = pos2(rect.right() - 8.0, rect.center().y);
+            paint::star(p, s, 8.0, k.accent);
+            let mark = paint_job(ui, pos2(s.x - 16.0, s.y), Align2::RIGHT_CENTER, spaced(MARK, FontId::new(10.0, tech_family()), k.muted, 1.2));
+            let code = Rect::from_min_max(pos2(mark.left() - 34.0, s.y - 6.0), pos2(mark.left() - 8.0, s.y + 6.0));
+            paint::barcode(p, code, k.muted, 0x2000);
+            let clip = Rect::from_min_max(rect.min, pos2(code.left() - 12.0, rect.bottom()));
             let caps = text.to_uppercase();
-            let at = pos2(rect.left(), rect.center().y);
-            for (off, col) in [(vec2(1.6, 1.0), alpha(k.accent2, 0.75)), (vec2(-1.2, -0.6), alpha(k.accent, 0.75)), (Vec2::ZERO, color)] {
-                let job = spaced(&caps, font.clone(), col, 2.0);
-                let galley = ui.fonts(|f| f.layout_job(job));
-                let r = Align2::LEFT_CENTER.anchor_size(at + off, galley.size());
-                p.with_clip_rect(clip).galley(r.min, galley, col);
-            }
-            let line = Rect::from_min_size(pos2(rect.left(), rect.bottom() + 6.0), vec2(w, 2.0));
-            paint::gradient(p, line, 1.0, k.accent, alpha(k.accent2, 0.15), true);
-            ui.add_space(12.0);
+            // the wide letters get smaller rather than cut off, down to a size that is still bold
+            let natural = text_width(ui.ctx(), &caps, FontId::new(19.0, display_family()));
+            let size = if natural > clip.width() { (19.0 * clip.width() / natural).floor().max(12.0) } else { 19.0 };
+            p.with_clip_rect(clip).text(pos2(rect.left(), rect.center().y + 1.0), Align2::LEFT_CENTER, caps, FontId::new(size, display_family()), color);
+            let y = rect.bottom() + 8.0;
+            paint::wire(p, pos2(rect.left() + 3.0, y), pos2(rect.right() - 3.0, y), k.border, k.bg);
+            p.rect_filled(Rect::from_min_size(pos2(rect.left() + 14.0, y - 1.5), vec2(44.0, 3.0)), 0.0, k.accent);
+            ui.add_space(15.0);
         }
     }
 }
@@ -220,7 +217,7 @@ pub fn caption(ui: &mut egui::Ui, text: &str) {
             ui.label(spaced(&text.to_uppercase(), FontId::proportional(10.5), muted(), 1.0));
         }
         Look::Y2k => {
-            ui.label(spaced(&text.to_uppercase(), FontId::proportional(10.5), muted(), 1.4));
+            ui.label(spaced(&text.to_uppercase(), FontId::new(11.0, tech_family()), muted(), 1.2));
         }
     }
 }
@@ -247,32 +244,34 @@ fn card_frame(top: f32) -> egui::Frame {
             top,
             bottom: 10.0,
         }),
-        Look::Y2k => egui::Frame::none().fill(k.glass).stroke(Stroke::new(1.0_f32, k.border)).rounding(14.0).inner_margin(Margin {
-            left: 14.0,
-            right: 14.0,
-            top: top + 2.0,
-            bottom: 12.0,
-        }),
+        // drawn by `cut_frame`
+        Look::Y2k => egui::Frame::none(),
     }
 }
 
-/// What sits on the edge of a card: a solid square (Brutalist) or a line of light (Y2K)
+/// What sits on the edge of a card: a solid square (Brutalist)
 fn card_marks(ui: &egui::Ui, rect: Rect) {
     let k = c();
-    match k.look {
-        Look::Classic => {}
-        Look::Brutal => {
-            ui.painter().rect_filled(Rect::from_min_size(rect.left_top(), vec2(6.0, 6.0)), 0.0, k.accent);
-        }
-        Look::Y2k => {
-            let line = Rect::from_min_size(pos2(rect.left() + 16.0, rect.top() + 0.5), vec2(rect.width() * 0.45, 1.0));
-            paint::gradient(ui.painter(), line, 0.0, alpha(Color32::WHITE, if k.dark { 0.45 } else { 0.9 }), Color32::TRANSPARENT, true);
-        }
+    if k.look == Look::Brutal {
+        ui.painter().rect_filled(Rect::from_min_size(rect.left_top(), vec2(6.0, 6.0)), 0.0, k.accent);
     }
+}
+
+fn y2k_margin(top: f32) -> Margin {
+    Margin { left: 14.0, right: 14.0, top, bottom: 12.0 }
 }
 
 /// A framed block on the surface colour (the log, the text of a command)
 pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let k = c();
+    if k.look == Look::Y2k {
+        let outline = |r: Rect| paint::cut_shape(r, CUT, DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border));
+        return cut_frame(ui, y2k_margin(12.0), outline, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+        .inner;
+    }
     let r = card_frame(10.0).show(ui, |ui| {
         ui.set_width(ui.available_width());
         add(ui)
@@ -285,8 +284,10 @@ pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
 /// Classic has neither: a plain card.
 pub fn tagged_card<R>(ui: &mut egui::Ui, label: &str, note: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let k = c();
-    if k.look == Look::Classic {
-        return card(ui, add);
+    match k.look {
+        Look::Classic => return card(ui, add),
+        Look::Y2k => return y2k_tagged_card(ui, label, note, add),
+        Look::Brutal => {}
     }
     let r = card_frame(28.0).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -294,13 +295,33 @@ pub fn tagged_card<R>(ui: &mut egui::Ui, label: &str, note: &str, add: impl FnOn
     });
     let rect = r.response.rect;
     card_marks(ui, rect);
-    let t = match k.look {
-        Look::Y2k => tag(ui, rect.left_top() + vec2(12.0, 9.0), label, k.accent, k.on_accent),
-        _ => tag(ui, rect.left_top(), label, k.text, k.bg),
-    };
+    let t = tag(ui, rect.left_top(), label, k.text, k.bg);
     if !note.is_empty() {
-        let spacing = if k.look == Look::Y2k { 1.4 } else { 1.0 };
-        paint_job(ui, pos2(rect.right() - 12.0, t.center().y), Align2::RIGHT_CENTER, spaced(&note.to_uppercase(), FontId::monospace(10.0), k.muted, spacing));
+        paint_job(ui, pos2(rect.right() - 12.0, t.center().y), Align2::RIGHT_CENTER, spaced(&note.to_uppercase(), FontId::monospace(10.0), k.muted, 1.0));
+    }
+    r.inner
+}
+
+/// The card of Y2K with a tab over its label, the note in brackets at the right
+fn y2k_tagged_card<R>(ui: &mut egui::Ui, label: &str, note: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    const STEP: f32 = 8.0;
+    let k = c();
+    let job = spaced(&label.to_uppercase(), FontId::new(11.0, tech_family()), k.text, 1.4);
+    let galley = ui.fonts(|f| f.layout_job(job));
+    let tab = galley.size().x + 44.0;
+    let outline = |r: Rect| paint::tab_shape(r, tab, STEP, CUT, k.surface, Stroke::new(1.0_f32, k.border));
+    let r = cut_frame(ui, y2k_margin(32.0), outline, |ui| {
+        ui.set_width(ui.available_width());
+        add(ui)
+    });
+    let rect = r.response.rect;
+    let p = ui.painter();
+    let y = rect.top() + 14.0;
+    p.rect_filled(Rect::from_center_size(pos2(rect.left() + 17.0, y), vec2(6.0, 6.0)), 0.0, k.accent);
+    p.galley(pos2(rect.left() + 26.0, y - galley.size().y / 2.0), galley, k.text);
+    if !note.is_empty() {
+        let job = spaced(&format!("[{}]", note.to_uppercase()), FontId::new(10.0, tech_family()), k.muted, 1.0);
+        paint_job(ui, pos2(rect.right() - 14.0, rect.top() + STEP + 11.0), Align2::RIGHT_CENTER, job);
     }
     r.inner
 }
@@ -324,7 +345,7 @@ pub fn button_row(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
 }
 
 /// A button: flat (Classic), a slab with a hard shadow that sinks into it when pressed
-/// (Brutalist) or a gel pill (Y2K)
+/// (Brutalist) or a sticker with cut corners, the main one lying on its own outline (Y2K)
 pub struct Slab {
     text: String,
     primary: bool,
@@ -354,8 +375,8 @@ impl egui::Widget for Slab {
             (Look::Classic, false) => (self.text, FontId::proportional(13.5), 24.0, 96.0),
             (Look::Brutal, true) => (format!("{} →", self.text.to_uppercase()), FontId::new(12.5, bold_family()), 28.0, 120.0),
             (Look::Brutal, false) => (self.text.to_uppercase(), FontId::new(12.5, bold_family()), 28.0, 96.0),
-            (Look::Y2k, true) => (self.text, FontId::new(13.0, bold_family()), 40.0, 120.0),
-            (Look::Y2k, false) => (self.text, FontId::proportional(13.0), 36.0, 100.0),
+            (Look::Y2k, true) => (self.text.to_uppercase(), FontId::new(13.5, tech_family()), 36.0, 120.0),
+            (Look::Y2k, false) => (self.text.to_uppercase(), FontId::new(13.5, tech_family()), 32.0, 100.0),
         };
         let min = self.min.unwrap_or(vec2(min_w, CONTROL_H));
         let w = text_width(ui.ctx(), &text, font.clone()) + pad;
@@ -397,18 +418,16 @@ impl egui::Widget for Slab {
                 p.text(face.center(), Align2::CENTER_CENTER, &text, font, color);
             }
             Look::Y2k => {
-                let face = if pressed { rect.translate(vec2(0.0, 1.0)) } else { rect };
-                let r = face.height() / 2.0;
-                if enabled {
-                    gel(p, face, r, self.primary, hovered);
-                } else {
-                    p.rect(face, r, k.glass, Stroke::new(1.0_f32, k.rule));
+                let face = if pressed { rect.translate(vec2(1.0, 1.0)) } else { rect };
+                if enabled && self.primary {
+                    paint::cut_rect(p, rect.translate(vec2(3.0, 3.0)), BUTTON_CUT, DIAGONAL, Color32::TRANSPARENT, Stroke::new(1.0_f32, k.accent));
                 }
-                let color = match (enabled, self.primary) {
-                    (false, _) => k.muted,
-                    (true, true) => k.on_accent,
-                    (true, false) => k.text,
+                let (fill, stroke, color) = match (enabled, self.primary, hovered) {
+                    (false, _, _) => (Color32::TRANSPARENT, Stroke::new(1.0_f32, k.rule), k.muted),
+                    (true, true, h) => (if h { theme_mix(k.accent, k.text, 0.18) } else { k.accent }, Stroke::NONE, k.on_accent),
+                    (true, false, h) => y2k_part(false, h),
                 };
+                paint::cut_rect(p, face, BUTTON_CUT, DIAGONAL, fill, stroke);
                 p.text(face.center(), Align2::CENTER_CENTER, &text, font, color);
             }
         }
@@ -432,8 +451,9 @@ pub fn segmented(ui: &mut egui::Ui, labels: &[&str], current: &mut usize) -> egu
     match k.look {
         Look::Classic => painter.rect(rect, 4.0, k.surface, Stroke::new(1.0_f32, k.border)),
         Look::Brutal => painter.rect_filled(rect, 0.0, k.surface),
-        Look::Y2k => painter.rect(rect, PILL, k.glass, Stroke::new(1.0_f32, k.border)),
+        Look::Y2k => painter.add(paint::cut_shape(rect, BUTTON_CUT, DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border))),
     };
+    let last = labels.len().saturating_sub(1);
     let seg_w = rect.width() / labels.len().max(1) as f32;
     let mut changed = false;
     let mut all = resp.clone();
@@ -465,17 +485,21 @@ pub fn segmented(ui: &mut egui::Ui, labels: &[&str], current: &mut usize) -> egu
                 }
             }
             Look::Y2k => {
-                let inner = r.shrink(3.0);
-                if selected {
-                    gel(&painter, inner, inner.height() / 2.0, true, part.hovered());
-                } else if part.hovered() {
-                    painter.rect_filled(inner, inner.height() / 2.0, k.hover);
+                // the outer ends follow the cut corners of the control
+                let corners = [i == 0, false, i == last, false];
+                if selected || part.hovered() {
+                    paint::cut_rect(&painter, r.shrink(3.0), BUTTON_CUT - 2.0, corners, if selected { k.accent } else { k.hover }, Stroke::NONE);
+                }
+                if i > 0 && !selected && *current != i - 1 {
+                    painter.line_segment([pos2(r.left(), r.top() + 9.0), pos2(r.left(), r.bottom() - 9.0)], Stroke::new(1.0_f32, k.rule));
                 }
             }
         }
         let (text, font, color) = match (k.look, selected) {
             (Look::Brutal, true) => (label.to_uppercase(), FontId::new(12.5, bold_family()), k.on_accent),
             (Look::Brutal, false) => (label.to_uppercase(), FontId::proportional(12.5), k.text),
+            (Look::Y2k, true) => (label.to_uppercase(), FontId::new(13.0, tech_family()), k.on_accent),
+            (Look::Y2k, false) => (label.to_uppercase(), FontId::new(13.0, tech_family()), k.text),
             (_, true) => (label.to_string(), FontId::new(13.0, bold_family()), k.on_accent),
             (_, false) => (label.to_string(), FontId::proportional(13.0), k.text),
         };
@@ -504,7 +528,7 @@ fn label_w() -> f32 {
 }
 
 /// A row of a form: the name at the left, the control (and a line about it) at the right.
-/// Brutalist: a line of a spec sheet, numbered between dashed rules. Y2K: a diamond before the name.
+/// Brutalist: a line of a spec sheet, numbered between dashed rules. Y2K: the end of a wire before the name.
 pub fn form_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let k = c();
     let label_w = label_w();
@@ -529,9 +553,11 @@ pub fn form_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::U
                     ui.painter().with_clip_rect(clip).galley(at, galley, k.muted);
                 }
                 Look::Y2k => {
-                    paint::diamond(ui.painter(), r.left_center() + vec2(4.0, 0.0), 3.5, k.accent2);
-                    let clip = Rect::from_min_max(pos2(r.left() + 14.0, r.top()), r.max);
-                    ui.painter().with_clip_rect(clip).text(pos2(clip.left(), r.center().y), Align2::LEFT_CENTER, label, FontId::proportional(12.5), k.muted);
+                    paint::node(ui.painter(), r.left_center() + vec2(3.0, 0.0), 2.5, k.accent, k.bg);
+                    let clip = Rect::from_min_max(pos2(r.left() + 13.0, r.top()), r.max);
+                    let galley = ui.fonts(|f| f.layout_job(spaced(&label.to_uppercase(), FontId::new(11.5, tech_family()), k.muted, 0.8)));
+                    let at = Align2::LEFT_CENTER.anchor_size(pos2(clip.left(), r.center().y), galley.size()).min;
+                    ui.painter().with_clip_rect(clip).galley(at, galley, k.muted);
                 }
             }
             ui.vertical(|ui| {
@@ -587,25 +613,30 @@ pub fn choice(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &str)])
                     }
                 }
                 Look::Y2k => {
-                    let text = if selected { bold(*label, 13.0).color(k.on_accent) } else { RichText::new(*label) };
-                    let b = egui::Button::new(text).min_size(vec2(64.0, CONTROL_H)).rounding(PILL);
-                    if selected {
-                        b.fill(k.accent).stroke(Stroke::NONE)
-                    } else {
-                        b.fill(k.glass)
+                    if chip(ui, label, selected).clicked() {
+                        *current = value.to_string();
                     }
+                    continue;
                 }
             };
             let r = ui.add(b);
-            if selected && k.look == Look::Y2k {
-                gel(ui.painter(), r.rect, PILL, true, r.hovered());
-                ui.painter().text(r.rect.center(), Align2::CENTER_CENTER, *label, FontId::new(13.0, bold_family()), k.on_accent);
-            }
             if r.clicked() {
                 *current = value.to_string();
             }
         }
     });
+}
+
+/// A button of `choice` in Y2K
+fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> Response {
+    let font = FontId::new(13.0, tech_family());
+    let caps = label.to_uppercase();
+    let w = (text_width(ui.ctx(), &caps, font.clone()) + 28.0).max(64.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, CONTROL_H), Sense::click());
+    let (fill, stroke, color) = y2k_part(selected, resp.hovered());
+    paint::cut_rect(ui.painter(), rect, BUTTON_CUT - 1.0, DIAGONAL, fill, stroke);
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, caps, font, color);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// One of several values as a grid of equal cells, two in a row: the name and a few words
@@ -615,8 +646,8 @@ pub fn option_grid(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &s
     const GAP: f32 = 6.0;
     let k = c();
     let brutal = k.look == Look::Brutal;
-    let caps = |n: &str| if brutal { n.to_uppercase() } else { n.to_string() };
-    let name_font = FontId::new(13.0, bold_family());
+    let caps = |n: &str| if k.look == Look::Classic { n.to_string() } else { n.to_uppercase() };
+    let name_font = if k.look == Look::Y2k { FontId::new(13.5, tech_family()) } else { FontId::new(13.0, bold_family()) };
     let hint_font = FontId::proportional(if brutal { 11.0 } else { 11.5 });
     let pad = match k.look {
         Look::Classic => 12.0,
@@ -655,7 +686,10 @@ pub fn option_grid(ui: &mut egui::Ui, current: &mut String, options: &[(&str, &s
                 // a notch at the left: the cell that is chosen gets a solid one
                 painter.rect_filled(Rect::from_min_size(r.left_top(), vec2(4.0, CONTROL_H)), 0.0, if selected { k.on_accent } else { k.rule });
             }
-            Look::Y2k => gel(&painter, r, 10.0, selected, hovered),
+            Look::Y2k => {
+                let (fill, stroke, _) = y2k_part(selected, hovered);
+                paint::cut_rect(&painter, r, BUTTON_CUT, DIAGONAL, fill, stroke);
+            }
         }
         painter.text(pos2(r.left() + pad, r.center().y), Align2::LEFT_CENTER, caps(name), name_font.clone(), text_c);
         if !hint.is_empty() {
@@ -689,7 +723,7 @@ pub fn number_field(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &
     .inner
 }
 
-/// A slider with its value at the right (a readout in a box: Brutalist, a pill: Y2K)
+/// A slider with its value at the right (a readout in a box: Brutalist, Y2K)
 pub fn slider_row(ui: &mut egui::Ui, value: &mut u32, range: std::ops::RangeInclusive<u32>) -> egui::Response {
     let k = c();
     ui.horizontal(|ui| {
@@ -713,8 +747,8 @@ pub fn slider_row(ui: &mut egui::Ui, value: &mut u32, range: std::ops::RangeIncl
             }
             Look::Y2k => {
                 let (rect, _) = ui.allocate_exact_size(vec2(46.0, 22.0), Sense::hover());
-                ui.painter().rect(rect, 11.0, k.glass, Stroke::new(1.0_f32, k.border));
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, value.to_string(), FontId::new(12.0, bold_family()), k.accent);
+                paint::cut_rect(ui.painter(), rect, 5.0, DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border));
+                ui.painter().text(rect.center(), Align2::CENTER_CENTER, value.to_string(), FontId::new(13.0, tech_family()), k.accent);
             }
         }
         r
@@ -735,22 +769,19 @@ fn crop_marks(ctx: &egui::Context) {
     }
 }
 
-/// The background of a window. Y2K paints a gradient with two spots of light under the panels
-/// and returns a clear fill for them; the other styles return the fill of the panels.
-pub fn backdrop(ctx: &egui::Context) -> Color32 {
+/// The frame of a sticker around a window (Y2K): cut corners, a star in the one that is not
+/// cut, a mark of the accent on the left edge and a row of squares on the bottom one
+fn sticker_frame(ctx: &egui::Context) {
     let k = c();
-    let fill = ctx.style().visuals.panel_fill;
-    if k.look != Look::Y2k {
-        return fill;
-    }
-    let a = fill.a() as f32 / 255.0;
-    let p = ctx.layer_painter(egui::LayerId::background());
-    let r = ctx.screen_rect();
-    paint::gradient(&p, r, 0.0, alpha(k.bg, a), alpha(k.bg2, a), false);
-    let strength = if k.dark { 0.22 } else { 0.28 };
-    paint::aura(&p, pos2(r.right() - r.width() * 0.1, r.top() + 20.0), r.width().max(r.height()) * 0.55, alpha(k.accent, strength * a));
-    paint::aura(&p, pos2(r.left() + r.width() * 0.05, r.bottom()), r.width().max(r.height()) * 0.6, alpha(k.accent2, strength * a));
-    Color32::TRANSPARENT
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::PanelResizeLine, Id::new("cmmt_marks")));
+    let r = ctx.screen_rect().shrink(7.0);
+    let line = mix(k.bg, k.text, 0.35);
+    paint::cut_rect(&p, r, 14.0, DIAGONAL, Color32::TRANSPARENT, Stroke::new(1.0_f32, line));
+    paint::star(&p, r.right_top(), 7.0, k.text);
+    p.rect_filled(Rect::from_min_size(pos2(r.left() - 1.5, r.top() + 34.0), vec2(3.0, 26.0)), 0.0, k.accent);
+    let row = Rect::from_min_size(pos2(r.left() + 26.0, r.bottom() - 3.0), vec2(52.0, 6.0));
+    p.rect_filled(row.expand2(vec2(4.0, 0.0)), 0.0, k.bg);
+    paint::squares(&p, row, 0.6, line, line);
 }
 
 /// The layout of the job windows: the buttons at the bottom, the content above them.
@@ -760,7 +791,7 @@ pub fn backdrop(ctx: &egui::Context) -> Color32 {
 pub fn window<R>(ctx: &egui::Context, scroll: bool, footer: impl FnOnce(&mut egui::Ui), body: impl FnOnce(&mut egui::Ui) -> R) -> (R, f32) {
     reset_index(ctx);
     let look = c().look;
-    let fill = backdrop(ctx);
+    let fill = ctx.style().visuals.panel_fill;
     let (body_top, foot_top, extra) = match look {
         Look::Classic => (18.0, 12.0, 0.0),
         Look::Brutal => (16.0, 14.0, 8.0),
@@ -778,14 +809,7 @@ pub fn window<R>(ctx: &egui::Context, scroll: bool, footer: impl FnOnce(&mut egu
                 Look::Brutal => {
                     ui.painter().line_segment([pos2(r.left(), y), pos2(r.right(), y)], Stroke::new(1.0_f32, k.border));
                 }
-                Look::Y2k => paint::gradient(
-                    ui.painter(),
-                    Rect::from_min_size(pos2(r.left(), y), vec2(r.width(), 1.0)),
-                    0.0,
-                    alpha(k.accent2, 0.1),
-                    alpha(k.accent, 0.6),
-                    true,
-                ),
+                Look::Y2k => paint::wire(ui.painter(), pos2(r.left() + 3.0, y), pos2(r.right() - 3.0, y), k.rule, k.bg),
             }
             footer(ui)
         });
@@ -804,8 +828,10 @@ pub fn window<R>(ctx: &egui::Context, scroll: bool, footer: impl FnOnce(&mut egu
             }
         })
         .inner;
-    if look == Look::Brutal {
-        crop_marks(ctx);
+    match look {
+        Look::Classic => {}
+        Look::Brutal => crop_marks(ctx),
+        Look::Y2k => sticker_frame(ctx),
     }
     (inner, body_top + content_h + extra + foot.response.rect.height())
 }

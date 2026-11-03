@@ -1,11 +1,11 @@
 //! The progress of a job, then its result.
 
 use super::paint;
-use super::widgets::{button_row, caption, card, fit_name, primary_button, secondary_button, spaced, tagged_card, title, window};
+use super::widgets::{button_row, caption, card, fit_name, primary_button, secondary_button, spaced, tagged_card, text_width, title, window};
 use super::Env;
 use crate::engine::{self, Job, Line, LineKind, Progress, Request, State};
 use crate::media;
-use crate::theme::{bold, bold_family, c, Look};
+use crate::theme::{bold, bold_family, c, display_family, tech_family, Look};
 use crate::units::fmt_duration;
 use eframe::egui::{self, pos2, text::LayoutJob, vec2, Align2, FontId, Rect, RichText, Sense, Stroke, TextFormat};
 use std::sync::Arc;
@@ -136,20 +136,14 @@ impl Running {
 }
 
 /// The bar of the progress: separate blocks like the level meter of a device (Brutalist) or a
-/// glowing gel tube (Y2K)
+/// row of squares in a frame with cut corners (Y2K)
 fn blocks(ui: &mut egui::Ui, done: f32, height: f32) {
     let k = c();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let p = ui.painter();
     if k.look == Look::Y2k {
-        let r = rect.height() / 2.0;
-        p.rect(rect, r, k.glass, Stroke::new(1.0_f32, k.border));
-        let inner = rect.shrink(3.0);
-        let w = (inner.width() * done.clamp(0.0, 1.0)).max(inner.height());
-        let fill = egui::Rect::from_min_size(inner.min, vec2(w, inner.height()));
-        paint::glow(p, fill, fill.height() / 2.0, paint::alpha(k.shadow, 0.8), 12.0);
-        paint::gradient(p, fill, fill.height() / 2.0, k.accent, k.accent2, true);
-        paint::gloss(p, fill, fill.height() / 2.0, 0.9);
+        paint::cut_rect(p, rect, 5.0, paint::DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border));
+        paint::squares(p, rect.shrink2(vec2(8.0, 5.0)), done, k.accent, crate::theme::mix(k.surface, k.text, 0.3));
         return;
     }
     p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, k.border));
@@ -170,8 +164,13 @@ fn readout(ui: &mut egui::Ui, name: &str, value: &str) {
     let k = c();
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 1.0;
-        ui.label(spaced(&name.to_uppercase(), FontId::proportional(9.5), k.muted, 1.0));
-        ui.label(bold(value, 12.5).color(k.text));
+        if k.look == Look::Y2k {
+            ui.label(spaced(&format!("[{}]", name.to_uppercase()), FontId::new(10.0, tech_family()), k.muted, 1.0));
+            ui.label(RichText::new(value).font(FontId::new(14.0, tech_family())).color(k.text));
+        } else {
+            ui.label(spaced(&name.to_uppercase(), FontId::proportional(9.5), k.muted, 1.0));
+            ui.label(bold(value, 12.5).color(k.text));
+        }
     });
 }
 
@@ -234,18 +233,21 @@ fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
         ui.add_space(8.0);
         let overall = s.overall();
         ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(78.0, 30.0), Sense::hover());
-            let pct = format!("{:.0}%", overall * 100.0);
-            let font = FontId::new(28.0, bold_family());
-            if k.look == Look::Y2k {
-                // a chromatic fringe, like the title
-                ui.painter().text(r.left_center() + vec2(1.6, 1.0), Align2::LEFT_CENTER, &pct, font.clone(), paint::alpha(k.accent2, 0.75));
-                ui.painter().text(r.left_center() + vec2(-1.2, -0.6), Align2::LEFT_CENTER, &pct, font.clone(), paint::alpha(k.accent, 0.75));
-            }
-            ui.painter().text(r.left_center(), Align2::LEFT_CENTER, pct, font, k.text);
+            let y2k = k.look == Look::Y2k;
+            let font = if y2k { FontId::new(22.0, display_family()) } else { FontId::new(28.0, bold_family()) };
+            let w = if y2k { text_width(ui.ctx(), "100%", font.clone()) + 14.0 } else { 78.0 };
+            let (r, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
+            ui.painter().text(r.left_center(), Align2::LEFT_CENTER, format!("{:.0}%", overall * 100.0), font, k.text);
             ui.vertical(|ui| {
-                ui.add_space(6.0);
+                ui.add_space(if y2k { 2.0 } else { 6.0 });
                 blocks(ui, overall as f32, 18.0);
+                if y2k {
+                    // the dots count up while the job runs
+                    let dots = (ui.input(|i| i.time) * 2.5) as usize % 4;
+                    ui.ctx().request_repaint_after(Duration::from_millis(400));
+                    ui.add_space(2.0);
+                    ui.label(spaced(&format!("NOW LOADING{}", ".".repeat(dots)), FontId::new(9.5, tech_family()), k.muted, 1.4));
+                }
             });
         });
         ui.add_space(4.0);
@@ -275,7 +277,7 @@ fn log(ui: &mut egui::Ui, lines: &[Line]) -> bool {
         let out = egui::ScrollArea::vertical().max_height(h).auto_shrink([false, true]).stick_to_bottom(true).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 5.0;
             for l in lines {
-                if look != Look::Brutal {
+                if look == Look::Classic {
                     let (prefix, col) = match l.kind {
                         LineKind::Info => ("", k.muted),
                         LineKind::Warn => ("⚠ ", k.warn),
@@ -292,7 +294,8 @@ fn log(ui: &mut egui::Ui, lines: &[Line]) -> bool {
                     LineKind::Result => ("[ OK ]", k.ok, k.text),
                 };
                 let mut job = LayoutJob::default();
-                job.append(tag, 0.0, TextFormat { font_id: FontId::new(11.5, bold_family()), color: col, ..Default::default() });
+                let tag_font = if look == Look::Y2k { FontId::new(12.0, tech_family()) } else { FontId::new(11.5, bold_family()) };
+                job.append(tag, 0.0, TextFormat { font_id: tag_font, color: col, ..Default::default() });
                 job.append(&l.text, 8.0, TextFormat { font_id: FontId::monospace(11.5), color: body, ..Default::default() });
                 ui.add(egui::Label::new(job).wrap());
             }

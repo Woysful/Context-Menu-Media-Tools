@@ -1,6 +1,7 @@
 //! Look of the windows: JetBrains Mono and one of three styles (Classic: flat and quiet;
-//! Brutalist: square corners, hard lines and offset shadows; Y2K: glossy pills, gradients and
-//! glow), with colours from the settings (dark / light / the system palette) and an accent.
+//! Brutalist: square corners, hard lines and offset shadows; Y2K: cyber stickers, thin light
+//! lines, cut corners and wide display type), with colours from the settings (dark / light /
+//! the system palette) and an accent.
 
 use crate::settings::Settings;
 use crate::syspal::Palette;
@@ -33,23 +34,17 @@ pub struct Colors {
     pub look: Look,
     pub dark: bool,
     pub bg: Color32,
-    /// the bottom of the background (Y2K: a gradient from `bg`; the same colour elsewhere)
-    pub bg2: Color32,
     pub surface: Color32,
-    /// the fill of cards: see-through in Y2K, `surface` elsewhere
-    pub glass: Color32,
     pub hover: Color32,
     /// the frames of the controls and the cards
     pub border: Color32,
     /// the faint lines between rows
     pub rule: Color32,
-    /// the shadow under buttons and lists (Brutalist: hard; Y2K: the colour of the glow)
+    /// the shadow under buttons and lists (Brutalist: hard; Y2K: none)
     pub shadow: Color32,
     pub text: Color32,
     pub muted: Color32,
     pub accent: Color32,
-    /// the other end of the gradients of Y2K (`accent` elsewhere)
-    pub accent2: Color32,
     pub on_accent: Color32,
     pub ok: Color32,
     pub warn: Color32,
@@ -95,8 +90,8 @@ pub fn default_accent(look: Look, dark: bool) -> Color32 {
         (Look::Classic, false) => 0x2f6bed,
         (Look::Brutal, true) => 0xd4ff00,
         (Look::Brutal, false) => 0xff4a00,
-        (Look::Y2k, true) => 0x3ce8ff,
-        (Look::Y2k, false) => 0x2f6bff,
+        (Look::Y2k, true) => 0x9db4ff,
+        (Look::Y2k, false) => 0x3d5afe,
     })
 }
 
@@ -121,8 +116,8 @@ pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>
         (None, Look::Classic, false) => (hex(0xf4f5f7), Color32::WHITE, hex(0x14171f)),
         (None, Look::Brutal, true) => (hex(0x0c0c0c), hex(0x161616), hex(0xeeece5)),
         (None, Look::Brutal, false) => (hex(0xe7e5de), hex(0xf4f3ee), hex(0x0c0c0c)),
-        (None, Look::Y2k, true) => (hex(0x0b0d2b), hex(0x181c4a), hex(0xeaf0ff)),
-        (None, Look::Y2k, false) => (hex(0xdde6f8), hex(0xf6f8ff), hex(0x16183a)),
+        (None, Look::Y2k, true) => (hex(0x121316), hex(0x0a0a0c), hex(0xeceef3)),
+        (None, Look::Y2k, false) => (hex(0xd9dadf), hex(0xf3f3f5), hex(0x0c0c0e)),
     };
     let accent = match &pal {
         Some(p) => rgb(p.accent),
@@ -133,9 +128,7 @@ pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>
         look,
         dark,
         bg,
-        bg2: bg,
         surface,
-        glass: surface,
         hover: mix(surface, toward, 0.07),
         border: mix(bg, text, 0.20),
         rule: mix(bg, text, 0.20),
@@ -143,7 +136,6 @@ pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>
         text,
         muted: mix(text, bg, 0.45),
         accent,
-        accent2: accent,
         on_accent: if luma(accent) > 0.6 { Color32::BLACK } else { Color32::WHITE },
         ok: hex(0x3fb96b),
         warn: hex(0xe0a13a),
@@ -163,32 +155,33 @@ pub fn compute(s: &Settings, system_dark: Option<bool>, palette: Option<Palette>
             err: hex(if dark { 0xff4545 } else { 0xd02222 }),
             ..base
         },
-        Look::Y2k => {
-            // the second colour of the gradients: magenta, turned with the accent
-            let accent2 = if pal.is_none() && s.accent.is_empty() { hex(if dark { 0xff4fd8 } else { 0xe040c8 }) } else { mix(accent, hex(0xff4fd8), 0.6) };
-            let mid = mix(accent, accent2, 0.5);
-            let g = |a: u8| if dark { Color32::from_rgba_unmultiplied(160, 180, 255, a) } else { Color32::from_rgba_unmultiplied(255, 255, 255, a) };
-            Colors {
-                bg2: if pal.is_some() { mix(bg, accent2, 0.18) } else { hex(if dark { 0x26104c } else { 0xf5e3f5 }) },
-                glass: g(if dark { 16 } else { 150 }),
-                hover: mix(surface, accent, 0.14),
-                border: mix(bg, accent, if dark { 0.42 } else { 0.5 }),
-                rule: mix(bg, text, 0.12),
-                shadow: Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), if dark { 110 } else { 90 }),
-                muted: mix(text, bg, 0.40),
-                accent2,
-                on_accent: if luma(mid) > 0.55 { hex(0x0b0d2b) } else { Color32::WHITE },
-                ok: hex(if dark { 0x4dffb0 } else { 0x0f9d63 }),
-                warn: hex(if dark { 0xffd166 } else { 0xb97900 }),
-                err: hex(if dark { 0xff5c8a } else { 0xd6336c }),
-                ..base
-            }
-        }
+        Look::Y2k => Colors {
+            hover: mix(surface, text, 0.08),
+            border: mix(bg, text, 0.78),
+            rule: mix(bg, text, 0.16),
+            shadow: Color32::TRANSPARENT,
+            muted: mix(text, bg, 0.45),
+            on_accent: if luma(accent) > 0.6 { hex(0x0a0a0c) } else { Color32::WHITE },
+            ok: hex(if dark { 0x8affc1 } else { 0x0d8a4e }),
+            warn: hex(if dark { 0xffd36b } else { 0xa86b00 }),
+            err: hex(if dark { 0xff6b6b } else { 0xd02a2a }),
+            ..base
+        },
     }
 }
 
 pub fn bold_family() -> FontFamily {
     FontFamily::Name("bold".into())
+}
+
+/// Wide and heavy (Unbounded Black): the titles and big numbers of Y2K
+pub fn display_family() -> FontFamily {
+    FontFamily::Name("display".into())
+}
+
+/// Square and technical (Chakra Petch Bold): the buttons and labels of Y2K
+pub fn tech_family() -> FontFamily {
+    FontFamily::Name("tech".into())
 }
 
 /// Bold text (JetBrains Mono Bold)
@@ -214,7 +207,17 @@ pub fn install_fonts(ctx: &egui::Context) {
     b.push("Hack".into());
     f.families.insert(FontFamily::Proportional, p);
     f.families.insert(FontFamily::Monospace, m);
-    f.families.insert(bold_family(), b);
+    f.families.insert(bold_family(), b.clone());
+    f.font_data.insert("unbounded".into(), FontData::from_static(include_bytes!("../assets/fonts/Unbounded-Black-Latin.ttf")));
+    f.font_data.insert("unbounded-cyr".into(), FontData::from_static(include_bytes!("../assets/fonts/Unbounded-Black-Cyrillic.ttf")));
+    f.font_data.insert("chakra".into(), FontData::from_static(include_bytes!("../assets/fonts/ChakraPetch-Bold.ttf")));
+    // the symbols and letters these fonts do not have come from JetBrains Mono Bold
+    let mut d = vec!["unbounded".to_string(), "unbounded-cyr".to_string()];
+    d.extend(b.clone());
+    let mut tech = vec!["chakra".to_string()];
+    tech.extend(b);
+    f.families.insert(display_family(), d);
+    f.families.insert(tech_family(), tech);
     ctx.set_fonts(f);
 }
 
@@ -236,7 +239,7 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
     let (r, frame_w, hover_w) = match k.look {
         Look::Classic => (Rounding::same(3.0), 1.0, 1.0),
         Look::Brutal => (Rounding::ZERO, 1.0, 2.0),
-        Look::Y2k => (Rounding::same(9.0), 1.0, 1.5),
+        Look::Y2k => (Rounding::ZERO, 1.0, 1.5),
     };
     match k.look {
         Look::Classic => {
@@ -260,14 +263,15 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
             v.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.45 };
         }
         Look::Y2k => {
-            v.window_stroke = stroke(1.0, k.border);
-            v.window_rounding = Rounding::same(14.0);
-            v.menu_rounding = Rounding::same(14.0);
-            v.window_shadow = egui::epaint::Shadow { offset: Vec2::ZERO, blur: 24.0, spread: 0.0, color: k.shadow };
-            v.popup_shadow = egui::epaint::Shadow { offset: Vec2::ZERO, blur: 22.0, spread: 0.0, color: k.shadow };
-            v.selection.bg_fill = mix(k.surface, k.accent, 0.5);
+            v.window_stroke = stroke(1.5, k.border);
+            v.window_rounding = Rounding::ZERO;
+            v.menu_rounding = Rounding::ZERO;
+            v.window_shadow = egui::epaint::Shadow::NONE;
+            v.popup_shadow = egui::epaint::Shadow { offset: Vec2::new(4.0, 4.0), blur: 0.0, spread: 0.0, color: k.rule };
+            v.selection.bg_fill = mix(k.surface, k.accent, 0.6);
             v.selection.stroke = stroke(1.0, k.text);
             v.slider_trailing_fill = true;
+            v.handle_shape = egui::style::HandleShape::Rect { aspect_ratio: 0.35 };
         }
     }
     if k.look != Look::Classic {
@@ -312,7 +316,7 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
         s.spacing.combo_height = 380.0;
         // between a checkbox and its text
         s.spacing.icon_spacing = 8.0;
-        let (body, small) = if look == Look::Brutal { (13.0, 11.0) } else { (13.5, 11.5) };
+        let (body, small) = if look == Look::Classic { (13.5, 11.5) } else { (13.0, 11.0) };
         s.text_styles.insert(TextStyle::Body, FontId::proportional(body));
         s.text_styles.insert(TextStyle::Button, FontId::proportional(body));
         s.text_styles.insert(TextStyle::Heading, FontId::new(18.0, bold_family()));
@@ -330,9 +334,11 @@ pub fn apply(ctx: &egui::Context, colors: Colors, alpha: f32) {
                 s.spacing.scroll.bar_width = 6.0;
             }
             Look::Y2k => {
-                s.spacing.slider_rail_height = 6.0;
-                s.spacing.icon_width = 16.0;
-                s.spacing.icon_width_inner = 8.0;
+                s.spacing.slider_rail_height = 2.0;
+                s.spacing.icon_width = 14.0;
+                s.spacing.icon_width_inner = 6.0;
+                s.spacing.scroll = egui::style::ScrollStyle::solid();
+                s.spacing.scroll.bar_width = 4.0;
             }
         }
     });
@@ -377,7 +383,7 @@ mod tests {
         assert_eq!(compute(&s, None, None).accent, default_accent(Look::Brutal, true));
         s.style = "y2k".into();
         let k = compute(&s, None, None);
-        assert!(k.look == Look::Y2k && k.accent2 != k.accent && k.bg2 != k.bg);
+        assert!(k.look == Look::Y2k && k.accent == default_accent(Look::Y2k, true));
         s.style = "unknown".into();
         assert_eq!(compute(&s, None, None).look, Look::Classic);
     }

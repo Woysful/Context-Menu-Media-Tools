@@ -1,99 +1,142 @@
-//! Shapes egui has no call for: gradients, gloss, glow, auras and sparkles (the Y2K style).
+//! Shapes egui has no call for, the parts of the cyber stickers of Y2K: frames with cut corners,
+//! four-pointed stars, wires with round ends, rows of squares, barcodes.
 
-use eframe::egui::{self, epaint::Mesh, pos2, vec2, Color32, Painter, Pos2, Rect, Shape, Stroke};
-use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use eframe::egui::{epaint::Mesh, pos2, vec2, Color32, Painter, Pos2, Rect, Shape, Stroke};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 
-/// Between two colours, alpha included
-pub fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
-    let f = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
-    let (a, b) = (a.to_array(), b.to_array());
-    Color32::from_rgba_premultiplied(f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2]), f(a[3], b[3]))
-}
+/// Which corners are cut: top left, top right, bottom right, bottom left
+pub type Corners = [bool; 4];
+/// The top left and the bottom right corner: the cut of buttons and cards
+pub const DIAGONAL: Corners = [true, false, true, false];
 
-pub fn alpha(c: Color32, a: f32) -> Color32 {
-    c.gamma_multiply(a.clamp(0.0, 1.0))
-}
-
-/// The outline of a rounded rectangle, clockwise from the top left corner
-fn outline(rect: Rect, radius: f32) -> Vec<Pos2> {
-    let r = radius.min(rect.width() / 2.0).min(rect.height() / 2.0).max(0.0);
-    if r < 0.5 {
-        return vec![rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
+fn cut_outline(rect: Rect, cut: f32, corners: Corners) -> Vec<Pos2> {
+    let c = cut.min(rect.width() / 2.0).min(rect.height() / 2.0);
+    let mut pts = Vec::with_capacity(8);
+    let (l, t, r, b) = (rect.left(), rect.top(), rect.right(), rect.bottom());
+    if corners[0] {
+        pts.extend([pos2(l, t + c), pos2(l + c, t)]);
+    } else {
+        pts.push(pos2(l, t));
     }
-    let steps = ((r / 2.0).ceil() as usize).clamp(3, 12);
-    let corners = [
-        (pos2(rect.left() + r, rect.top() + r), PI),
-        (pos2(rect.right() - r, rect.top() + r), PI + FRAC_PI_2),
-        (pos2(rect.right() - r, rect.bottom() - r), 0.0),
-        (pos2(rect.left() + r, rect.bottom() - r), FRAC_PI_2),
-    ];
-    let mut pts = Vec::with_capacity(4 * (steps + 1));
-    for (c, start) in corners {
-        for i in 0..=steps {
-            let a = start + FRAC_PI_2 * i as f32 / steps as f32;
-            pts.push(c + vec2(a.cos(), a.sin()) * r);
-        }
+    if corners[1] {
+        pts.extend([pos2(r - c, t), pos2(r, t + c)]);
+    } else {
+        pts.push(pos2(r, t));
+    }
+    if corners[2] {
+        pts.extend([pos2(r, b - c), pos2(r - c, b)]);
+    } else {
+        pts.push(pos2(r, b));
+    }
+    if corners[3] {
+        pts.extend([pos2(l + c, b), pos2(l, b - c)]);
+    } else {
+        pts.push(pos2(l, b));
     }
     pts
 }
 
-/// A rounded rectangle filled with a gradient: left to right (`across`) or top to bottom
-pub fn gradient(p: &Painter, rect: Rect, radius: f32, from: Color32, to: Color32, across: bool) {
-    if rect.width() <= 0.0 || rect.height() <= 0.0 {
-        return;
+/// A rectangle with cut corners, filled and framed
+pub fn cut_shape(rect: Rect, cut: f32, corners: Corners, fill: Color32, stroke: Stroke) -> Shape {
+    let pts = cut_outline(rect, cut, corners);
+    let mut shapes = Vec::with_capacity(2);
+    if fill != Color32::TRANSPARENT {
+        shapes.push(Shape::convex_polygon(pts.clone(), fill, Stroke::NONE));
     }
-    let at = |q: Pos2| {
-        let t = if across { (q.x - rect.left()) / rect.width() } else { (q.y - rect.top()) / rect.height() };
-        lerp(from, to, t)
-    };
+    if stroke.width > 0.0 {
+        shapes.push(Shape::closed_line(pts, stroke));
+    }
+    Shape::Vec(shapes)
+}
+
+pub fn cut_rect(p: &Painter, rect: Rect, cut: f32, corners: Corners, fill: Color32, stroke: Stroke) {
+    p.add(cut_shape(rect, cut, corners, fill, stroke));
+}
+
+/// A card whose top edge is higher at the left, over its label: the tab is `tab` wide and
+/// `step` higher than the rest of the edge; the top left and the bottom right corners are cut
+pub fn tab_shape(rect: Rect, tab: f32, step: f32, cut: f32, fill: Color32, stroke: Stroke) -> Shape {
+    let (l, t, r, b) = (rect.left(), rect.top(), rect.right(), rect.bottom());
+    let c = cut.min(step + 2.0).min(tab / 2.0);
+    let tab = tab.min(rect.width() - step - c);
+    let pts =
+        vec![pos2(l, t + c), pos2(l + c, t), pos2(l + tab, t), pos2(l + tab + step, t + step), pos2(r, t + step), pos2(r, b - c), pos2(r - c, b), pos2(l, b)];
+    let mut shapes = Vec::with_capacity(2);
+    if fill != Color32::TRANSPARENT {
+        // not convex, but every corner can be seen from a point under the tab: a fan of triangles
+        let mut mesh = Mesh::default();
+        mesh.colored_vertex(pos2(l + tab / 2.0, (t + step + b) / 2.0), fill);
+        for p in &pts {
+            mesh.colored_vertex(*p, fill);
+        }
+        let n = pts.len() as u32;
+        for i in 0..n {
+            mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+        }
+        shapes.push(Shape::mesh(mesh));
+    }
+    if stroke.width > 0.0 {
+        shapes.push(Shape::closed_line(pts, stroke));
+    }
+    Shape::Vec(shapes)
+}
+
+/// A four-pointed star with thin arms, like the sparkles of the stickers
+pub fn star(p: &Painter, c: Pos2, size: f32, color: Color32) {
     let mut mesh = Mesh::default();
-    let c = rect.center();
-    mesh.colored_vertex(c, at(c));
-    let pts = outline(rect, radius);
-    for q in &pts {
-        mesh.colored_vertex(*q, at(*q));
+    mesh.colored_vertex(c, color);
+    for i in 0..8 {
+        let a = -FRAC_PI_2 + FRAC_PI_4 * i as f32;
+        let d = if i % 2 == 0 { size } else { size * 0.16 };
+        mesh.colored_vertex(c + vec2(a.cos(), a.sin()) * d, color);
     }
-    let n = pts.len() as u32;
-    for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    for i in 0..8u32 {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % 8);
     }
     p.add(Shape::mesh(mesh));
 }
 
-/// The shine on the upper half of a gel button
-pub fn gloss(p: &Painter, rect: Rect, radius: f32, strength: f32) {
-    let top = Rect::from_min_max(rect.min + vec2(3.0, 1.5), pos2(rect.right() - 3.0, rect.top() + rect.height() * 0.5));
-    gradient(p, top, (radius - 2.0).max(0.0), Color32::from_white_alpha((90.0 * strength) as u8), Color32::from_white_alpha(0), false);
+/// A round end of a wire: a ring on the background
+pub fn node(p: &Painter, c: Pos2, r: f32, color: Color32, fill: Color32) {
+    p.circle(c, r, fill, Stroke::new(1.2_f32, color));
 }
 
-/// A soft light around a shape
-pub fn glow(p: &Painter, rect: Rect, radius: f32, color: Color32, blur: f32) {
-    p.add(egui::epaint::Shadow { offset: egui::Vec2::ZERO, blur, spread: 0.0, color }.as_shape(rect, radius));
+/// A line with a ring at each end
+pub fn wire(p: &Painter, a: Pos2, b: Pos2, color: Color32, bg: Color32) {
+    p.line_segment([a, b], Stroke::new(1.0_f32, color));
+    node(p, a, 3.0, color, bg);
+    node(p, b, 3.0, color, bg);
 }
 
-/// A round spot of light that fades out
-pub fn aura(p: &Painter, center: Pos2, radius: f32, color: Color32) {
-    let mut mesh = Mesh::default();
-    mesh.colored_vertex(center, color);
-    let n = 48u32;
+/// A row of small squares across `rect`, the first part of them filled (a loading bar)
+pub fn squares(p: &Painter, rect: Rect, done: f32, lit: Color32, empty: Color32) {
+    let side = rect.height();
+    let gap = (side * 0.4).max(2.0);
+    let n = ((rect.width() + gap) / (side + gap)).floor().max(1.0) as usize;
+    let gap = if n > 1 { (rect.width() - n as f32 * side) / (n - 1) as f32 } else { 0.0 };
+    let on = (done.clamp(0.0, 1.0) * n as f32).round() as usize;
     for i in 0..n {
-        let a = TAU * i as f32 / n as f32;
-        mesh.colored_vertex(center + vec2(a.cos(), a.sin()) * radius, Color32::TRANSPARENT);
+        let r = Rect::from_min_size(pos2(rect.left() + i as f32 * (side + gap), rect.top()), vec2(side, side));
+        if i < on {
+            p.rect_filled(r, 0.0, lit);
+        } else {
+            p.rect_stroke(r.shrink(0.5), 0.0, Stroke::new(1.0_f32, empty));
+        }
     }
-    for i in 0..n {
-        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
-    }
-    p.add(Shape::mesh(mesh));
 }
 
-/// A four-pointed star
-pub fn sparkle(p: &Painter, c: Pos2, size: f32, color: Color32) {
-    let w = size * 0.2;
-    p.add(Shape::convex_polygon(vec![c + vec2(0.0, -size), c + vec2(w, 0.0), c + vec2(0.0, size), c + vec2(-w, 0.0)], color, Stroke::NONE));
-    p.add(Shape::convex_polygon(vec![c + vec2(-size, 0.0), c + vec2(0.0, -w), c + vec2(size, 0.0), c + vec2(0.0, w)], color, Stroke::NONE));
-}
-
-/// A small diamond (the bullet of a row)
-pub fn diamond(p: &Painter, c: Pos2, size: f32, color: Color32) {
-    p.add(Shape::convex_polygon(vec![c + vec2(0.0, -size), c + vec2(size, 0.0), c + vec2(0.0, size), c + vec2(-size, 0.0)], color, Stroke::NONE));
+/// The bars of a barcode, always the same for the same `seed`
+pub fn barcode(p: &Painter, rect: Rect, color: Color32, seed: u64) {
+    let mut x = rect.left();
+    let mut s = seed | 1;
+    while x < rect.right() {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        let w = 1.0 + (s % 3) as f32;
+        let gap = 1.0 + ((s >> 8) % 3) as f32;
+        let bar = Rect::from_min_max(pos2(x, rect.top()), pos2((x + w).min(rect.right()), rect.bottom()));
+        p.rect_filled(bar, 0.0, color);
+        x += w + gap;
+    }
 }

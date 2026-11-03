@@ -52,10 +52,10 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
             painter.rect(rect, 0.0, k.surface, stroke);
         }
         Look::Y2k => {
-            if hot {
-                paint::glow(painter, rect, rect.height() / 2.0, paint::alpha(k.shadow, 0.5), 12.0);
-            }
-            painter.rect(rect, rect.height() / 2.0, if hot { k.hover } else { k.glass }, Stroke::new(1.0_f32, if hot { k.accent } else { k.border }));
+            let (fill, stroke) = if hot { (k.hover, Stroke::new(1.0_f32, k.accent)) } else { (k.surface, Stroke::new(1.0_f32, k.border)) };
+            paint::cut_rect(painter, rect, 7.0, paint::DIAGONAL, fill, stroke);
+            let x = rect.right() - 30.0;
+            painter.line_segment([pos2(x, rect.top() + 8.0), pos2(x, rect.bottom() - 8.0)], Stroke::new(1.0_f32, k.rule));
         }
     }
     // the arrow: at the right (Classic, Y2K) or in a square cell of its own (Brutalist)
@@ -69,7 +69,7 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
             (cell.center(), if open { k.on_accent } else { k.text }, CONTROL_H + 4.0)
         }
         Look::Classic => (pos2(rect.right() - 15.0, rect.center().y), k.muted, 28.0),
-        Look::Y2k => (pos2(rect.right() - 18.0, rect.center().y), k.accent, 32.0),
+        Look::Y2k => (pos2(rect.right() - 15.0, rect.center().y), k.accent, 32.0),
     };
     // centred between two margins as wide as the arrow, so it stays clear of it
     let clip = rect.shrink2(vec2(margin, 0.0));
@@ -88,8 +88,16 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
 
     // the size of the list
     let font = FontId::proportional(text_size);
-    let title_font = if look == Look::Classic { FontId::proportional(10.5) } else { FontId::new(10.0, theme::bold_family()) };
-    let title_text = |t: &str| if look == Look::Brutal { format!("// {}", t.to_uppercase()) } else { t.to_uppercase() };
+    let title_font = match look {
+        Look::Classic => FontId::proportional(10.5),
+        Look::Brutal => FontId::new(10.0, theme::bold_family()),
+        Look::Y2k => FontId::new(10.5, theme::tech_family()),
+    };
+    let title_text = |t: &str| match look {
+        Look::Classic => t.to_uppercase(),
+        Look::Brutal => format!("// {}", t.to_uppercase()),
+        Look::Y2k => format!("[ {} ]", t.to_uppercase()),
+    };
     let screen = ctx.screen_rect();
     let max_w = (screen.width() - 16.0).max(160.0);
     let natural: Vec<f32> = cols
@@ -154,7 +162,7 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
                                         let color = match look {
                                             Look::Classic => k.muted,
                                             Look::Brutal => k.accent,
-                                            Look::Y2k => k.accent2,
+                                            Look::Y2k => k.accent,
                                         };
                                         ui.painter().text(
                                             pos2(r.left() + 10.0, r.center().y),
@@ -179,14 +187,13 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
                                             k.on_accent
                                         }
                                         (Look::Y2k, true) => {
-                                            paint::gradient(p, r, 8.0, k.accent, k.accent2, true);
-                                            paint::gloss(p, r, 8.0, 0.7);
+                                            paint::cut_rect(p, r, 6.0, paint::DIAGONAL, k.accent, Stroke::NONE);
                                             k.on_accent
                                         }
                                         (_, false) => {
                                             if resp.hovered() {
-                                                p.rect_filled(r, if look == Look::Brutal { 0.0 } else { 3.0 }, k.hover);
-                                                if look == Look::Brutal {
+                                                p.rect_filled(r, if look == Look::Classic { 3.0 } else { 0.0 }, k.hover);
+                                                if look != Look::Classic {
                                                     p.rect_filled(Rect::from_min_size(r.left_top(), vec2(3.0, r.height())), 0.0, k.accent);
                                                 }
                                             }

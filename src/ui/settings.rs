@@ -211,7 +211,7 @@ fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
 pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Command> {
     let ts = si::s();
     let k = c();
-    let fill = super::widgets::backdrop(ctx);
+    let fill = ctx.style().visuals.panel_fill;
     let mut pressed: Option<Command> = None;
 
     // top: the title and the menu buttons
@@ -261,7 +261,7 @@ pub fn screen(ctx: &egui::Context, st: &mut SettingsState, t: &T) -> Option<Comm
         });
 
     // left: the pages
-    egui::SidePanel::left("s_nav").exact_width(190.0).resizable(false).frame(egui::Frame::none().fill(k.glass).inner_margin(Margin::same(12.0))).show(
+    egui::SidePanel::left("s_nav").exact_width(190.0).resizable(false).frame(egui::Frame::none().fill(k.surface).inner_margin(Margin::same(12.0))).show(
         ctx,
         |ui| {
             for (i, label) in [ts.tab_general, ts.tab_look, ts.tab_menu, ts.tab_defaults].iter().enumerate() {

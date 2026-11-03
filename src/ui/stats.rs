@@ -1,12 +1,13 @@
 //! The Stats window: what is in each file, from ffprobe. The overview is made of the numbers
 //! that matter and one section per stream; the full text of ffprobe is one click away.
 
-use super::widgets::{button_row, caption, card, file_name, fit_name_in, primary_button, secondary_button, spaced, tag, title, window};
+use super::paint;
+use super::widgets::{button_row, caption, card, cut_frame, file_name, fit_name_in, primary_button, secondary_button, spaced, tag, title, window};
 use super::Env;
 use crate::engine;
 use crate::media;
 use crate::report::{self, Report, Section};
-use crate::theme::{bold, c, Look};
+use crate::theme::{bold, bold_family, c, tech_family, Look};
 use eframe::egui::{self, vec2, FontId, Margin, RichText, Sense, Stroke};
 use std::sync::{Arc, Mutex};
 
@@ -137,16 +138,19 @@ fn overview(ui: &mut egui::Ui, file: usize, r: &Report) {
                     col.add(egui::Label::new(bold(value.as_str(), 15.0).color(k.text)).truncate());
                     continue;
                 }
-                let frame = match k.look {
-                    Look::Y2k => egui::Frame::none().fill(k.glass).stroke(Stroke::new(1.0_f32, k.border)).rounding(10.0),
-                    _ => egui::Frame::none().fill(k.bg).stroke(Stroke::new(1.0_f32, k.border)),
-                };
-                frame.inner_margin(Margin::symmetric(10.0, 8.0)).show(col, |col| {
+                let body = |col: &mut egui::Ui| {
                     col.set_width(col.available_width());
                     col.spacing_mut().item_spacing.y = 3.0;
                     caption(col, label);
-                    col.add(egui::Label::new(bold(value.as_str(), 17.0).color(k.text)).truncate());
-                });
+                    let font = if k.look == Look::Y2k { FontId::new(18.0, tech_family()) } else { FontId::new(17.0, bold_family()) };
+                    col.add(egui::Label::new(RichText::new(value.as_str()).font(font).color(k.text)).truncate());
+                };
+                let margin = Margin::symmetric(10.0, 8.0);
+                if k.look == Look::Y2k {
+                    cut_frame(col, margin, |r| paint::cut_shape(r, 7.0, paint::DIAGONAL, k.bg, Stroke::new(1.0_f32, k.border)), body);
+                } else {
+                    egui::Frame::none().fill(k.bg).stroke(Stroke::new(1.0_f32, k.border)).inner_margin(margin).show(col, body);
+                }
             }
         });
         ui.add_space(8.0);
@@ -184,7 +188,9 @@ fn section(ui: &mut egui::Ui, id: (usize, usize, usize), s: &Section) {
     ui.spacing_mut().interact_size.y = 16.0;
     egui::Grid::new(("stats", id)).num_columns(2).min_col_width(KEY_W).spacing(vec2(10.0, 5.0)).show(ui, |ui| {
         for (key, value) in &s.rows {
-            if k.look == Look::Brutal {
+            if k.look == Look::Y2k {
+                ui.label(spaced(&key.to_uppercase(), FontId::new(11.0, tech_family()), k.muted, 0.8));
+            } else if k.look == Look::Brutal {
                 ui.label(spaced(&key.to_uppercase(), FontId::proportional(10.5), k.muted, 0.6));
             } else {
                 ui.label(RichText::new(key).color(k.muted));
