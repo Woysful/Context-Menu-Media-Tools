@@ -24,11 +24,12 @@ use std::time::{Duration, Instant};
 
 /// The width of the fields of Compress Image of one picture; the picture at their right takes
 /// the rest of the window
-pub const FIELDS_W: f32 = 460.0;
+pub const FIELDS_W: f32 = 440.0;
 pub const GAP: f32 = 20.0;
-/// The picture at the right: the narrowest and widest it starts with, the height it starts with
+/// The picture at the right: the narrowest and widest it starts with (the window starts at most
+/// 900 wide), the height it starts with
 const PREVIEW_MIN_W: f32 = 340.0;
-const PREVIEW_START_W: f32 = 560.0;
+const PREVIEW_START_W: f32 = 400.0;
 const PREVIEW_START_H: f32 = 470.0;
 const PREVIEW_MIN_H: f32 = 240.0;
 /// The room between the picture and the edge of its box
@@ -619,9 +620,11 @@ impl ImageForm {
                 }
             }
         }
-        if full.is_some() && !big {
-            if corner_button(ui, area, 0, CornerIcon::Expand, t.img_crop_expand) {
-                self.big = true;
+        if full.is_some() {
+            let (icon, tip) = if big { (CornerIcon::Collapse, t.img_crop_collapse) } else { (CornerIcon::Expand, t.img_crop_expand) };
+            if corner_button(ui, area, 0, icon, tip) {
+                self.big = !big;
+                ui.ctx().request_repaint();
             }
             if self.crop.is_some() && corner_button(ui, area, 1, CornerIcon::Reset, t.img_crop_reset) {
                 self.reset_crop();
@@ -1120,6 +1123,8 @@ fn draw_loupe(ctx: &egui::Context, tex: &TextureHandle, full: (u32, u32), focus:
 enum CornerIcon {
     /// four corners pointing out
     Expand,
+    /// four corners pointing in
+    Collapse,
     /// an arrow round to the left
     Reset,
 }
@@ -1159,6 +1164,14 @@ fn corner_button(ui: &mut egui::Ui, area: Rect, row: usize, icon: CornerIcon, ti
                 let corner = m + vec2(dx * s, dy * s);
                 p.line_segment([corner, corner - vec2(dx * l, 0.0)], line);
                 p.line_segment([corner, corner - vec2(0.0, dy * l)], line);
+            }
+        }
+        CornerIcon::Collapse => {
+            let (s, l) = (2.5, 4.0);
+            for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let corner = m + vec2(dx * s, dy * s);
+                p.line_segment([corner, corner + vec2(dx * l, 0.0)], line);
+                p.line_segment([corner, corner + vec2(0.0, dy * l)], line);
             }
         }
         CornerIcon::Reset => {

@@ -769,7 +769,9 @@ pub fn measure(env: &Env) -> (f32, f32) {
     // long names are cut to the width, only the line about the file widens the window
     let text_w = env.infos.iter().map(|i| text_width(&ctx, &media::describe(i, env.t.audio_word), FontId::proportional(11.5))).fold(0.0, f32::max);
     // the card adds its margins and border
-    let width = (text_w + 2.0 * MARGIN + 2.0 * 13.0 + 6.0).clamp(min_w, 960.0_f32.max(min_w));
+    // the picture of Compress Image takes what is left, the window does not grow for the line
+    let max_w = if env.action == Action::CompressImage && env.custom_id.is_none() && env.files.len() == 1 { min_w } else { 960.0_f32.max(min_w) };
+    let width = (text_w + 2.0 * MARGIN + 2.0 * 13.0 + 6.0).clamp(min_w, max_w);
 
     let mut height: f32 = 0.0;
     for mut form in measured_forms(env) {
