@@ -157,13 +157,6 @@ fn hex(c: [u8; 3]) -> String {
     format!("0x{:02X}{:02X}{:02X}", c[0], c[1], c[2])
 }
 
-/// The value as ffmpeg reads it from the filter ({:.6}) times the size, cut to whole pixels as
-/// the crop filter does
-fn part_px(v: f64, size: u32) -> u32 {
-    let v: f64 = format!("{v:.6}").parse().unwrap_or(v);
-    (size as f64 * v) as u32
-}
-
 fn colour_filters(c: &Colours, f: &mut Vec<String>) {
     let k = |v: i32| v as f64 / 100.0;
     if c.brightness != 0 || c.contrast != 0 || c.saturation != 0 || c.gamma != 0 {
@@ -220,7 +213,7 @@ fn blur_filter(b: &BlurArea, size: (u32, u32), label: &mut usize) -> String {
     };
     let (a, b, c) = (*label, *label + 1, *label + 2);
     *label += 3;
-    format!("split[cmmt{a}][cmmt{b}];[cmmt{b}]crop={w}:{h}:{x}:{y},{inner}[cmmt{c}];[cmmt{a}][cmmt{c}]overlay={x}:{y}:format=auto")
+    format!("split[cmmt{a}][cmmt{b}];[cmmt{b}]crop={w}:{h}:{x}:{y}:exact=1,{inner}[cmmt{c}];[cmmt{a}][cmmt{c}]overlay={x}:{y}:format=auto")
 }
 
 /// The font of a text, or the one that is used when none is chosen
@@ -358,10 +351,16 @@ pub fn build(edit: &ImageEdit, size: Option<(u32, u32)>, upto: Upto) -> Result<B
     if upto == Upto::Crop {
         return Ok(Built { filters: f, size });
     }
-    if let Some([x, y, w, h]) = edit.crop {
-        // exact: x and y are not moved to even pixels for the subsampled colours of a JPEG
-        f.push(format!("crop=w=iw*{w:.6}:h=ih*{h:.6}:x=iw*{x:.6}:y=ih*{y:.6}:exact=1"));
-        size = size.map(|(sw, sh)| (part_px(w, sw).max(1), part_px(h, sh).max(1)));
+    // exact: x and y are not moved to even pixels for the subsampled colours of a JPEG
+    match (edit.crop, size) {
+        // in whole pixels: the size that comes out is known whatever ffmpeg rounds to
+        (Some(r), Some(s)) => {
+            let (x, y, w, h) = area_px(r, s);
+            f.push(format!("crop={w}:{h}:{x}:{y}:exact=1"));
+            size = Some((w, h));
+        }
+        (Some([x, y, w, h]), None) => f.push(format!("crop=w=iw*{w:.6}:h=ih*{h:.6}:x=iw*{x:.6}:y=ih*{y:.6}:exact=1")),
+        (None, _) => {}
     }
     if edit.vignette > 0 {
         f.push(format!("vignette=angle={:.4}", edit.vignette.min(100) as f64 / 100.0 * 1.2));
@@ -402,7 +401,7 @@ mod tests {
         // 500 x 100 px at 100, 80; blocks of 10 px
         assert_eq!(
             b.filters[2],
-            "split[cmmt0][cmmt1];[cmmt1]crop=500:100:100:80,scale=50:10:flags=area,scale=500:100:flags=neighbor[cmmt2];[cmmt0][cmmt2]overlay=100:80:format=auto"
+            "split[cmmt0][cmmt1];[cmmt1]crop=500:100:100:80:exact=1,scale=50:10:flags=area,scale=500:100:flags=neighbor[cmmt2];[cmmt0][cmmt2]overlay=100:80:format=auto"
         );
         assert_eq!(b.size, Some((1000, 400)));
         // the areas need the size
@@ -414,9 +413,13 @@ mod tests {
     fn the_crop_and_the_turn_give_the_size() {
         let edit = ImageEdit { turns: 1, crop: Some([0.0, 0.0, 0.5, 1.0 / 3.0]), vignette: 50, ..Default::default() };
         let b = build(&edit, Some((1067, 1601)), Upto::All).unwrap();
-        // turned: 1601 x 1067; 1601 * 0.5 = 800.5, 1067 * 0.333333 = 355.66...
-        assert_eq!(b.size, Some((800, 355)));
+        // turned: 1601 x 1067; 1601 * 0.5 = 800.5, 1067 / 3 = 355.67
+        assert_eq!(b.size, Some((801, 356)));
+        assert_eq!(b.filters[1], "crop=801:356:0:0:exact=1");
         assert_eq!(b.filters.last().unwrap(), "vignette=angle=0.6000");
+        // without the size: parts of it
+        let parts = build(&edit, None, Upto::All).unwrap();
+        assert_eq!(parts.filters[1], "crop=w=iw*0.500000:h=ih*0.333333:x=iw*0.000000:y=ih*0.000000:exact=1");
         let before = build(&edit, Some((1067, 1601)), Upto::Crop).unwrap();
         assert_eq!((before.filters, before.size), (vec!["transpose=clock".to_string()], Some((1601, 1067))));
     }
