@@ -323,7 +323,7 @@ impl ImageForm {
             estimate: Estimate::default(),
             live: false,
             view_bottom: None,
-            below: 8.0 + 4.0 + 2.0 * CONTROL_H,
+            below: 8.0 + CONTROL_H,
             big: false,
             focus: None,
             loupe: Loupe::default(),
@@ -550,7 +550,8 @@ impl ImageForm {
         let top = ui.cursor().top();
         let mut h = fields_h - self.below;
         if let (true, Some(bottom)) = (self.live, self.view_bottom) {
-            let room = bottom - top - self.below;
+            // a little air above the buttons at the bottom of the window
+            let room = bottom - top - self.below - 8.0;
             let need = self.aspect(env).map_or(room, |a| (w - 2.0 * PREVIEW_PAD) / a + 2.0 * PREVIEW_PAD);
             h = h.max(room.min(need));
         }
@@ -558,17 +559,6 @@ impl ImageForm {
         let box_bottom = ui.min_rect().bottom();
         ui.add_space(8.0);
         self.ratio_row(ui, t, full);
-        ui.add_space(4.0);
-        let note = self.crop_note(t, full);
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTROL_H), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add_enabled(self.crop.is_some(), secondary_button(t.img_crop_reset)).clicked() {
-                self.reset_crop();
-            }
-            ui.add_space(4.0);
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(note).small().color(muted())).truncate());
-            });
-        });
         self.below = ui.min_rect().bottom() - box_bottom;
     }
 
@@ -627,8 +617,13 @@ impl ImageForm {
                 }
             }
         }
-        if full.is_some() && !big && expand_button(ui, area, t.img_crop_expand) {
-            self.big = true;
+        if full.is_some() && !big {
+            if corner_button(ui, area, 0, CornerIcon::Expand, t.img_crop_expand) {
+                self.big = true;
+            }
+            if self.crop.is_some() && corner_button(ui, area, 1, CornerIcon::Reset, t.img_crop_reset) {
+                self.reset_crop();
+            }
         }
         full
     }
@@ -1119,19 +1114,30 @@ fn draw_loupe(ctx: &egui::Context, tex: &TextureHandle, full: (u32, u32), focus:
         }
     }
 }
-/// A small button in the top right corner of `area`, four corners pointing out; true: clicked
-fn expand_button(ui: &mut egui::Ui, area: Rect, tip: &str) -> bool {
+#[derive(Clone, Copy, PartialEq)]
+enum CornerIcon {
+    /// four corners pointing out
+    Expand,
+    /// an arrow round to the left
+    Reset,
+}
+
+/// A small button over the top right corner of `area`, `row` buttons under the top; half
+/// transparent until the pointer is on it, so it hides little of the picture. True: clicked.
+fn corner_button(ui: &mut egui::Ui, area: Rect, row: usize, icon: CornerIcon, tip: &str) -> bool {
     let k = c();
-    let rect = Rect::from_min_size(pos2(area.right() - 8.0 - 28.0, area.top() + 8.0), vec2(28.0, 28.0));
+    let side = 28.0;
+    let rect = Rect::from_min_size(pos2(area.right() - 8.0 - side, area.top() + 8.0 + row as f32 * (side + 6.0)), vec2(side, side));
     // it takes drags too, so a drag that starts on it does not crop
-    let resp = ui.interact(rect, ui.id().with("cmmt_expand"), Sense::click_and_drag()).on_hover_text(tip);
+    let resp = ui.interact(rect, ui.id().with(("cmmt_corner", row)), Sense::click_and_drag()).on_hover_text(tip);
     let hovered = resp.hovered();
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
+    let fade = |c: Color32| if hovered { c } else { c.gamma_multiply(0.5) };
     let p = ui.painter();
-    let fill = if hovered { k.hover } else { k.surface };
-    let stroke = Stroke::new(1.0_f32, if hovered { k.accent } else { k.border });
+    let fill = fade(if hovered { k.hover } else { k.surface });
+    let stroke = Stroke::new(1.0_f32, fade(if hovered { k.accent } else { k.border }));
     match k.look {
         Look::Classic => {
             p.rect(rect, 4.0, fill, stroke);
@@ -1141,17 +1147,35 @@ fn expand_button(ui: &mut egui::Ui, area: Rect, tip: &str) -> bool {
         }
         Look::Y2k => super::paint::cut_rect(p, rect, 6.0, super::paint::DIAGONAL, fill, stroke),
     }
-    let line = Stroke::new(1.6_f32, if hovered { k.accent } else { k.text });
+    let color = if hovered { k.accent } else { k.text.gamma_multiply(0.75) };
+    let line = Stroke::new(1.6_f32, color);
     let m = rect.center();
-    let (s, l) = (6.5, 4.0);
-    for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-        let corner = m + vec2(dx * s, dy * s);
-        p.line_segment([corner, corner - vec2(dx * l, 0.0)], line);
-        p.line_segment([corner, corner - vec2(0.0, dy * l)], line);
+    match icon {
+        CornerIcon::Expand => {
+            let (s, l) = (6.5, 4.0);
+            for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let corner = m + vec2(dx * s, dy * s);
+                p.line_segment([corner, corner - vec2(dx * l, 0.0)], line);
+                p.line_segment([corner, corner - vec2(0.0, dy * l)], line);
+            }
+        }
+        CornerIcon::Reset => {
+            // from the top clockwise nearly round; the arrow at the top points back to the left
+            let r = 6.5;
+            let pts: Vec<Pos2> = (0..=18)
+                .map(|i| {
+                    let a = (-90.0 + 290.0 * i as f32 / 18.0).to_radians();
+                    pos2(m.x + r * a.cos(), m.y + r * a.sin())
+                })
+                .collect();
+            p.add(Shape::line(pts, line));
+            let start = pos2(m.x, m.y - r);
+            let (dir, up) = (vec2(-1.0, 0.0), vec2(0.0, 1.0));
+            p.add(Shape::convex_polygon(vec![start + dir * 3.5, start - dir * 1.5 + up * 3.5, start - dir * 1.5 - up * 3.5], color, Stroke::NONE));
+        }
     }
     resp.clicked()
 }
-
 #[derive(Clone, Copy, PartialEq)]
 enum Sym {
     Left,
