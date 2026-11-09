@@ -38,7 +38,8 @@ pub fn edit_filters(edit: &ImageEdit, scale: ScaleMode) -> Vec<String> {
         f.push("vflip".into());
     }
     if let Some([x, y, w, h]) = edit.crop {
-        f.push(format!("crop=w=iw*{w:.6}:h=ih*{h:.6}:x=iw*{x:.6}:y=ih*{y:.6}"));
+        // exact: x and y are not moved to even pixels for the subsampled colours of a JPEG
+        f.push(format!("crop=w=iw*{w:.6}:h=ih*{h:.6}:x=iw*{x:.6}:y=ih*{y:.6}:exact=1"));
     }
     match scale {
         ScaleMode::Height(px) => f.push(format!("scale=w='if(lte(iw,ih),min(iw,{px}),-2)':h='if(lte(iw,ih),-2,min(ih,{px}))':flags=lanczos")),
@@ -399,7 +400,7 @@ mod tests {
         let f = edit_filters(&e, ScaleMode::Height(720));
         assert_eq!(f[0], "transpose=clock");
         assert_eq!(f[1], "hflip");
-        assert_eq!(f[2], "crop=w=iw*0.500000:h=ih*0.400000:x=iw*0.100000:y=ih*0.200000");
+        assert_eq!(f[2], "crop=w=iw*0.500000:h=ih*0.400000:x=iw*0.100000:y=ih*0.200000:exact=1");
         assert!(f[3].starts_with("scale=w='if(lte(iw,ih),min(iw,720),-2)'"));
         assert!(edit_filters(&ImageEdit::default(), ScaleMode::Orig).is_empty());
         assert_eq!(edit_filters(&ImageEdit { turns: 2, ..Default::default() }, ScaleMode::Factor(1.0)), ["hflip,vflip"]);
