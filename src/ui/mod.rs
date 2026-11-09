@@ -137,7 +137,7 @@ pub fn run(l: Launch) -> Result<(), String> {
 /// The icon of the window (X11, Windows). Wayland takes it from the menu entry named like the
 /// app id (see `install::app_id`).
 fn icon() -> egui::IconData {
-    eframe::icon_data::from_png_bytes(include_bytes!("../../assets/cmmt.png")).unwrap_or_default()
+    eframe::icon_data::from_png_bytes(include_bytes!("../../assets/cmmt-256.png")).unwrap_or_default()
 }
 
 fn initial_size(env: &Env, start: &Start, direct: bool) -> (f32, f32) {

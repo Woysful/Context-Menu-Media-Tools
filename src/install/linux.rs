@@ -122,7 +122,13 @@ pub fn remove_path_blocks(name: &str) -> Vec<String> {
     log
 }
 
-const ICON: &[u8] = include_bytes!("../../assets/cmmt.png");
+/// The icon of the menu entry in the hicolor theme: the vector one and two sizes for the
+/// programs that only take pictures
+const ICONS: [(&str, &[u8]); 3] = [
+    ("scalable/apps/cmmt.svg", include_bytes!("../../assets/cmmt.svg")),
+    ("512x512/apps/cmmt.png", include_bytes!("../../assets/cmmt.png")),
+    ("256x256/apps/cmmt.png", include_bytes!("../../assets/cmmt-256.png")),
+];
 
 /// The entry of the application menu that opens the Settings window
 pub fn launcher_desktop(exe: &str) -> String {
@@ -152,8 +158,8 @@ fn launcher_file() -> PathBuf {
     applications_dir().join("cmmt.desktop")
 }
 
-fn icon_file() -> PathBuf {
-    paths::xdg_data().join("icons/hicolor/256x256/apps/cmmt.png")
+fn icon_file(name: &str) -> PathBuf {
+    paths::xdg_data().join("icons/hicolor").join(name)
 }
 
 fn write(path: &Path, bytes: &[u8]) -> bool {
@@ -162,7 +168,9 @@ fn write(path: &Path, bytes: &[u8]) -> bool {
 
 pub fn launcher_install(exe: &Path) -> Vec<String> {
     let file = launcher_file();
-    let _ = write(&icon_file(), ICON);
+    for (name, bytes) in ICONS {
+        let _ = write(&icon_file(name), bytes);
+    }
     if write(&file, launcher_desktop(&exe.to_string_lossy()).as_bytes()) {
         set_executable(&file);
         vec![format!("application menu: \"Media Tools\" opens the Settings ({})", file.display())]
@@ -172,7 +180,9 @@ pub fn launcher_install(exe: &Path) -> Vec<String> {
 }
 
 pub fn launcher_uninstall() -> Vec<String> {
-    let _ = fs::remove_file(icon_file());
+    for (name, _) in ICONS {
+        let _ = fs::remove_file(icon_file(name));
+    }
     let file = launcher_file();
     if fs::remove_file(&file).is_ok() {
         vec![format!("removed {}", file.display())]
@@ -210,7 +220,10 @@ mod tests {
         let d = launcher_desktop("/home/u/.local/bin/cmmt");
         assert!(d.contains("Exec=/home/u/.local/bin/cmmt settings") && d.contains("Categories=AudioVideo;Video;"));
         assert!(d.contains("Icon=cmmt\n"));
-        assert!(ICON.starts_with(b"\x89PNG"));
+        for (name, bytes) in ICONS {
+            assert_eq!(name.ends_with(".svg"), bytes.starts_with(b"<?xml") || bytes.starts_with(b"<svg"), "{name}");
+            assert!(name.ends_with(".svg") || bytes.starts_with(b"\x89PNG"), "{name}");
+        }
     }
 
     #[test]

@@ -131,16 +131,21 @@ make_appimage() {  # binary, triple, friendly name
     [ -n "$arch" ] || return 0
     tool="$(find_appimagetool)" || { echo "    no AppImage: appimagetool not found and not downloadable (set APPIMAGETOOL=...)" >&2; return 1; }
     dir="target/appdir-$name"
-    icons="$dir/usr/share/icons/hicolor/256x256/apps"
+    icons="$dir/usr/share/icons/hicolor"
     rm -rf "$dir"
-    mkdir -p "$dir/usr/bin" "$dir/usr/share/applications" "$icons"
+    mkdir -p "$dir/usr/bin" "$dir/usr/share/applications" "$icons/scalable/apps" "$icons/512x512/apps" "$icons/256x256/apps"
     cp "$bin" "$dir/usr/bin/cmmt"
     ln -s usr/bin/cmmt "$dir/AppRun"
     cp assets/cmmt.desktop "$dir/cmmt.desktop"
     cp assets/cmmt.desktop "$dir/usr/share/applications/cmmt.desktop"
-    cp assets/cmmt.png "$dir/cmmt.png"
-    cp assets/cmmt.png "$icons/cmmt.png"
-    ln -s cmmt.png "$dir/.DirIcon"
+    # the icon of the app is the vector one; .DirIcon (thumbnailers) must be a PNG
+    cp assets/cmmt.svg "$dir/cmmt.svg"
+    cp assets/cmmt.svg "$icons/scalable/apps/cmmt.svg"
+    cp assets/cmmt.png "$icons/512x512/apps/cmmt.png"
+    cp assets/cmmt-256.png "$icons/256x256/apps/cmmt.png"
+    ln -s usr/share/icons/hicolor/256x256/apps/cmmt.png "$dir/.DirIcon"
+    # appimagetool refuses files others cannot read (assets copied in with a private mode)
+    chmod -R a+rX "$dir"
     out="cmmt-$name.AppImage"
     # extract-and-run: appimagetool is an AppImage itself and must work without FUSE (containers, CI)
     if ! ARCH="$arch" VERSION="$VERSION" APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$dir" "$OUT/$out" > "target/appimagetool-$name.log" 2>&1; then
