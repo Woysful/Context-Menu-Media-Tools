@@ -9,6 +9,7 @@
 mod app;
 mod dropdown;
 mod forms;
+mod image_forms;
 mod paint;
 mod running;
 mod scale_field;
@@ -82,6 +83,10 @@ struct Env {
     track_counts: Vec<usize>,
     first_kind: Option<Kind>,
     tools: Option<Tools>,
+    /// the encoders of ffmpeg (Compress Image leaves out the formats it cannot make)
+    encoders: Vec<String>,
+    /// the videos of Frames to Video
+    sets: Vec<image_forms::SetInfo>,
 }
 
 impl Env {
@@ -93,8 +98,20 @@ impl Env {
 pub fn run(l: Launch) -> Result<(), String> {
     let Launch { start, action, custom_id, files, cfg, tools, request, delete_original, first_kind } = l;
     let t = i18n::t();
+    let pictures = matches!(action, Action::CompressImage | Action::MakeIcon) && custom_id.is_none();
     let infos: Vec<Info> = match (&tools, &start) {
-        (Some(tools), Start::Normal) => files.iter().take(3).filter_map(|f| media::probe(&tools.ffprobe, f)).collect(),
+        (Some(tools), Start::Normal) => files
+            .iter()
+            .take(3)
+            .filter_map(|f| {
+                let mut info = media::probe(&tools.ffprobe, f)?;
+                // a photo is shown turned by its EXIF orientation, which ffprobe leaves out of its size
+                if let Some((w, h)) = pictures.then(|| media::picture_size(&tools.ffprobe, f)).flatten() {
+                    (info.width, info.height) = (w, h);
+                }
+                Some(info)
+            })
+            .collect(),
         _ => vec![],
     };
     let chooses_tracks = matches!(action, Action::Compress | Action::DeleteAudio) && custom_id.is_none() && request.is_none();
@@ -108,7 +125,22 @@ pub fn run(l: Launch) -> Result<(), String> {
         (_, Some(id)) => cfg.settings.custom(id).map_or(id.clone(), |c| c.name.clone()),
         _ => action.title(t).to_string(),
     };
-    let env = Env { t, cfg, action, title, custom_id, files, infos, track_counts, first_kind, tools };
+    let form = matches!(start, Start::Normal) && custom_id.is_none() && request.is_none();
+    let encoders = match &tools {
+        Some(tools) if form && action == Action::CompressImage => crate::engine::encoders(&tools.ffmpeg),
+        _ => vec![],
+    };
+    let sets = match &tools {
+        Some(tools) if form && action == Action::FramesVideo => crate::engine::frame_sets(&files)
+            .into_iter()
+            .map(|set| {
+                let size = set.frames.first().and_then(|f| media::picture_size(&tools.ffprobe, f));
+                image_forms::SetInfo { set, size }
+            })
+            .collect(),
+        _ => vec![],
+    };
+    let env = Env { t, cfg, action, title, custom_id, files, infos, track_counts, first_kind, tools, encoders, sets };
     let scale = env.cfg.settings.ui_scale.clamp(0.5, 3.0) as f32;
     let transparent = effects::transparency_enabled(&env.cfg.settings);
     let (w, h) = initial_size(&env, &start, request.is_some());

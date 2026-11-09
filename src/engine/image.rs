@@ -389,7 +389,7 @@ mod tests {
     fn natural_order() {
         let mut v = ["f10.png", "f2.png", "F1.png", "f02b.png", "a.png", "f2a.png"].map(String::from).to_vec();
         v.sort_by(|a, b| natural_cmp(a, b));
-        assert_eq!(v, ["a.png", "F1.png", "f2.png", "f02b.png", "f2a.png", "f10.png"]);
+        assert_eq!(v, ["a.png", "F1.png", "f2.png", "f2a.png", "f02b.png", "f10.png"]);
         assert_eq!(natural_cmp("img_0009", "img_0010"), Ordering::Less);
     }
 

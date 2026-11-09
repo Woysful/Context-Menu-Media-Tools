@@ -51,7 +51,7 @@ impl App {
             Start::Normal if env.is_stats() => Stage::Stats(Stats::spawn(&env, ctx)),
             Start::Normal => match request {
                 Some((req, delete_original)) => Stage::Running(Running::start(&env, ctx, req, delete_original)),
-                None => Stage::Form(Form::new(&env)),
+                None => Stage::Form(Form::start(&env)),
             },
         };
         App { env, stage, valid: None, transparent, palette: syspal::detect(), applied: None, blur_state: None }

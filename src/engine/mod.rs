@@ -10,7 +10,7 @@ mod progress;
 mod runner;
 
 pub use crate::config::ConvertKind;
-pub use image::{edit_filters, encoders, frame_sets, natural_cmp, FrameSet, SOURCE};
+pub use image::{encoders, frame_sets, set_name, FrameSet, SOURCE};
 pub use progress::{Line, LineKind, Progress, State};
 pub use runner::stats_text;
 

@@ -1,6 +1,7 @@
 //! The options forms of the actions, and the size of their windows.
 
 use super::dropdown::{build_groups, codec_combo, dropdown, need_id, Col, Group};
+use super::image_forms::{FramesForm, IconForm, ImageForm};
 use super::scale_field::ScaleField;
 use super::widgets::{
     button_row, card, field, file_name, fit_name, fit_name_in, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button,
@@ -17,7 +18,8 @@ use crate::scale::ScaleMode;
 use crate::settings;
 use crate::theme::{self, bold, c, Look, CONTROL_H};
 use crate::units;
-use eframe::egui::{self, pos2, vec2, Align, FontId, Layout, Rect, RichText};
+use eframe::egui::{self, pos2, vec2, Align, Color32, FontId, Layout, Rect, RichText};
+use std::path::PathBuf;
 
 pub struct CompressForm {
     tab: usize,
@@ -66,6 +68,15 @@ impl Form {
     pub fn new(env: &Env) -> Form {
         Form { fields: Fields::new(env), delete_original: dv::flag(&env.cfg, dv::DELETE_ORIGINAL) }
     }
+
+    /// The form of the window on the screen (one that is measured loads and estimates nothing)
+    pub fn start(env: &Env) -> Form {
+        let mut form = Form::new(env);
+        if let Fields::Image(f) = &mut form.fields {
+            f.live = true;
+        }
+        form
+    }
 }
 
 pub enum Fields {
@@ -73,6 +84,9 @@ pub enum Fields {
     Format(FormatForm),
     Webp(WebpForm),
     DeleteAudio(DeleteForm),
+    Image(Box<ImageForm>),
+    Icon(IconForm),
+    Frames(FramesForm),
     /// Nothing to choose (own items)
     Confirm(Request),
 }
@@ -115,6 +129,9 @@ impl Fields {
                 quality: d(dv::WEBP_QUALITY).parse().unwrap_or(cfg.webp.quality),
                 compression: d(dv::WEBP_COMPRESSION).parse().unwrap_or(cfg.webp.compression),
             }),
+            Action::CompressImage => Fields::Image(Box::new(ImageForm::new(env))),
+            Action::MakeIcon => Fields::Icon(IconForm::new(env)),
+            Action::FramesVideo => Fields::Frames(FramesForm::new(env)),
             _ => Fields::DeleteAudio(DeleteForm::new(env)),
         }
     }
@@ -135,6 +152,9 @@ impl Fields {
             }
             Fields::Webp(f) => f.ui(ui, env, delete_original),
             Fields::DeleteAudio(f) => f.ui(ui, env),
+            Fields::Image(f) => f.ui(ui, env, delete_original),
+            Fields::Icon(f) => f.ui(ui, env, delete_original),
+            Fields::Frames(f) => f.ui(ui, env),
             Fields::Confirm(req) => {
                 if let Request::Custom { id } = &*req {
                     if let Some(item) = env.cfg.settings.custom(id) {
@@ -231,7 +251,7 @@ fn small_number(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &str)
     .inner
 }
 
-fn bool_text(on: bool) -> &'static str {
+pub(super) fn bool_text(on: bool) -> &'static str {
     if on {
         "true"
     } else {
@@ -240,7 +260,7 @@ fn bool_text(on: bool) -> &'static str {
 }
 
 /// "Delete the original when done": to the trash or for good, as the Settings say
-fn original_check(ui: &mut egui::Ui, env: &Env, on: &mut bool, text: &str) {
+pub(super) fn original_check(ui: &mut egui::Ui, env: &Env, on: &mut bool, text: &str) {
     let t = env.t;
     let r = ui
         .horizontal(|ui| {
@@ -476,7 +496,7 @@ impl CompressForm {
 
 /// Right click on a field: "Save as default" (`value`; None = the field is not valid now) or
 /// "Reset to standard". Returns the standard value when that was chosen.
-fn default_menu(resp: &egui::Response, env: &Env, key: &str, value: Option<&str>) -> Option<String> {
+pub(super) fn default_menu(resp: &egui::Response, env: &Env, key: &str, value: Option<&str>) -> Option<String> {
     let t = env.t;
     let mut reset = None;
     resp.context_menu(|ui| {
@@ -534,8 +554,18 @@ pub fn audio_combo(ui: &mut egui::Ui, id: &str, t: &T, cfg: &Config, selected: &
 
 /// The name of the result in one row of the form (of the first file; the others are counted)
 fn result_row(ui: &mut egui::Ui, env: &Env, req: Option<&Request>) {
-    let first = req.and_then(|r| env.files.first().and_then(|f| engine::result_name(&env.cfg, r, f)));
-    let more = env.files.len().saturating_sub(1);
+    result_row_with(ui, env, req, None);
+}
+
+/// The result row with a line under the name
+pub(super) fn result_row_with(ui: &mut egui::Ui, env: &Env, req: Option<&Request>, note: Option<(String, Color32)>) {
+    result_names(ui, env, req, &env.files, note);
+}
+
+/// The result row of what `req` makes of `files`
+pub(super) fn result_names(ui: &mut egui::Ui, env: &Env, req: Option<&Request>, files: &[PathBuf], note: Option<(String, Color32)>) {
+    let first = req.and_then(|r| files.first().and_then(|f| engine::result_name(&env.cfg, r, f)));
+    let more = files.len().saturating_sub(1);
     form_row(ui, env.t.result, |ui| {
         ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTROL_H), Layout::left_to_right(Align::Center), |ui| {
             let font = egui::TextStyle::Body.resolve(ui.style());
@@ -551,6 +581,9 @@ fn result_row(ui: &mut egui::Ui, env: &Env, req: Option<&Request>) {
             let text = if c().look == Look::Classic { RichText::new(text) } else { bold(text, 13.0) };
             ui.add(egui::Label::new(text.color(c().text)).truncate());
         });
+        if let Some((text, color)) = note {
+            one_line(ui, &text, color);
+        }
     });
 }
 /// The title of the window and the files it works on
@@ -613,7 +646,7 @@ fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
     }
     ui.add_space(14.0);
     let req = form.fields.ui(ui, env, &mut form.delete_original);
-    if !matches!(form.fields, Fields::Compress(_) | Fields::Webp(_)) {
+    if !matches!(form.fields, Fields::Compress(_) | Fields::Webp(_) | Fields::Image(_) | Fields::Icon(_) | Fields::Frames(_)) {
         ui.add_space(2.0);
         original_check(ui, env, &mut form.delete_original, env.t.delete_original);
         if let Some(r) = &req {
@@ -672,6 +705,17 @@ fn measured_forms(env: &Env) -> Vec<Form> {
         }
         return out;
     }
+    if let Fields::Image(_) = Fields::new(env) {
+        let mut out = Vec::new();
+        for tab in 0..2usize {
+            if let Fields::Image(mut f) = Fields::new(env) {
+                f.tab = tab;
+                f.scale.mode = ScaleMode::Height(720);
+                out.push(with(Fields::Image(f)));
+            }
+        }
+        return out;
+    }
     let Fields::Compress(_) = Fields::new(env) else { return vec![Form::new(env)] };
     let mut out = Vec::new();
     for tab in 0..2usize {
@@ -702,6 +746,8 @@ pub fn measure(env: &Env) -> (f32, f32) {
     let min_w = match (env.action, env.custom_id.is_some()) {
         (Action::Compress, false) => 480.0,
         (Action::Webp, false) => 480.0,
+        (Action::CompressImage, false) if env.files.len() == 1 => 520.0 + super::image_forms::PREVIEW_W,
+        (Action::CompressImage | Action::FramesVideo | Action::MakeIcon, false) => 520.0,
         _ => 440.0,
     };
     // long names are cut to the width, only the line about the file widens the window

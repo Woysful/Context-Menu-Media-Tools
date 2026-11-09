@@ -77,6 +77,10 @@ pub struct Info {
     pub audio: Vec<AudioTrack>,
     /// the number of frames of the video stream, where the file says it (an animated GIF)
     pub frames: Option<u64>,
+    /// codec_name of the video stream ("mjpeg" for a JPEG)
+    pub video_codec: String,
+    /// bytes of the file
+    pub size: Option<u64>,
 }
 
 /// One audio track of a file
@@ -140,6 +144,7 @@ pub fn parse_probe(name: &str, json: &str) -> Option<Info> {
     let mut info = Info { name: name.to_string(), ..Default::default() };
     info.duration = num(fmt.and_then(|f| f.get("duration"))).or_else(|| num(video.and_then(|v| v.get("duration"))));
     info.audio_bps = audio.and_then(|a| num(a.get("bit_rate")));
+    info.size = num(fmt.and_then(|f| f.get("size"))).map(|s| s as u64);
     info.audio = streams
         .iter()
         .filter(|s| s["codec_type"] == "audio")
@@ -166,6 +171,7 @@ pub fn parse_probe(name: &str, json: &str) -> Option<Info> {
         info.fps = ["avg_frame_rate", "r_frame_rate"].iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).and_then(ratio));
         info.video_bps = num(v.get("bit_rate"));
         info.frames = num(v.get("nb_frames")).map(|n| n as u64);
+        info.video_codec = v["codec_name"].as_str().unwrap_or_default().to_string();
         if info.video_bps.is_none() {
             if let (Some(d), Some(size)) = (info.duration.filter(|d| *d > 0.0), num(fmt.and_then(|f| f.get("size")))) {
                 info.video_bps = Some((size * 8.0 / d - info.audio_bps.unwrap_or(0.0)).max(0.0));
@@ -247,6 +253,19 @@ pub fn describe(info: &Info, audio_word: &str) -> String {
     if info.width > 0 {
         parts.push(format!("{}×{}", info.width, info.height));
     }
+    // a picture: "1600×1067 · JPEG · 214 KB"
+    if Kind::of(Path::new(&info.name)) == Some(Kind::Image) {
+        if !info.video_codec.is_empty() {
+            parts.push(picture_format(&info.video_codec));
+        }
+        if let Some(n) = info.frames.filter(|n| *n > 1) {
+            parts.push(format!("{n} frames"));
+        }
+        if let Some(s) = info.size {
+            parts.push(crate::units::fmt_size(s));
+        }
+        return parts.join(" · ");
+    }
     if let Some(f) = info.fps {
         let s = format!("{f:.2}");
         parts.push(format!("{} fps", s.trim_end_matches('0').trim_end_matches('.')));
@@ -261,6 +280,22 @@ pub fn describe(info: &Info, audio_word: &str) -> String {
         parts.push(fmt_duration(d));
     }
     parts.join(" · ")
+}
+
+/// The name of a picture format by its ffmpeg codec
+fn picture_format(codec: &str) -> String {
+    match codec {
+        "mjpeg" | "jpegls" => "JPEG".into(),
+        "png" | "apng" => "PNG".into(),
+        "webp" => "WebP".into(),
+        "av1" => "AVIF".into(),
+        "jpegxl" => "JPEG XL".into(),
+        "gif" => "GIF".into(),
+        "bmp" => "BMP".into(),
+        "tiff" => "TIFF".into(),
+        "targa" => "TGA".into(),
+        other => other.to_uppercase(),
+    }
 }
 
 #[cfg(test)]

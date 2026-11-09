@@ -531,6 +531,16 @@ fn field_names(t: &T, key: &str) -> (String, String) {
         dv::WEBP_COMPRESSION => (t.webp_compression, t.t_webp.to_string()),
         dv::DELETE_MERGE => (t.merge_kept, t.t_delete_audio.to_string()),
         dv::DELETE_ORIGINAL => (t.delete_original, ts.every_window.to_string()),
+        dv::IMAGE_MODE => (ts.field_tab, t.t_compress_image.to_string()),
+        dv::IMAGE_FORMAT => (t.img_format, t.t_compress_image.to_string()),
+        dv::IMAGE_QUALITY => (t.img_quality, t.t_compress_image.to_string()),
+        dv::IMAGE_LIMIT => (t.img_limit, t.t_compress_image.to_string()),
+        dv::IMAGE_RESOLUTION => (t.resolution, t.t_compress_image.to_string()),
+        dv::ICON_SIZES => (t.icon_sizes, t.t_make_icon.to_string()),
+        dv::ICON_SQUARE => (t.icon_square, t.t_make_icon.to_string()),
+        dv::FRAMES_FPS => (t.fv_fps, t.t_frames_video.to_string()),
+        dv::FRAMES_CODEC => (t.codec, t.t_frames_video.to_string()),
+        dv::FRAMES_LEVEL => (t.level, t.t_frames_video.to_string()),
         _ => match dv::kind_of(key) {
             Some(Kind::Format(k)) => {
                 let action = match k {
@@ -566,7 +576,21 @@ fn shown_value(cfg: &Config, t: &T, key: &str, value: &str) -> String {
         Some(Kind::Format(k)) => cfg.format(k, value).map_or_else(|| value.to_string(), |f| f.label(value).to_string()),
         Some(Kind::Megabytes) => format!("{value} MB"),
         Some(Kind::Number { .. }) if key == dv::WEBP_SIZE => format!("{value} px"),
+        Some(Kind::Choice(_)) => choice_options(t, key).iter().find(|(v, _)| *v == value).map_or_else(|| value.to_string(), |(_, l)| l.to_string()),
+        Some(Kind::ImageFormat) if value == crate::engine::SOURCE => t.img_source.to_string(),
+        Some(Kind::ImageFormat) => cfg.image_format(value).map_or_else(|| value.to_string(), |f| f.label(value).to_string()),
+        Some(Kind::Sizes) => format!("{} px", value.replace(',', ", ")),
+        Some(Kind::Fps) => format!("{value} fps"),
         _ => value.to_string(),
+    }
+}
+
+/// The values of a field of a few words, with their names
+fn choice_options(t: &T, key: &str) -> Vec<(&'static str, &'static str)> {
+    match key {
+        dv::IMAGE_MODE => vec![("quality", t.img_tab_quality), ("limit", t.img_tab_limit)],
+        dv::ICON_SQUARE => vec![("pad", t.icon_pad), ("crop", t.icon_crop)],
+        _ => vec![],
     }
 }
 
@@ -600,10 +624,18 @@ fn value_control(ui: &mut egui::Ui, key: &str, value: &mut String, cfg: &Config,
             let shown = shown_value(cfg, t, key, value);
             dropdown(ui, id, &shown, &[Col { title: None, items }], value);
         }
-        Some(kind @ (Kind::Number { .. } | Kind::Megabytes)) => {
+        Some(Kind::Choice(_)) => choice(ui, value, &choice_options(t, key)),
+        Some(Kind::ImageFormat) => {
+            let mut items = vec![(crate::engine::SOURCE.to_string(), t.img_source.to_string())];
+            items.extend(cfg.image_compress.iter().map(|(key, f)| (key.clone(), f.label(key).to_string())));
+            let shown = shown_value(cfg, t, key, value);
+            dropdown(ui, id, &shown, &[Col { title: None, items }], value);
+        }
+        Some(kind @ (Kind::Number { .. } | Kind::Megabytes | Kind::Size | Kind::Sizes | Kind::Fps)) => {
             let suffix = match key {
                 dv::LIMIT_SIZE => "MB",
-                dv::WEBP_SIZE => "px",
+                dv::WEBP_SIZE | dv::ICON_SIZES => "px",
+                dv::FRAMES_FPS => "fps",
                 _ => "",
             };
             number_field(ui, value, dv::valid(cfg, kind, value), suffix);
