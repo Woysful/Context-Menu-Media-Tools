@@ -52,7 +52,7 @@ On Windows 11 the items are under *Show more options*.
 | Make frame sequence | PNG / JPG / WebP frames in a new folder |
 | Convert to WebP anim | size, fps, quality, compression |
 | Convert Image | JPG, PNG, BMP, TIFF, GIF, WebP, TGA |
-| Compress Image | quality or a size limit in KB / MB, as the source or to JPEG, WebP, AVIF, JPEG XL, PNG (the formats your ffmpeg can make), resolution, turn and mirror; for one picture, crop it with a frame on the preview (free or 1:1, 4:3, 3:2, 16:9); shows the size of the result before you start; EXIF and GPS data are left out |
+| Compress Image | quality or a size limit in KB / MB, as the source or to JPEG, WebP, AVIF, JPEG XL, PNG (the formats your ffmpeg can make), resolution, turn and mirror; for one picture, crop it with a frame on the preview (free or 1:1, 4:3, 3:2, 16:9), also on the whole window; shows the size of the result before you start; EXIF and GPS data are left out |
 | Make Icon | one `.ico` with the sizes you tick (16 to 256 px); a picture that is not square gets transparent borders or is cropped to its middle |
 | Frames to Video | a folder of pictures (right-click the folder) or several selected pictures into a video, sorted by the numbers in their names; frame rate, codec (CPU or GPU) and compression as in Compress Video |
 | Stats | duration, size, bitrate and streams of the files, plus the full `ffprobe` output |

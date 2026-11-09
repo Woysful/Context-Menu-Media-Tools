@@ -146,13 +146,13 @@ impl eframe::App for App {
                     ctx.request_repaint();
                 }
                 self.valid = shown.request;
-                let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+                let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !shown.cropping;
                 if shown.start || enter {
                     if let Some(req) = self.valid.clone() {
                         next = Some((Stage::Running(Running::start(&self.env, ctx, req, shown.delete_original)), None));
                     }
                 }
-                close = shown.cancel || (ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()));
+                close = shown.cancel || (ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) && !shown.cropping);
             }
             Stage::Running(run) => close = run.ui(ctx, &self.env),
             Stage::Stats(stats) => close = stats.ui(ctx, &self.env),

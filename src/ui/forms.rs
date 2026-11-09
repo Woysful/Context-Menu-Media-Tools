@@ -640,6 +640,12 @@ fn results(ui: &mut egui::Ui, env: &Env, req: &Request) {
 
 /// The content of a form window: what the files are, problems of the config, the fields
 fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
+    if let Fields::Image(f) = &mut form.fields {
+        // the content scrolls: its top here and the height of the view give the bottom of
+        // what is seen without scrolling, wherever it is scrolled to
+        let view = ui.clip_rect().height() - 2.0 * ui.visuals().clip_rect_margin;
+        f.view_bottom = Some(ui.cursor().top() + view);
+    }
     header(ui, env);
     for w in &env.cfg.warnings {
         ui.label(RichText::new(format!("⚠ {} {w}", env.t.config_warning)).small().color(c().warn));
@@ -677,14 +683,22 @@ pub struct Shown {
     pub delete_original: bool,
     pub start: bool,
     pub cancel: bool,
+    /// the crop takes the whole window: Enter and Escape are its own
+    pub cropping: bool,
 }
 
 /// Draw a form window. `valid`: whether the form was valid in the frame before (the buttons
 /// are drawn before the fields)
 pub fn show(ctx: &egui::Context, env: &Env, form: &mut Form, valid: bool) -> Shown {
+    if let Fields::Image(f) = &mut form.fields {
+        if f.big {
+            f.crop_window(ctx, env);
+            return Shown { request: None, delete_original: form.delete_original, start: false, cancel: false, cropping: true };
+        }
+    }
     let mut pressed = (false, false);
     let (request, _) = window(ctx, true, |ui| pressed = buttons(ui, env.t, valid), |ui| content(ui, env, form));
-    Shown { request, delete_original: form.delete_original, start: pressed.0, cancel: pressed.1 }
+    Shown { request, delete_original: form.delete_original, start: pressed.0, cancel: pressed.1, cropping: false }
 }
 
 /// The forms the window has to be tall enough for (both tabs of Compress Video, the longest hints)
@@ -746,7 +760,9 @@ pub fn measure(env: &Env) -> (f32, f32) {
     let min_w = match (env.action, env.custom_id.is_some()) {
         (Action::Compress, false) => 480.0,
         (Action::Webp, false) => 480.0,
-        (Action::CompressImage, false) if env.files.len() == 1 => 520.0 + super::image_forms::PREVIEW_W,
+        (Action::CompressImage, false) if env.files.len() == 1 => {
+            super::image_forms::FIELDS_W + super::image_forms::GAP + 2.0 * MARGIN + super::image_forms::preview_width(env)
+        }
         (Action::CompressImage | Action::FramesVideo | Action::MakeIcon, false) => 520.0,
         _ => 440.0,
     };

@@ -4,7 +4,9 @@
 use super::dropdown::{build_groups, codec_combo, Group};
 use super::forms::{default_menu, original_check, result_row_with};
 use super::scale_field::ScaleField;
-use super::widgets::{card, form_row, hint, line_edit, muted, one_line, option_grid, secondary_button, segmented, slider_row};
+use super::widgets::{
+    button_row, card, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button, segmented, slider_row, title, window,
+};
 use super::Env;
 use crate::defaults::{self as dv, IMAGE_MODES, LEVELS, SQUARES};
 use crate::engine::{self, ImageEdit, ImageTarget, Request};
@@ -12,17 +14,27 @@ use crate::i18n::T;
 use crate::media;
 use crate::theme::{c, Look, CONTROL_H};
 use crate::units::{fmt_duration, fmt_float, fmt_size, parse_size};
-use eframe::egui::{self, pos2, vec2, Align2, Color32, ColorImage, Pos2, Rect, RichText, Sense, Shape, Stroke, TextureHandle, TextureOptions};
+use eframe::egui::{
+    self, pos2, vec2, Align2, Color32, ColorImage, Pos2, Rect, RichText, Sense, Shape, Stroke, TextureFilter, TextureHandle, TextureOptions, Vec2,
+};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The size of the picture at the right of Compress Image
-pub const PREVIEW_W: f32 = 360.0;
-const PREVIEW_H: f32 = 330.0;
-/// The longest side of the picture ffmpeg makes for the preview
-const PREVIEW_PX: u32 = 900;
+/// The width of the fields of Compress Image of one picture; the picture at their right takes
+/// the rest of the window
+pub const FIELDS_W: f32 = 460.0;
+pub const GAP: f32 = 20.0;
+/// The picture at the right: the narrowest and widest it starts with, the height it starts with
+const PREVIEW_MIN_W: f32 = 340.0;
+const PREVIEW_START_W: f32 = 560.0;
+const PREVIEW_START_H: f32 = 470.0;
+const PREVIEW_MIN_H: f32 = 240.0;
+/// The room between the picture and the edge of its box
+const PREVIEW_PAD: f32 = 10.0;
+/// The longest side of the picture ffmpeg makes for the preview (sharp on the whole window too)
+const PREVIEW_PX: u32 = 1600;
 /// The ratios of the crop after Free and Source: width, height
 const RATIOS: [(f64, f64); 4] = [(1.0, 1.0), (4.0, 3.0), (3.0, 2.0), (16.0, 9.0)];
 const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
@@ -116,7 +128,9 @@ impl Preview {
         if !matches!(&self.shown, Some((_, t, m, _)) if *t == turns && *m == mirrored) {
             let p = picture.turned(turns, mirrored);
             let image = ColorImage::from_rgba_unmultiplied([p.w, p.h], &p.rgba);
-            self.shown = Some((ctx.load_texture("cmmt_preview", image, TextureOptions::LINEAR), turns, mirrored, p.full));
+            // mipmaps: the picture is mostly drawn much smaller than it is
+            let options = TextureOptions { mipmap_mode: Some(TextureFilter::Linear), ..TextureOptions::LINEAR };
+            self.shown = Some((ctx.load_texture("cmmt_preview", image, options), turns, mirrored, p.full));
         }
         self.shown.as_ref().map(|(tex, _, _, full)| Ok((tex.clone(), *full)))
     }
@@ -199,6 +213,20 @@ pub struct ImageForm {
     estimate: Estimate,
     /// a window on the screen, not one that is measured: it loads the picture and estimates
     pub(super) live: bool,
+    /// the lowest edge of the window's content that is seen without scrolling (the picture
+    /// grows down to it)
+    pub(super) view_bottom: Option<f32>,
+    /// the height of what is under the picture, as it was drawn last
+    below: f32,
+    /// the crop takes the whole window
+    pub(super) big: bool,
+}
+
+/// The width the picture at the right of Compress Image starts with: about as wide as the
+/// picture is at the height it starts with
+pub fn preview_width(env: &Env) -> f32 {
+    let aspect = env.infos.first().filter(|i| i.width > 0 && i.height > 0).map_or(1.0, |i| i.width as f32 / i.height as f32);
+    ((PREVIEW_START_H - 2.0 * PREVIEW_PAD) * aspect + 2.0 * PREVIEW_PAD).clamp(PREVIEW_MIN_W, PREVIEW_START_W)
 }
 
 /// "500 KB" -> ("500", 0), "2 MB" -> ("2", 1)
@@ -231,6 +259,9 @@ impl ImageForm {
             preview: Preview::default(),
             estimate: Estimate::default(),
             live: false,
+            view_bottom: None,
+            below: 8.0 + 4.0 + 2.0 * CONTROL_H,
+            big: false,
         }
     }
 
@@ -255,24 +286,24 @@ impl ImageForm {
         if !Self::one_file(env) {
             return self.rows(ui, env, delete_original);
         }
-        let gap = 20.0;
-        let left = (ui.available_width() - PREVIEW_W - gap).max(300.0);
+        // the fields keep their width, a wider window widens the picture
+        let avail = ui.available_width();
+        let left = FIELDS_W.min(avail - GAP - PREVIEW_MIN_W).max(300.0);
+        let right = (avail - left - GAP).max(PREVIEW_MIN_W);
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            let req = ui
-                .vertical(|ui| {
-                    ui.set_width(left);
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    self.rows(ui, env, delete_original)
-                })
-                .inner;
-            ui.add_space(gap);
-            ui.vertical(|ui| {
-                ui.set_width(PREVIEW_W);
+            let fields = ui.vertical(|ui| {
+                ui.set_width(left);
                 ui.spacing_mut().item_spacing.x = 8.0;
-                self.crop_panel(ui, env);
+                self.rows(ui, env, delete_original)
             });
-            req
+            ui.add_space(GAP);
+            ui.vertical(|ui| {
+                ui.set_width(right);
+                ui.spacing_mut().item_spacing.x = 8.0;
+                self.crop_panel(ui, env, fields.response.rect.height());
+            });
+            fields.inner
         })
         .inner
     }
@@ -436,13 +467,53 @@ impl ImageForm {
         self.crop = self.part_ratio(full).map(|a| if a <= 1.0 { [(1.0 - a) / 2.0, 0.0, a, 1.0] } else { [0.0, (1.0 - 1.0 / a) / 2.0, 1.0, 1.0 / a] });
     }
 
-    fn crop_panel(&mut self, ui: &mut egui::Ui, env: &Env) {
+    /// The width / height of the picture as it is turned now
+    fn aspect(&self, env: &Env) -> Option<f32> {
+        let i = env.infos.first().filter(|i| i.width > 0 && i.height > 0)?;
+        let a = i.width as f32 / i.height as f32;
+        Some(if self.turns % 2 == 1 { 1.0 / a } else { a })
+    }
+
+    /// The picture at the right: as tall as the fields, taller when the window has room for
+    /// it (but not taller than the picture needs at this width)
+    fn crop_panel(&mut self, ui: &mut egui::Ui, env: &Env, fields_h: f32) {
+        let t = env.t;
+        let w = ui.available_width();
+        let top = ui.cursor().top();
+        let mut h = fields_h - self.below;
+        if let (true, Some(bottom)) = (self.live, self.view_bottom) {
+            let room = bottom - top - self.below;
+            let need = self.aspect(env).map_or(room, |a| (w - 2.0 * PREVIEW_PAD) / a + 2.0 * PREVIEW_PAD);
+            h = h.max(room.min(need));
+        }
+        let full = self.picture(ui, env, vec2(w, h.max(PREVIEW_MIN_H)), true);
+        let box_bottom = ui.min_rect().bottom();
+        ui.add_space(8.0);
+        self.ratio_row(ui, t, full);
+        ui.add_space(4.0);
+        let note = self.crop_note(t, full);
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTROL_H), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.add_enabled(self.crop.is_some(), secondary_button(t.img_crop_reset)).clicked() {
+                self.reset_crop();
+            }
+            ui.add_space(4.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(RichText::new(note).small().color(muted())).truncate());
+            });
+        });
+        self.below = ui.min_rect().bottom() - box_bottom;
+    }
+
+    /// The picture with the frame of the crop in a box of `size`; a drag on it crops. `expand`:
+    /// a button in its corner opens the crop on the whole window. Returns the size of the
+    /// turned picture once it is loaded.
+    fn picture(&mut self, ui: &mut egui::Ui, env: &Env, size: Vec2, expand: bool) -> Option<(u32, u32)> {
         let t = env.t;
         if self.live && !self.preview.started {
             self.preview.start(env, ui.ctx());
         }
         let k = c();
-        let (area, resp) = ui.allocate_exact_size(vec2(PREVIEW_W, PREVIEW_H), Sense::click_and_drag());
+        let (area, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
         let painter = ui.painter().clone();
         let frame_stroke = Stroke::new(1.0_f32, k.border);
         match k.look {
@@ -469,7 +540,7 @@ impl ImageForm {
             Some(Ok((tex, size))) => {
                 full = Some(size);
                 let [tw, th] = tex.size().map(|v| v as f32);
-                let room = area.shrink(10.0);
+                let room = area.shrink(PREVIEW_PAD);
                 let s = (room.width() / tw).min(room.height() / th);
                 let pic = Rect::from_center_size(area.center(), vec2(tw * s, th * s));
                 painter.image(tex.id(), pic, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
@@ -481,12 +552,18 @@ impl ImageForm {
         }
         if full.is_some() {
             resp.on_hover_cursor(egui::CursorIcon::Crosshair);
+            if expand && expand_button(ui, area, t.img_crop_expand) {
+                self.big = true;
+            }
         }
-        ui.add_space(8.0);
+        full
+    }
+
+    /// The ratios of the crop; a ratio clicked again stands up (or lies down)
+    fn ratio_row(&mut self, ui: &mut egui::Ui, t: &T, full: Option<(u32, u32)>) {
         let labels = ratio_labels(t);
         let before = self.ratio;
         let r = ui.add_enabled_ui(full.is_some(), |ui| segmented(ui, &labels, &mut self.ratio)).inner.on_hover_text(t.img_crop_upright);
-        // a ratio clicked again stands up (or lies down)
         let again = r.clicked() && self.ratio == before && self.ratio > 1;
         if again {
             self.upright = !self.upright;
@@ -494,27 +571,58 @@ impl ImageForm {
         if let (Some(full), true) = (full, r.changed() || again) {
             self.fit_ratio(full);
         }
-        ui.add_space(4.0);
-        let note = match (self.crop, full) {
+    }
+
+    /// The size of the crop in pixels, or how to crop
+    fn crop_note(&self, t: &T, full: Option<(u32, u32)>) -> String {
+        match (self.crop, full) {
             (Some([_, _, w, h]), Some((fw, fh))) => {
                 let (pw, ph) = ((w * fw as f64).round() as u32, (h * fh as f64).round() as u32);
                 t.img_crop_size.replace("{}", &format!("{pw}×{ph}"))
             }
             _ => t.img_crop_hint.to_string(),
-        };
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTROL_H), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let reset = ui.add_enabled(self.crop.is_some(), secondary_button(t.img_crop_reset));
-            if reset.clicked() {
-                self.crop = None;
-                self.ratio = 0;
-            }
-            ui.add_space(4.0);
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add(egui::Label::new(RichText::new(note).small().color(muted())).truncate());
-            });
-        });
+        }
     }
 
+    fn reset_crop(&mut self) {
+        self.crop = None;
+        self.ratio = 0;
+    }
+
+    /// The crop on the whole window: the picture, the ratios under it, Done at the bottom.
+    /// Done or Escape go back to the form.
+    pub fn crop_window(&mut self, ctx: &egui::Context, env: &Env) {
+        let t = env.t;
+        let note = self.crop_note(t, self.preview.shown.as_ref().map(|s| s.3));
+        let (mut done, mut reset, cropped) = (false, false, self.crop.is_some());
+        window(
+            ctx,
+            false,
+            |ui| {
+                button_row(ui, |ui| {
+                    done = ui.add(primary_button(t.img_crop_done)).clicked();
+                    reset = ui.add_enabled(cropped, secondary_button(t.img_crop_reset)).clicked();
+                    ui.add_space(6.0);
+                    ui.add(egui::Label::new(RichText::new(note).small().color(muted())).truncate());
+                });
+            },
+            |ui| {
+                title(ui, t.img_crop, c().text);
+                ui.add_space(12.0);
+                let size = vec2(ui.available_width(), (ui.available_height() - 8.0 - CONTROL_H - 14.0).max(120.0));
+                let full = self.picture(ui, env, size, false);
+                ui.add_space(8.0);
+                ui.allocate_ui(vec2(ui.available_width().min(560.0), CONTROL_H), |ui| self.ratio_row(ui, t, full));
+            },
+        );
+        if reset {
+            self.reset_crop();
+        }
+        if done || ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) {
+            self.big = false;
+            ctx.request_repaint();
+        }
+    }
     /// Drag on the picture: a new frame, a corner of the frame, or the whole frame
     fn drag_crop(&mut self, resp: &egui::Response, pic: Rect, full: (u32, u32)) {
         let Some(p) = resp.interact_pointer_pos() else {
@@ -646,6 +754,38 @@ fn draw_crop(p: &egui::Painter, pic: Rect, r: [f64; 4]) {
     }
 }
 
+/// A small button in the top right corner of `area`, four corners pointing out; true: clicked
+fn expand_button(ui: &mut egui::Ui, area: Rect, tip: &str) -> bool {
+    let k = c();
+    let rect = Rect::from_min_size(pos2(area.right() - 8.0 - 28.0, area.top() + 8.0), vec2(28.0, 28.0));
+    // it takes drags too, so a drag that starts on it does not crop
+    let resp = ui.interact(rect, ui.id().with("cmmt_expand"), Sense::click_and_drag()).on_hover_text(tip);
+    let hovered = resp.hovered();
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let p = ui.painter();
+    let fill = if hovered { k.hover } else { k.surface };
+    let stroke = Stroke::new(1.0_f32, if hovered { k.accent } else { k.border });
+    match k.look {
+        Look::Classic => {
+            p.rect(rect, 4.0, fill, stroke);
+        }
+        Look::Brutal => {
+            p.rect(rect, 0.0, fill, stroke);
+        }
+        Look::Y2k => super::paint::cut_rect(p, rect, 6.0, super::paint::DIAGONAL, fill, stroke),
+    }
+    let line = Stroke::new(1.6_f32, if hovered { k.accent } else { k.text });
+    let m = rect.center();
+    let (s, l) = (6.5, 4.0);
+    for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+        let corner = m + vec2(dx * s, dy * s);
+        p.line_segment([corner, corner - vec2(dx * l, 0.0)], line);
+        p.line_segment([corner, corner - vec2(0.0, dy * l)], line);
+    }
+    resp.clicked()
+}
 #[derive(Clone, Copy, PartialEq)]
 enum Sym {
     Left,
