@@ -1,7 +1,7 @@
 //! Windows: the classic context menu of Explorer, written to `cmmt-menu.reg` in %APPDATA%\cmmt
 //! and imported with `reg import`; PATH and the Start menu shortcut through PowerShell.
 
-use super::menu::{SUBMENUS, VIDEO};
+use super::menu::{IMAGE, SUBMENUS, VIDEO};
 use crate::media::Kind;
 use crate::paths;
 use crate::settings::Settings;
@@ -58,6 +58,22 @@ pub fn reg_text(exe: &str, uninstall: bool, s: &Settings) -> String {
             }
         }
     }
+    // the other picture items after the Convert Image cascade
+    for ext in Kind::Image.extensions() {
+        for (i, it) in IMAGE.iter().enumerate() {
+            let key = format!(r"{root}\.{ext}\shell\cmmt_{:02}", i + 2);
+            if s.enabled(it.action) {
+                verb(&mut body, &key, it.name(), &command(it.action.cli_name()));
+            }
+            keys.push(key);
+        }
+    }
+    // Frames to Video of a folder
+    let folder = r"HKEY_CURRENT_USER\Software\Classes\Directory\shell\cmmt_frames";
+    if s.enabled(crate::action::Action::FramesVideo) {
+        verb(&mut body, folder, super::menu::IMAGE[2].name(), &command(crate::action::Action::FramesVideo.cli_name()));
+    }
+    keys.push(folder.to_string());
     // own items: one verb per extension of their kind
     for c in s.menu_customs() {
         for ext in c.media_kind().extensions() {
@@ -183,6 +199,11 @@ mod tests {
         assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.mp4\shell\cmmt_08]"));
         assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.png\shell\cmmt_01]"));
         assert!(!off.contains("MUIVerb"));
+        assert!(t.contains(r"[HKEY_CURRENT_USER\Software\Classes\SystemFileAssociations\.jpg\shell\cmmt_02]"));
+        assert!(t.contains("\"MUIVerb\"=\"Compress Image\"") && t.contains("compress-image --batch"));
+        assert!(t.contains(r"[HKEY_CURRENT_USER\Software\Classes\Directory\shell\cmmt_frames\command]"));
+        assert!(t.contains("frames-to-video --batch \\\"%1\\\""));
+        assert!(off.contains(r"[-HKEY_CURRENT_USER\Software\Classes\Directory\shell\cmmt_frames]"));
     }
 
     #[test]

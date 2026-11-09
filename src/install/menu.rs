@@ -36,6 +36,13 @@ pub const VIDEO: &[Item] = &[
     item("08_stats", Action::Stats, "documentinfo"),
 ];
 
+/// The picture items besides Convert Image, in menu order
+pub const IMAGE: &[Item] = &[
+    item("09_compressImage", Action::CompressImage, "image-x-generic"),
+    item("10_makeIcon", Action::MakeIcon, "preferences-desktop-icons"),
+    item("11_framesToVideo", Action::FramesVideo, "video-x-generic"),
+];
+
 pub const CONVERT_AUDIO: Item = item("convertAudio", Action::ConvertAudio, "audio-x-generic");
 pub const CONVERT_IMAGE: Item = item("convertImage", Action::ConvertImage, "image-x-generic");
 pub const STATS: Item = item("stats", Action::Stats, "documentinfo");
@@ -85,18 +92,21 @@ pub struct Flat {
     pub name: String,
     pub icon: &'static str,
     pub kinds: Vec<Kind>,
+    /// also for folders (Frames to Video)
+    pub folders: bool,
     /// the arguments of cmmt, before the files
     pub args: String,
 }
 
 /// The items of a flat menu: the video items, Convert Audio (audio files and videos),
-/// Convert Image, Stats (every kind) and the own items
+/// the picture items, Stats (every kind) and the own items
 pub fn flat_entries(s: &Settings) -> Vec<Flat> {
     let mut out = Vec::new();
     let mut add = |it: &Item, kinds: Vec<Kind>| {
         if s.enabled(it.action) {
             let action = it.action.cli_name();
-            out.push(Flat { thunar_id: action.into(), file_id: it.id.into(), name: it.name().into(), icon: it.icon, kinds, args: action.into() });
+            let folders = it.action == Action::FramesVideo;
+            out.push(Flat { thunar_id: action.into(), file_id: it.id.into(), name: it.name().into(), icon: it.icon, kinds, folders, args: action.into() });
         }
     };
     for it in VIDEO.iter().filter(|i| ![Action::ConvertAudio, Action::Stats].contains(&i.action)) {
@@ -104,11 +114,22 @@ pub fn flat_entries(s: &Settings) -> Vec<Flat> {
     }
     add(&CONVERT_AUDIO, vec![Kind::Audio, Kind::Video]);
     add(&CONVERT_IMAGE, vec![Kind::Image]);
+    for it in IMAGE {
+        add(it, vec![Kind::Image]);
+    }
     add(&STATS, vec![Kind::Video, Kind::Audio, Kind::Image]);
     for c in s.menu_customs() {
         let kind = c.media_kind();
         let id = format!("custom-{}", c.id);
-        out.push(Flat { thunar_id: id.clone(), file_id: id, name: c.name.clone(), icon: kind.icon(), kinds: vec![kind], args: format!("run {}", c.id) });
+        out.push(Flat {
+            thunar_id: id.clone(),
+            file_id: id,
+            name: c.name.clone(),
+            icon: kind.icon(),
+            kinds: vec![kind],
+            folders: false,
+            args: format!("run {}", c.id),
+        });
     }
     out
 }

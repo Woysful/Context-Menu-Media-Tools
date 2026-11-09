@@ -13,6 +13,9 @@ pub fn actions(exe: &str, s: &Settings) -> String {
     for e in flat_entries(s) {
         let mut types: Vec<&str> = e.kinds.iter().map(|k| thunar_type(*k)).collect();
         types.sort();
+        if e.folders {
+            types.push("directories");
+        }
         let types: String = types.iter().map(|t| format!("\t<{t}/>\n")).collect();
         let name = xml_escape(&e.name);
         out.push_str(&format!(
@@ -106,7 +109,9 @@ mod tests {
         let twice = merge(Some(&once), &ours);
         assert_eq!(once, twice);
         assert!(once.contains("<unique-id>123-1</unique-id>"));
-        assert_eq!(once.matches("<unique-id>cmmt-").count(), 9);
+        assert_eq!(once.matches("<unique-id>cmmt-").count(), 12);
+        assert!(once.contains("<unique-id>cmmt-frames-to-video</unique-id>\n\t<command>/bin/cmmt frames-to-video %F</command>"));
+        assert!(once.contains("\t<image-files/>\n\t<directories/>\n</action>"));
         assert!(once.contains("<command>/bin/cmmt compress %F</command>"));
         assert!(once.contains("<video-files/>"));
         assert!(once.contains("<unique-id>cmmt-convert-audio</unique-id>"));

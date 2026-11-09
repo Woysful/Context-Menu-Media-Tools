@@ -14,7 +14,10 @@ pub fn files(exe: &str, s: &Settings) -> Vec<(String, String)> {
     flat_entries(s)
         .into_iter()
         .map(|e| {
-            let mime: Vec<&str> = e.kinds.iter().map(|k| k.mime()).collect();
+            let mut mime: Vec<&str> = e.kinds.iter().map(|k| k.mime()).collect();
+            if e.folders {
+                mime.push("inode/directory");
+            }
             let content = format!(
                 "[Desktop Entry]\nType=Action\nName={}\nIcon={}\nProfiles=on-all;\n\n[X-Action-Profile on-all]\nMimeTypes={}\nExec={exe} {} %F\nName=Default profile\n",
                 e.name,
@@ -62,6 +65,8 @@ mod tests {
         assert!(compress.contains("Exec=/bin/cmmt compress %F"));
         let audio = &files.iter().find(|(n, _)| n == "cmmt-convertAudio.desktop").unwrap().1;
         assert!(audio.contains("audio/mpeg") && audio.contains("video/mp4"));
+        let frames = &files.iter().find(|(n, _)| n == "cmmt-11_framesToVideo.desktop").unwrap().1;
+        assert!(frames.contains("image/png") && frames.contains(";inode/directory\n") && frames.contains("Exec=/bin/cmmt frames-to-video %F"));
     }
 
     #[test]

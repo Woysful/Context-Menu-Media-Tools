@@ -1,7 +1,8 @@
 //! KDE (Dolphin): service menus in ~/.local/share/kio/servicemenus/cmmt-*.desktop
 
-use super::menu::{desktop_quote, Item, STATS, SUBMENUS, VIDEO};
+use super::menu::{desktop_quote, Item, IMAGE, STATS, SUBMENUS, VIDEO};
 use super::{remove_matching, set_executable};
+use crate::action::Action;
 use crate::media::Kind;
 use crate::paths;
 use crate::settings::Settings;
@@ -49,6 +50,17 @@ pub fn files(exe: &str, s: &Settings) -> Vec<(String, String)> {
         }
         let content = head(sub.kind.mime(), &ids.join(";"), &format!("X-KDE-Submenu={}\n", sub.name)) + &body;
         files.push((format!("cmmt-{}.desktop", sub.kind.name()), content));
+    }
+
+    // the other picture items at the top level; Frames to Video also for folders, and for
+    // pictures only when there are several of them
+    for it in IMAGE.iter().filter(|i| s.enabled(i.action)) {
+        let body = action(it.id, it.name(), &format!("{exe} {} %F", it.action.cli_name()), it.icon);
+        let several = if it.action == Action::FramesVideo { "X-KDE-MinNumberOfUrls=2\n" } else { "" };
+        files.push((format!("cmmt-{}.desktop", it.id), head(Kind::Image.mime(), it.id, &format!("{top}{several}")) + &body));
+        if it.action == Action::FramesVideo {
+            files.push((format!("cmmt-{}-folder.desktop", it.id), head("inode/directory", it.id, top) + &body));
+        }
     }
 
     // own items
@@ -105,12 +117,16 @@ pub fn uninstall() -> Vec<String> {
 mod tests {
     use super::super::tests::with_custom;
     use super::*;
-    use crate::action::Action;
 
     #[test]
     fn files_are_complete() {
         let files = files("/home/u/.local/bin/cmmt", &Settings::default());
-        assert_eq!(files.len(), 10); // 8 video items + audio + image submenus
+        assert_eq!(files.len(), 14); // 8 video items + audio + image submenus + 3 picture items + folders
+        let frames = &files.iter().find(|(n, _)| n == "cmmt-11_framesToVideo.desktop").unwrap().1;
+        assert!(frames.contains("MimeType=image/jpeg;") && frames.contains("X-KDE-MinNumberOfUrls=2\n"));
+        let folder = &files.iter().find(|(n, _)| n == "cmmt-11_framesToVideo-folder.desktop").unwrap().1;
+        assert!(folder.contains("MimeType=inode/directory\n") && folder.contains("Exec=/home/u/.local/bin/cmmt frames-to-video %F"));
+        assert!(!folder.contains("MinNumberOfUrls"));
         let compress = &files.iter().find(|(n, _)| n == "cmmt-01_compressVideo.desktop").unwrap().1;
         assert!(compress.contains("Exec=/home/u/.local/bin/cmmt compress %F"));
         assert!(compress.contains("X-KDE-Priority=TopLevel"));
@@ -125,7 +141,7 @@ mod tests {
     #[test]
     fn switched_off_items_and_own_items() {
         let mut s = with_custom();
-        for a in [Action::DeleteAudio, Action::ConvertImage, Action::Stats] {
+        for a in [Action::DeleteAudio, Action::ConvertImage, Action::Stats, Action::FramesVideo] {
             s.set_enabled(a, false);
         }
         let files = files("/bin/cmmt", &s);
@@ -134,6 +150,7 @@ mod tests {
         assert!(!names.contains(&"cmmt-08_stats.desktop"));
         assert!(!names.contains(&"cmmt-image.desktop")); // no formats and no stats: no submenu at all
         assert!(names.contains(&"cmmt-audio.desktop"));
+        assert!(names.contains(&"cmmt-09_compressImage.desktop") && !names.iter().any(|n| n.contains("framesToVideo")));
         let audio = &files.iter().find(|(n, _)| n == "cmmt-audio.desktop").unwrap().1;
         assert!(!audio.contains("stats"));
         let custom = &files.iter().find(|(n, _)| n == "cmmt-custom-gif.desktop").unwrap().1;

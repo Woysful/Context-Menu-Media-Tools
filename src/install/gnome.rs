@@ -65,10 +65,11 @@ mod tests {
     #[test]
     fn scripts_pass_the_selection_and_numbers_are_optional() {
         let files = files("/opt/my cmmt/cmmt", &Settings::default());
-        assert_eq!(files.len(), 9);
+        assert_eq!(files.len(), 12);
         assert_eq!(files[0].0, "Compress Video"); // plain names by default
         assert_eq!(files[7].0, "Convert Image");
-        assert_eq!(files[8].0, "Stats");
+        assert_eq!(files[10].0, "Frames to Video");
+        assert_eq!(files[11].0, "Stats");
         assert!(files[0].1.contains("exec '/opt/my cmmt/cmmt' compress \"$@\""));
         assert!(files[0].1.starts_with("#!/bin/sh\n"));
         let s = Settings { numbered_scripts: true, ..Default::default() };
