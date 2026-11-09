@@ -296,6 +296,9 @@ fn caption_filters(c: &Caption, (w, h): (u32, u32), f: &mut Vec<String>) -> Resu
     let (size, color, border) = if c.strip {
         let strip = |n: usize| if n == 0 { 0 } else { (block(n) + 2.0 * pad).ceil() as u32 };
         let (st, sb) = (strip(top.len()), strip(bottom.len()));
+        // pad rounds sizes and places down to the half-size colours of yuv420p (WebP, AVIF,
+        // after sharpen or vignette): an odd picture or strip would not fit in it
+        f.push("format=yuv444p|yuva444p|rgb24|rgba".into());
         f.push(format!("pad=w=iw:h=ih+{}:x=0:y={st}:color=white", st + sb));
         lines.extend(top.iter().enumerate().map(|(i, l)| (l, pad + i as f64 * m.step + m.ascent)));
         let below = (st + h) as f64 + pad;
@@ -442,7 +445,8 @@ mod tests {
         assert!(built.filters[0].starts_with("drawbox=x="));
         assert!(built.filters[1].contains(":text=Hello:fontsize=50:fontcolor=0xFFFFFF:borderw=4:bordercolor=0x000000:x=500.0-text_w/2"));
         assert!(built.filters[2].contains(r":text=world\\: \\\'x\\\':"));
-        assert!(built.filters[3].starts_with("pad=w=iw:h=ih+"));
+        assert!(built.filters[3].starts_with("format=yuv444p"));
+        assert!(built.filters[4].starts_with("pad=w=iw:h=ih+"));
         let strip = built.size.unwrap().1 - 800;
         assert!(strip > 100 && strip < 200, "{strip}");
     }

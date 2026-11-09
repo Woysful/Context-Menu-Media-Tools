@@ -138,9 +138,19 @@ fn render(tools: &super::super::Tools, file: &Path, src: (u32, u32), filters: &[
         .map_err(|e| e.to_string())?;
     let (w, h) = (out.0 as usize, out.1 as usize);
     if r.stdout.len() != w * h * 4 {
-        return Err(String::from_utf8_lossy(&r.stderr).lines().last().unwrap_or("ffmpeg").to_string());
+        return Err(first_error(&String::from_utf8_lossy(&r.stderr)));
     }
     Ok(ColorImage::from_rgba_unmultiplied([w, h], &r.stdout))
+}
+
+/// The first line ffmpeg wrote, which says what went wrong (the last ones only that nothing
+/// came out), without the "[Parsed_pad_3 @ 0x...]" in front
+fn first_error(stderr: &str) -> String {
+    let line = stderr.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("ffmpeg");
+    match (line.starts_with('['), line.find("] ")) {
+        (true, Some(i)) => line[i + 2..].to_string(),
+        _ => line.to_string(),
+    }
 }
 
 /// A frame in pixels of a picture of `full` on the picture drawn at `pic`
@@ -797,8 +807,17 @@ impl ImageForm {
 
 #[cfg(test)]
 mod tests {
-    use super::on_screen;
+    use super::{first_error, on_screen};
     use eframe::egui::{pos2, Rect};
+
+    #[test]
+    fn the_first_error_of_ffmpeg() {
+        let err = "[Parsed_pad_2 @ 0x7f77] Input area 0:100:720:1181 not within the padded area
+[out#0/rawvideo @ 0x55] Nothing was written into output file
+";
+        assert_eq!(first_error(err), "Input area 0:100:720:1181 not within the padded area");
+        assert_eq!(first_error(""), "ffmpeg");
+    }
 
     #[test]
     fn frames_in_pixels_go_on_the_screen() {
