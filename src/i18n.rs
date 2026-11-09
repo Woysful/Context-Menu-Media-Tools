@@ -282,7 +282,7 @@ static EN: T = T {
     img_crop: "Crop",
     img_crop_free: "Free",
     img_crop_source: "Source",
-    img_crop_reset: "Whole picture",
+    img_crop_reset: "Reset",
     img_crop_hint: "Drag on the picture to crop it.",
     img_crop_upright: "Click a ratio again to turn it upright.",
     img_crop_many: "Cropping works on one file at a time.",
