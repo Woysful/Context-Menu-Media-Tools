@@ -161,6 +161,84 @@ pub struct WebpAnim {
     pub output: String,
 }
 
+/// An output format of Compress Image
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct ImageFormat {
+    pub text: String,
+    pub hint: String,
+    pub ext: String,
+    /// the ffmpeg encoder it needs (the window leaves the format out without it)
+    pub encoder: String,
+    /// "As source": the extensions of the files that keep this format
+    pub sources: Vec<String>,
+    /// {q} at quality 1 and at quality 100
+    pub q: Vec<f64>,
+    pub command: String,
+    /// the command at quality 100 (empty = `command`)
+    pub lossless: String,
+    pub output: String,
+    pub default: bool,
+}
+
+impl ImageFormat {
+    pub fn label<'a>(&'a self, key: &'a str) -> &'a str {
+        if self.text.is_empty() {
+            key
+        } else {
+            &self.text
+        }
+    }
+
+    pub fn extension<'a>(&'a self, key: &'a str) -> &'a str {
+        if self.ext.is_empty() {
+            key
+        } else {
+            &self.ext
+        }
+    }
+
+    /// {q} for a quality of 1..=100: on the line between the two values of `q`
+    pub fn q_value(&self, quality: u32) -> String {
+        let a = self.q.first().copied().unwrap_or(1.0);
+        let b = self.q.get(1).copied().unwrap_or(100.0);
+        let v = a + (b - a) * (quality.clamp(1, 100) as f64 - 1.0) / 99.0;
+        if a.fract() == 0.0 && b.fract() == 0.0 {
+            format!("{}", v.round() as i64)
+        } else {
+            format!("{v:.2}")
+        }
+    }
+
+    pub fn command_for(&self, quality: u32) -> &str {
+        if quality >= 100 && !self.lossless.is_empty() {
+            &self.lossless
+        } else {
+            &self.command
+        }
+    }
+}
+
+/// Make Icon
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct Icon {
+    pub sizes: Vec<u32>,
+    pub pad: String,
+    pub crop: String,
+    pub command: String,
+    pub output: String,
+}
+
+/// Frames to Video
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct FramesVideo {
+    pub fps: f64,
+    pub fit: String,
+    pub output: String,
+}
+
 /// The actions that only pick an output format; each one has its own list in presets.toml
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ConvertKind {
@@ -215,6 +293,9 @@ pub struct Config {
     formats: [Formats; 6],
     pub delete_audio: DeleteAudio,
     pub webp: WebpAnim,
+    pub image_compress: Vec<(String, ImageFormat)>,
+    pub icon: Icon,
+    pub frames_video: FramesVideo,
     /// Problems found in the user's files (shown in the window; a broken file is ignored)
     pub warnings: Vec<String>,
 }
@@ -367,6 +448,9 @@ impl Config {
             formats: ConvertKind::ALL.map(|k| section(&root, k.section(), &mut warnings)),
             delete_audio: single(&root, "delete_audio", &mut warnings),
             webp: single(&root, "webp_anim", &mut warnings),
+            image_compress: section(&root, "image_compress", &mut warnings),
+            icon: single(&root, "icon", &mut warnings),
+            frames_video: single(&root, "frames_video", &mut warnings),
             warnings,
         };
         // A user entry that merges into something unusable must not break the program
@@ -396,6 +480,13 @@ impl Config {
         check_command("[delete_audio] tracks_command", &self.delete_audio.tracks_command, &mut w);
         check_command("[delete_audio] merge_command", &self.delete_audio.merge_command, &mut w);
         check_command("[webp_anim]", &self.webp.command, &mut w);
+        for (k, f) in &self.image_compress {
+            check_command(&format!("[image_compress.{k}]"), &f.command, &mut w);
+            if !f.lossless.is_empty() {
+                check_command(&format!("[image_compress.{k}] lossless"), &f.lossless, &mut w);
+            }
+        }
+        check_command("[icon]", &self.icon.command, &mut w);
         self.warnings.extend(w);
     }
 
@@ -411,6 +502,22 @@ impl Config {
     pub fn default_format(&self, kind: ConvertKind) -> Option<&str> {
         let list = self.formats(kind);
         list.iter().find(|(_, f)| f.default).or_else(|| list.first()).map(|(k, _)| k.as_str())
+    }
+
+    pub fn image_format(&self, key: &str) -> Option<&ImageFormat> {
+        self.image_compress.iter().find(|(k, _)| k == key).map(|(_, f)| f)
+    }
+
+    /// The Compress Image format of "As source" for a file: the entry that lists its extension,
+    /// else the default one
+    pub fn image_source_format(&self, file: &Path) -> Option<(&str, &ImageFormat)> {
+        let ext = file.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let list = &self.image_compress;
+        list.iter()
+            .find(|(_, f)| f.sources.iter().any(|s| s.eq_ignore_ascii_case(&ext)))
+            .or_else(|| list.iter().find(|(_, f)| f.default))
+            .or_else(|| list.first())
+            .map(|(k, f)| (k.as_str(), f))
     }
 
     pub fn compress_codec(&self, key: &str) -> Option<&Codec> {
@@ -460,6 +567,25 @@ mod tests {
         assert!(c.compress.iter().all(|(_, e)| e.command.contains("{audio}")));
         assert!(c.audio_codec("copy").unwrap().copies() && !c.audio_codec("aac").unwrap().copies());
         assert!(c.audio_merge.filter.contains("{count}"));
+        assert_eq!(c.image_compress.len(), 5);
+        assert_eq!(c.icon.sizes, [16, 24, 32, 48, 64, 256]);
+        assert_eq!(c.frames_video.fps, 30.0);
+        assert!(c.frames_video.fit.contains("{w}") && c.frames_video.output.contains("{name}"));
+    }
+
+    #[test]
+    fn image_quality_values() {
+        let c = defaults();
+        let jpg = c.image_format("jpg").unwrap();
+        assert_eq!((jpg.q_value(1), jpg.q_value(100)), ("31".into(), "2".into()));
+        assert_eq!(c.image_format("jxl").unwrap().q_value(100), "0.20");
+        let png = c.image_format("png").unwrap();
+        assert!(png.command_for(100).contains("-pred mixed") && !png.command_for(100).contains("palettegen"));
+        assert!(png.command_for(99).contains("palettegen"));
+        assert_eq!(c.image_source_format(Path::new("/a/b.JPEG")).unwrap().0, "jpg");
+        assert_eq!(c.image_source_format(Path::new("/a/b.gif")).unwrap().0, "png");
+        assert_eq!(c.image_source_format(Path::new("/a/b.webp")).unwrap().0, "webp");
+        assert_eq!(c.image_source_format(Path::new("/a/b.xyz")).unwrap().0, "jpg");
     }
 
     #[test]

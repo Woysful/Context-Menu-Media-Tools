@@ -4,11 +4,13 @@
 mod budget;
 mod compress;
 mod convert;
+mod image;
 mod output;
 mod progress;
 mod runner;
 
 pub use crate::config::ConvertKind;
+pub use image::{edit_filters, encoders, frame_sets, natural_cmp, FrameSet, SOURCE};
 pub use progress::{Line, LineKind, Progress, State};
 pub use runner::stats_text;
 
@@ -28,6 +30,27 @@ pub struct Tracks {
     pub keep: Option<Vec<usize>>,
     /// mix the kept tracks into one
     pub merge: bool,
+}
+
+/// Turning, mirroring and cropping of Compress Image
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ImageEdit {
+    /// quarter turns clockwise (0..=3)
+    pub turns: u8,
+    /// mirrored after the turn
+    pub flip_h: bool,
+    pub flip_v: bool,
+    /// x, y, width, height as parts (0..1) of the turned picture; None = all of it
+    pub crop: Option<[f64; 4]>,
+}
+
+/// What Compress Image aims at
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImageTarget {
+    /// 1..=100
+    Quality(u32),
+    /// the highest quality that fits into this many bytes
+    Bytes(u64),
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +87,25 @@ pub enum Request {
         quality: u32,
         compression: u32,
     },
+    CompressImage {
+        /// key of [image_compress], or "source"
+        format: String,
+        target: ImageTarget,
+        scale: ScaleMode,
+        edit: ImageEdit,
+    },
+    Icon {
+        sizes: Vec<u32>,
+        /// the middle of a picture that is not square (else transparent borders)
+        crop: bool,
+    },
+    /// One video per chosen folder, one of the chosen pictures
+    FramesVideo {
+        fps: f64,
+        /// key of [compress]
+        codec: String,
+        level: usize,
+    },
     /// An own menu item (settings.toml)
     Custom {
         id: String,
@@ -76,6 +118,7 @@ impl Request {
         match self {
             Request::Convert { what, .. } => what.input_kind(),
             Request::Custom { id } => cfg.settings.custom(id).map_or(Kind::Video, |c| c.media_kind()),
+            Request::CompressImage { .. } | Request::Icon { .. } | Request::FramesVideo { .. } => Kind::Image,
             _ => Kind::Video,
         }
     }
@@ -100,6 +143,22 @@ pub fn result_name(cfg: &Config, req: &Request, file: &Path) -> Option<String> {
         Request::DeleteAudio { remove: Some(_), .. } => name(&cfg.delete_audio.tracks_output, &[]),
         Request::Webp { .. } => name(&cfg.webp.output, &[]),
         Request::Custom { id } => name(&cfg.settings.custom(id)?.output, &[]),
+        Request::CompressImage { format, .. } => short_name(&output::unique_path(image::compressed_path(cfg, format, file)?)),
+        Request::Icon { .. } => name(&cfg.icon.output, &[]),
+        Request::FramesVideo { .. } => {
+            let folder = if file.is_dir() { file.to_path_buf() } else { file.parent()?.to_path_buf() };
+            short_name(&output::unique_path(image::video_path(cfg, &folder, file.is_dir())))
+        }
+    })
+}
+
+/// The size of what Compress Image makes of `file` with a quality (the window shows it before Start)
+pub fn estimate_image(cfg: Arc<Config>, ffmpeg: PathBuf, ffprobe: PathBuf, req: &Request, file: &Path) -> Result<u64, String> {
+    let Request::CompressImage { format, target: ImageTarget::Quality(q), scale, edit } = req else { return Err("no estimate".into()) };
+    let job = Job { cfg, ffmpeg, ffprobe, prog: Progress::new(Box::new(|| {}), false), delete_original: false };
+    image::estimate(&job, file, format, *q, *scale, edit).map_err(|e| match e {
+        Failure::Error(e) => e,
+        Failure::Cancelled => String::new(),
     })
 }
 
@@ -150,6 +209,9 @@ type Outcome<T> = Result<T, Failure>;
 pub fn run(job: &Job, req: &Request, files: &[PathBuf]) {
     let t = i18n::t();
     let p = &job.prog;
+    if let Request::FramesVideo { fps, codec, level } = req {
+        return frames_video(job, files, *fps, codec, *level);
+    }
     let wanted = req.input_kind(&job.cfg);
 
     let mut eligible: Vec<&PathBuf> = Vec::new();
@@ -181,6 +243,33 @@ pub fn run(job: &Job, req: &Request, files: &[PathBuf]) {
             }
             Err(Failure::Cancelled) => break,
             Err(Failure::Error(e)) => p.error(format!("{} {}\n{}", t.failed, short_name(file), e)),
+        }
+    }
+    if p.is_cancelled() {
+        p.mark_cancelled();
+        p.info(t.cancelled.to_string());
+    }
+    p.finish();
+}
+
+/// Frames to Video: a video per set of pictures (the originals stay)
+fn frames_video(job: &Job, files: &[PathBuf], fps: f64, codec: &str, level: usize) {
+    let t = i18n::t();
+    let p = &job.prog;
+    let sets = image::frame_sets(files);
+    if sets.is_empty() {
+        p.error(t.fv_none.to_string());
+    }
+    for (i, set) in sets.iter().enumerate() {
+        if p.is_cancelled() {
+            break;
+        }
+        let name = image::set_name(set);
+        p.begin_file(i, sets.len(), &name);
+        match image::frames_video(job, set, fps, codec, level) {
+            Ok(done) => p.result(done.text),
+            Err(Failure::Cancelled) => break,
+            Err(Failure::Error(e)) => p.error(format!("{} {name}\n{e}", t.failed)),
         }
     }
     if p.is_cancelled() {
@@ -226,5 +315,8 @@ fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<Done> {
             let c = job.cfg.settings.custom(id).ok_or_else(|| unknown(id))?;
             convert::custom(job, file, &info, c)
         }
+        Request::CompressImage { format, target, scale, edit } => image::compress(job, file, format, *target, *scale, edit),
+        Request::Icon { sizes, crop } => image::icon(job, file, sizes, *crop),
+        Request::FramesVideo { .. } => Err(Failure::Error("frames to video takes all files at once".into())),
     }
 }

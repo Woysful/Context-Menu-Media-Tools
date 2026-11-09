@@ -21,12 +21,12 @@ fn path_val(p: &Path) -> Val {
     Val::S(p.to_string_lossy().to_string())
 }
 
-fn file_size(p: &Path) -> u64 {
+pub(super) fn file_size(p: &Path) -> u64 {
     std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
 }
 
 /// `{vf}` of the commands: "-vf <filters>", or nothing
-fn vf_val(chain: &[String]) -> Val {
+pub(super) fn vf_val(chain: &[String]) -> Val {
     if chain.is_empty() {
         Val::L(vec![])
     } else {
@@ -35,7 +35,7 @@ fn vf_val(chain: &[String]) -> Val {
 }
 
 /// `{scale}` of the commands: the filters with a trailing comma, for an own -vf chain
-fn scale_val(chain: &[String]) -> Val {
+pub(super) fn scale_val(chain: &[String]) -> Val {
     if chain.is_empty() {
         Val::s("")
     } else {
@@ -49,7 +49,7 @@ fn rate_val(bps: u64, max_pct: f64, buf_pct: f64) -> Val {
 }
 
 /// VAAPI needs the render device of the GPU of that vendor; the other backends need nothing
-fn render_node(t: &T, c: &Codec) -> Result<Option<String>, String> {
+pub(super) fn render_node(t: &T, c: &Codec) -> Result<Option<String>, String> {
     if c.backend != "vaapi" {
         return Ok(None);
     }
@@ -61,7 +61,7 @@ fn render_node(t: &T, c: &Codec) -> Result<Option<String>, String> {
     Ok(Some(node))
 }
 
-fn push_node(vars: &mut Vec<(&'static str, Val)>, node: &Option<String>) {
+pub(super) fn push_node(vars: &mut Vec<(&'static str, Val)>, node: &Option<String>) {
     if let Some(n) = node {
         vars.push(("render_node", Val::s(n.clone())));
     }

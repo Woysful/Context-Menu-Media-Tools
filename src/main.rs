@@ -42,7 +42,7 @@ Usage: cmmt <action> [options] [files...]
 
 Actions:
   compress  convert-video  convert-audio  extract-audio  delete-audio
-  frames  webp  convert-image  stats
+  frames  webp  convert-image  compress-image  make-icon  frames-to-video  stats
   settings                                               the Settings window (also: run cmmt without arguments)
   run <id> [files...]                                    an own menu item of the Settings window
   install [--kde|--gnome|--xfce|--pcmanfm|--windows] [--no-copy] [--path]   add the menu items
@@ -66,6 +66,10 @@ Options:
   --delete-original  delete the original file after a successful result (to the trash or
                      permanently, as in Settings > General)
   --size N --fps N --quality N --compression N          webp
+  compress-image: --format source|jpg|webp|avif|jxl|png  --quality 1-100  or  --limit 500KB|2MB
+                  --scale S  --rotate 90|180|270  --flip h|v|hv  --crop x,y,w,h (in % of the picture)
+  make-icon:      --sizes 16,24,32,48,64,128,256  --square pad|crop
+  frames-to-video (folders or pictures): --fps N  --codec C  --level low|medium|high
 ";
 
 struct Cli {
@@ -77,7 +81,24 @@ struct Cli {
 
 impl Cli {
     fn parse(args: Vec<String>) -> Cli {
-        const WITH_VALUE: &[&str] = &["format", "level", "codec", "limit", "scale", "audio", "tracks", "size", "fps", "quality", "compression"];
+        const WITH_VALUE: &[&str] = &[
+            "format",
+            "level",
+            "codec",
+            "limit",
+            "scale",
+            "audio",
+            "tracks",
+            "size",
+            "fps",
+            "quality",
+            "compression",
+            "rotate",
+            "flip",
+            "crop",
+            "sizes",
+            "square",
+        ];
         let mut it = args.into_iter();
         let mut cli = Cli { action: it.next().unwrap_or_default(), files: vec![], opts: HashMap::new(), flags: vec![] };
         while let Some(a) = it.next() {
@@ -146,21 +167,46 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
         let format = cli.opt("format").or_else(|| cfg.default_format(what)).ok_or("no formats")?;
         return Ok(Request::Convert { what, format: format.to_string() });
     }
+    let level = || match cli.opt("level").unwrap_or("medium") {
+        "low" => Ok(0),
+        "medium" => Ok(1),
+        "high" => Ok(2),
+        other => Err(format!("bad --level: {other}")),
+    };
     Ok(match action {
+        Action::CompressImage => image_request(cli, cfg, scale)?,
+        Action::MakeIcon => {
+            let sizes = match cli.opt("sizes") {
+                Some(list) => list
+                    .split(',')
+                    .map(|n| n.trim().parse::<u32>().ok().filter(|v| (1..=256).contains(v)))
+                    .collect::<Option<Vec<u32>>>()
+                    .ok_or_else(|| format!("bad --sizes: {list}"))?,
+                None => cfg.icon.sizes.clone(),
+            };
+            let crop = match cli.opt("square").unwrap_or("pad") {
+                "pad" => false,
+                "crop" => true,
+                other => return Err(format!("bad --square: {other}")),
+            };
+            Request::Icon { sizes, crop }
+        }
+        Action::FramesVideo => {
+            let fps = match cli.opt("fps") {
+                Some(f) => units::parse_decimal(f).filter(|v| (1.0..=240.0).contains(v)).ok_or_else(|| format!("bad --fps: {f}"))?,
+                None => cfg.frames_video.fps,
+            };
+            if cfg.compress_codec(&codec).is_none() {
+                return Err(format!("bad --codec: {codec}"));
+            }
+            Request::FramesVideo { fps, codec, level: level()? }
+        }
         Action::Compress => match cli.opt("limit") {
             Some(l) => {
                 let mb = units::parse_decimal(l).filter(|v| *v > 0.0).ok_or_else(|| format!("bad --limit: {l}"))?;
                 Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass"), audio, tracks }
             }
-            None => {
-                let level = match cli.opt("level").unwrap_or("medium") {
-                    "low" => 0,
-                    "medium" => 1,
-                    "high" => 2,
-                    other => return Err(format!("bad --level: {other}")),
-                };
-                Request::CompressPreset { level, codec, scale, audio, tracks }
-            }
+            None => Request::CompressPreset { level: level()?, codec, scale, audio, tracks },
         },
         // --merge alone: no track is removed, all of them are mixed
         Action::DeleteAudio => match (track_list, cli.flag("merge")) {
@@ -175,6 +221,43 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
         },
         _ => return Err(format!("{} has no options", action.cli_name())),
     })
+}
+
+/// compress-image: the format, quality or size, turn, mirror and crop of the options
+fn image_request(cli: &Cli, cfg: &Config, scale: ScaleMode) -> Result<Request, String> {
+    let format = cli.opt("format").unwrap_or(engine::SOURCE).to_string();
+    if format != engine::SOURCE && cfg.image_format(&format).is_none() {
+        return Err(format!("bad --format: {format}"));
+    }
+    let target = match (cli.opt("limit"), cli.opt("quality")) {
+        (Some(l), _) => engine::ImageTarget::Bytes(units::parse_size(l).ok_or_else(|| format!("bad --limit: {l}"))?),
+        (None, Some(q)) => engine::ImageTarget::Quality(q.parse().ok().filter(|v| (1..=100).contains(v)).ok_or_else(|| format!("bad --quality: {q}"))?),
+        (None, None) => engine::ImageTarget::Quality(80),
+    };
+    let turns = match cli.opt("rotate").unwrap_or("0") {
+        "0" => 0,
+        "90" => 1,
+        "180" | "-180" => 2,
+        "270" | "-90" => 3,
+        other => return Err(format!("bad --rotate: {other}")),
+    };
+    let flip = cli.opt("flip").unwrap_or("");
+    if !flip.chars().all(|c| c == 'h' || c == 'v') {
+        return Err(format!("bad --flip: {flip}"));
+    }
+    let crop = match cli.opt("crop") {
+        Some(text) => {
+            let v: Option<Vec<f64>> = text.split(',').map(|n| units::parse_decimal(n.trim().trim_end_matches('%')).map(|v| v / 100.0)).collect();
+            match v.as_deref() {
+                Some(&[x, y, w, h]) if x >= 0.0 && y >= 0.0 && w > 0.0 && h > 0.0 && x + w <= 1.0 + 1e-9 && y + h <= 1.0 + 1e-9 => Some([x, y, w, h]),
+                _ => return Err(format!("bad --crop: {text} (x,y,width,height in % of the picture)")),
+            }
+        }
+        None => None,
+    };
+    let edit = engine::ImageEdit { turns, flip_h: flip.contains('h'), flip_v: flip.contains('v'), crop };
+    let scale = if scale == ScaleMode::Auto { ScaleMode::Orig } else { scale };
+    Ok(Request::CompressImage { format, target, scale, edit })
 }
 
 /// Output of a command that is not a menu action. A program without a console (Windows)

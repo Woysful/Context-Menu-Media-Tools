@@ -75,6 +75,8 @@ pub struct Info {
     pub bitrate_estimated: bool,
     pub audio_bps: Option<f64>,
     pub audio: Vec<AudioTrack>,
+    /// the number of frames of the video stream, where the file says it (an animated GIF)
+    pub frames: Option<u64>,
 }
 
 /// One audio track of a file
@@ -163,6 +165,7 @@ pub fn parse_probe(name: &str, json: &str) -> Option<Info> {
         info.height = h;
         info.fps = ["avg_frame_rate", "r_frame_rate"].iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).and_then(ratio));
         info.video_bps = num(v.get("bit_rate"));
+        info.frames = num(v.get("nb_frames")).map(|n| n as u64);
         if info.video_bps.is_none() {
             if let (Some(d), Some(size)) = (info.duration.filter(|d| *d > 0.0), num(fmt.and_then(|f| f.get("size")))) {
                 info.video_bps = Some((size * 8.0 / d - info.audio_bps.unwrap_or(0.0)).max(0.0));
@@ -200,6 +203,37 @@ pub fn audio_counts(ffprobe: &Path, files: &[std::path::PathBuf]) -> Vec<usize> 
             files.chunks(per_thread).map(|part| s.spawn(move || part.iter().filter_map(|f| audio_count(ffprobe, f)).collect::<Vec<_>>())).collect();
         jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
     })
+}
+
+/// The size of a picture as ffmpeg decodes it: turned by its EXIF orientation (which a
+/// stream of ffprobe does not show)
+pub fn picture_size(ffprobe: &Path, file: &Path) -> Option<(u32, u32)> {
+    let out = crate::proc::command(ffprobe)
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-read_intervals",
+            "%+#1",
+            "-show_frames",
+            "-show_entries",
+            "frame=width,height:side_data=rotation",
+            "-of",
+            "json",
+        ])
+        .arg(file)
+        .output()
+        .ok()?;
+    parse_picture_size(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_picture_size(json: &str) -> Option<(u32, u32)> {
+    let data: Value = serde_json::from_str(json).ok()?;
+    let frame = data.get("packets_and_frames").or_else(|| data.get("frames"))?.as_array()?.iter().find(|f| f.get("width").is_some())?;
+    let (w, h) = (num(frame.get("width"))? as u32, num(frame.get("height"))? as u32);
+    let rotation = frame.get("side_data_list").and_then(|l| l.as_array()).and_then(|l| l.iter().find_map(|s| num(s.get("rotation")))).unwrap_or(0.0);
+    Some(if (rotation.round() as i64).abs() % 180 == 90 { (h, w) } else { (w, h) })
 }
 
 pub fn probe(ffprobe: &Path, file: &Path) -> Option<Info> {
@@ -269,6 +303,15 @@ mod tests {
         let i = parse_probe("a.mp3", json).unwrap();
         assert_eq!(i.width, 0);
         assert!(!i.audio.is_empty());
+    }
+
+    #[test]
+    fn picture_size_follows_the_orientation() {
+        let turned = r#"{"packets_and_frames":[{"type":"packet"},{"type":"frame","width":640,"height":480,"side_data_list":[{"rotation":-90}]}]}"#;
+        assert_eq!(parse_picture_size(turned), Some((480, 640)));
+        let plain = r#"{"packets_and_frames":[{"type":"frame","width":640,"height":480}]}"#;
+        assert_eq!(parse_picture_size(plain), Some((640, 480)));
+        assert_eq!(parse_picture_size(""), None);
     }
 
     #[test]

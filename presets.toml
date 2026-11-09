@@ -744,6 +744,92 @@ ext = "tga"
 command = 'ffmpeg -n -i {input} {output}'
 output = "{base}.{ext}"
 
+# ------------------------------------------------------------------ Compress Image
+# One entry per output format. The window shows only the formats whose `encoder` is in
+# `ffmpeg -encoders`. "As source" takes the entry whose `sources` has the extension of the file
+# (else the one with `default = true`). The Quality slider (1-100) becomes {q}: `q` = the value
+# at quality 1 and at quality 100, the values between are on a straight line (whole numbers
+# when both are whole). `lossless` is the command at quality 100 (PNG: no palette).
+# {chain} = the filters for turning, cropping and scaling, with a trailing comma (or nothing),
+# {vf} = the same as "-vf <filters>". The size limit mode looks for the highest quality that fits.
+# JPEG and AVIF have no transparency here: a transparent picture is put on white.
+# ffmpeg does not carry EXIF / GPS data over into the result. -frames:v 1: an animated GIF
+# gives its first frame.
+
+[image_compress.jpg]
+text = "JPEG"
+hint = "photos, plays anywhere"
+ext = "jpg"
+encoder = "mjpeg"
+sources = ["jpg", "jpeg", "bmp", "tiff", "tif"]
+q = [31, 2]
+default = true
+command = 'ffmpeg -n -i {input} -frames:v 1 -vf "{chain}split[fg][bg];[bg]drawbox=c=white:t=fill[white];[white][fg]overlay=format=auto,format=yuvj420p" -q:v {q} -map_metadata -1 {output}'
+output = "{base}_compressed.{ext}"
+
+[image_compress.webp]
+text = "WebP"
+hint = "small, transparency"
+ext = "webp"
+encoder = "libwebp"
+sources = ["webp"]
+q = [1, 100]
+command = 'ffmpeg -n -i {input} -frames:v 1 {vf} -c:v libwebp -quality {q} -compression_level 6 -map_metadata -1 {output}'
+output = "{base}_compressed.{ext}"
+
+[image_compress.avif]
+text = "AVIF"
+hint = "smallest, newer apps"
+ext = "avif"
+encoder = "libaom-av1"
+q = [60, 18]
+command = 'ffmpeg -n -i {input} -frames:v 1 -vf "{chain}split[fg][bg];[bg]drawbox=c=white:t=fill[white];[white][fg]overlay=format=auto,format=yuv420p" -c:v libaom-av1 -still-picture 1 -crf {q} -b:v 0 -cpu-used 6 -row-mt 1 -map_metadata -1 {output}'
+output = "{base}_compressed.{ext}"
+
+[image_compress.jxl]
+text = "JPEG XL"
+hint = "small, transparency"
+ext = "jxl"
+encoder = "libjxl"
+q = [10.0, 0.2]
+command = 'ffmpeg -n -i {input} -frames:v 1 {vf} -c:v libjxl -distance {q} -map_metadata -1 {output}'
+output = "{base}_compressed.{ext}"
+
+[image_compress.png]
+text = "PNG"
+hint = "fewer colours, lossless at 100"
+ext = "png"
+encoder = "png"
+sources = ["png", "gif", "tga", "psd"]
+q = [2, 256]
+command = 'ffmpeg -n -i {input} -frames:v 1 -vf "{chain}split[a][b];[a]palettegen=max_colors={q}:reserve_transparent=1[p];[b][p]paletteuse=dither=sierra2_4a" -c:v png -pred mixed -map_metadata -1 {output}'
+lossless = 'ffmpeg -n -i {input} -frames:v 1 {vf} -c:v png -pred mixed -map_metadata -1 {output}'
+output = "{base}_compressed.{ext}"
+
+# ------------------------------------------------------------------ Make Icon
+# One .ico with a picture per size. {graph} = the -filter_complex that makes the picture square
+# (`pad`: transparent borders, `crop`: the middle) and scales it to every size, with its -map options.
+# `sizes` are ticked when the window opens.
+
+[icon]
+sizes = [16, 24, 32, 48, 64, 256]
+pad = "format=rgba,pad=w='max(iw,ih)':h='max(iw,ih)':x='(ow-iw)/2':y='(oh-ih)/2':color=black@0"
+crop = "format=rgba,crop=w='min(iw,ih)':h='min(iw,ih)'"
+command = 'ffmpeg -n -i {input} -frames:v 1 {graph} -c:v png {output}'
+output = "{base}.ico"
+
+# ------------------------------------------------------------------ Frames to Video
+# A folder of pictures (or the selected pictures) becomes a video, sorted by the numbers in the
+# names. The command is the one of the codec in [compress.*] (the Compress Video presets); the
+# pictures come in as a list ({input}) with -r {fps} -f concat in front of it. `fit` puts every
+# picture into the size of the first one ({w} x {h}); it goes into {vf} / {scale}.
+# `output`: {name} = the name of the folder of the pictures, {dir} = where the video goes: next to
+# a folder that was chosen, or into the folder of the selected pictures.
+
+[frames_video]
+fps = 30
+fit = "scale=w={w}:h={h}:force_original_aspect_ratio=decrease:flags=lanczos,pad=w={w}:h={h}:x=(ow-iw)/2:y=(oh-ih)/2:color=black,setsar=1,format=yuv420p"
+output = "{dir}/{name}.mp4"
 # ------------------------------------------------------------------ Delete Audio
 
 # command / output: every audio track goes. tracks_command / tracks_output: only the tracks

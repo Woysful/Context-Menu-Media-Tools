@@ -15,12 +15,16 @@ pub enum Action {
     Frames,
     Webp,
     ConvertImage,
+    CompressImage,
+    MakeIcon,
+    /// A folder of pictures (or several pictures) into a video
+    FramesVideo,
     Stats,
 }
 
 impl Action {
     /// Every standard item, in menu order
-    pub const ALL: [Action; 9] = [
+    pub const ALL: [Action; 12] = [
         Action::Compress,
         Action::ConvertVideo,
         Action::ConvertAudio,
@@ -29,6 +33,9 @@ impl Action {
         Action::Frames,
         Action::Webp,
         Action::ConvertImage,
+        Action::CompressImage,
+        Action::MakeIcon,
+        Action::FramesVideo,
         Action::Stats,
     ];
 
@@ -48,6 +55,9 @@ impl Action {
             Action::Frames => "frames",
             Action::Webp => "webp",
             Action::ConvertImage => "convert-image",
+            Action::CompressImage => "compress-image",
+            Action::MakeIcon => "make-icon",
+            Action::FramesVideo => "frames-to-video",
             Action::Stats => "stats",
         }
     }
@@ -77,6 +87,9 @@ impl Action {
             Action::Frames => t.t_frames,
             Action::Webp => t.t_webp,
             Action::ConvertImage => t.t_convert_image,
+            Action::CompressImage => t.t_compress_image,
+            Action::MakeIcon => t.t_make_icon,
+            Action::FramesVideo => t.t_frames_video,
             Action::Stats => t.t_stats,
         }
     }
