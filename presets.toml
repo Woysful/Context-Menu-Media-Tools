@@ -20,7 +20,8 @@
 #      size limit mode only:
 #      {rate}    -b:v -maxrate -bufsize (computed from the limit)   {pass}   two-pass options
 #      {seek}    -ss / -t of a chunk   {overwrite}   -n or -y
-#      {fps} {quality} {compression} {size}      WebP animation
+#      {fps} {quality} {compression} {size} {edit}      Make Anim (WebP)
+#      {fps} {size} {edit} {dither} {palette}           Make Anim (GIF)
 #
 #  `output` is the name of the result: {base} = path of the file without extension,
 #  {name} = its name, {dir} = its folder, {srcext} = its extension, {ext} = extension
@@ -849,13 +850,25 @@ merge_output = "{base} (audio merged).{srcext}"
 merge_codec = '-c:a aac -b:a 192k'
 merge_codec_webm = '-c:a libopus -b:a 160k'
 
-# ------------------------------------------------------------------ Convert to WebP animation
+# ------------------------------------------------------------------ Make Anim: animated WebP
 # size / fps / quality / compression preselect the dialog. {size} limits the SHORTER side of the picture.
+# {edit}: the filters of the editor (turn, crop, text, ...) with a trailing comma, or nothing.
 
 [webp_anim]
 size = 720
 fps = 20
 quality = 80
 compression = 5
-command = '''ffmpeg -n -i {input} -an -vf "fps={fps},scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos" -c:v libwebp -quality {quality} -compression_level {compression} -loop 0 {output}'''
+command = '''ffmpeg -n -i {input} -an -vf "fps={fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos" -c:v libwebp -quality {quality} -compression_level {compression} -loop 0 {output}'''
 output = "{base}.webp"
+
+# ------------------------------------------------------------------ Make Anim: GIF
+# The size and the frame rate are those of [webp_anim]. Two runs: palette_command finds the 256
+# colours of the whole animation ({palette}: a picture in a work folder), command uses them.
+# dither preselects the dialog: sierra2_4a | floyd_steinberg | bayer | none
+
+[gif_anim]
+dither = "sierra2_4a"
+palette_command = '''ffmpeg -y -i {input} -an -vf "fps={fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos,palettegen=stats_mode=diff" {palette}'''
+command = '''ffmpeg -n -i {input} -i {palette} -an -lavfi "[0:v]fps={fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos[x];[x][1:v]paletteuse=dither={dither}:diff_mode=rectangle" -loop 0 {output}'''
+output = "{base}.gif"

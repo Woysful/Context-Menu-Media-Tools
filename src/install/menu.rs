@@ -32,7 +32,7 @@ pub const VIDEO: &[Item] = &[
     item("04_extractAudio", Action::ExtractAudio, "audio-x-generic"),
     item("05_deleteAudio", Action::DeleteAudio, "media-track-remove-amarok"),
     item("06_makeFrames", Action::Frames, "image-x-generic"),
-    item("07_convertWebPAnim", Action::Webp, "image-webp"),
+    item("07_makeAnim", Action::Anim, "image-webp"),
     item("08_stats", Action::Stats, "documentinfo"),
 ];
 

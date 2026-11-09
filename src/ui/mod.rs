@@ -98,7 +98,8 @@ impl Env {
 pub fn run(l: Launch) -> Result<(), String> {
     let Launch { start, action, custom_id, files, cfg, tools, request, delete_original, first_kind } = l;
     let t = i18n::t();
-    let pictures = matches!(action, Action::CompressImage | Action::MakeIcon) && custom_id.is_none();
+    // Make Anim: a video turned by its rotation, as ffmpeg decodes it
+    let pictures = matches!(action, Action::CompressImage | Action::MakeIcon | Action::Anim) && custom_id.is_none();
     let infos: Vec<Info> = match (&tools, &start) {
         (Some(tools), Start::Normal) => files
             .iter()

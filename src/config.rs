@@ -161,6 +161,17 @@ pub struct WebpAnim {
     pub output: String,
 }
 
+/// Make Anim as GIF: the size and the frame rate are those of [webp_anim]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct GifAnim {
+    pub dither: String,
+    /// the first run: the palette of the whole animation into {palette}
+    pub palette_command: String,
+    pub command: String,
+    pub output: String,
+}
+
 /// An output format of Compress Image
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -293,6 +304,7 @@ pub struct Config {
     formats: [Formats; 6],
     pub delete_audio: DeleteAudio,
     pub webp: WebpAnim,
+    pub gif: GifAnim,
     pub image_compress: Vec<(String, ImageFormat)>,
     pub icon: Icon,
     pub frames_video: FramesVideo,
@@ -448,6 +460,7 @@ impl Config {
             formats: ConvertKind::ALL.map(|k| section(&root, k.section(), &mut warnings)),
             delete_audio: single(&root, "delete_audio", &mut warnings),
             webp: single(&root, "webp_anim", &mut warnings),
+            gif: single(&root, "gif_anim", &mut warnings),
             image_compress: section(&root, "image_compress", &mut warnings),
             icon: single(&root, "icon", &mut warnings),
             frames_video: single(&root, "frames_video", &mut warnings),
@@ -480,6 +493,7 @@ impl Config {
         check_command("[delete_audio] tracks_command", &self.delete_audio.tracks_command, &mut w);
         check_command("[delete_audio] merge_command", &self.delete_audio.merge_command, &mut w);
         check_command("[webp_anim]", &self.webp.command, &mut w);
+        check_command("[gif_anim]", &self.gif.command, &mut w);
         for (k, f) in &self.image_compress {
             check_command(&format!("[image_compress.{k}]"), &f.command, &mut w);
             if !f.lossless.is_empty() {
@@ -556,6 +570,8 @@ mod tests {
         assert_eq!(c.formats(ConvertKind::AudioFile).len(), 8);
         assert_eq!(c.formats(ConvertKind::Image).len(), 7);
         assert_eq!(c.webp.size, 720);
+        assert!(c.webp.command.contains("{edit}") && c.gif.command.contains("{palette}") && c.gif.palette_command.contains("palettegen"));
+        assert_eq!(c.gif.dither, "sierra2_4a");
         assert_eq!(c.compress[0].0, "h264_cpu");
         assert_eq!(c.default_format(ConvertKind::Video), Some("mp4"));
         assert_eq!(c.audio.len(), 11);

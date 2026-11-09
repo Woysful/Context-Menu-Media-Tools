@@ -50,7 +50,7 @@ On Windows 11 the items are under *Show more options*.
 | Extract Audio | MP3, AAC, Opus, WAV, M4A, MKA |
 | Delete Audio | the video without the audio tracks you untick; the kept tracks can be merged into one |
 | Make frame sequence | PNG / JPG / WebP frames in a new folder |
-| Convert to WebP anim | size, fps, quality, compression |
+| Make Anim | an animated WebP (quality, compression) or GIF (dithering), size, fps, turn and mirror; for one video, the same crop and editor as Compress Image on a frame you pick with a slider, the edits apply to the whole animation |
 | Convert Image | JPG, PNG, BMP, TIFF, GIF, WebP, TGA |
 | Compress Image | quality or a size limit in KB / MB, as the source or to JPEG, WebP, AVIF, JPEG XL, PNG (the formats your ffmpeg can make), resolution, turn and mirror; for one picture, crop it with a frame on the preview (free or 1:1, 4:3, 3:2, 16:9), also on the whole window with a magnifier; the pencil opens an editor for one picture: text with any system font, outline and background, blurred or pixelated areas, colours (brightness, contrast, saturation, vibrance, gamma, warmth, hue, shadows and highlights), sharpen, vignette and meme captions (on strips or on the picture, in any colours); shows the size of the result before you start; EXIF and GPS data are left out |
 | Make Icon | one `.ico` with the sizes you tick (16 to 256 px); a picture that is not square gets transparent borders or is cropped to its middle |
@@ -106,6 +106,7 @@ cmmt compress --cli --limit 20 --codec h265_cpu video.mp4    # no window, progre
 cmmt convert-audio --yes --format mp3 song.wav               # no options dialog
 cmmt delete-audio --cli --merge --delete-original film.mkv   # one mixed track, the original to the trash
 cmmt compress-image --cli --format webp --limit 300KB photo.jpg
+cmmt make-anim --cli --format gif --fps 15 --size 480 --top-text "TOP TEXT" clip.mp4
 cmmt frames-to-video --cli --fps 24 ~/Pictures/timelapse/
 cmmt help
 ```

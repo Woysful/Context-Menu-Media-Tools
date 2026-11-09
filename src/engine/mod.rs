@@ -53,6 +53,30 @@ pub struct ImageEdit {
     pub caption: Option<Caption>,
 }
 
+/// What Make Anim makes
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum AnimFormat {
+    #[default]
+    Webp,
+    Gif,
+}
+
+/// Make Anim: an animated WebP or GIF of a video
+#[derive(Clone, Debug, PartialEq)]
+pub struct Anim {
+    pub format: AnimFormat,
+    /// the shorter side at most
+    pub size: u32,
+    pub fps: u32,
+    /// WebP only
+    pub quality: u32,
+    pub compression: u32,
+    /// GIF only: the dither of paletteuse
+    pub dither: String,
+    /// the edits of the editor, as in Compress Image
+    pub edit: ImageEdit,
+}
+
 /// What Compress Image aims at
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ImageTarget {
@@ -90,12 +114,7 @@ pub enum Request {
         /// mix the tracks that stay into one
         merge: bool,
     },
-    Webp {
-        size: u32,
-        fps: u32,
-        quality: u32,
-        compression: u32,
-    },
+    Anim(Box<Anim>),
     CompressImage {
         /// key of [image_compress], or "source"
         format: String,
@@ -150,7 +169,8 @@ pub fn result_name(cfg: &Config, req: &Request, file: &Path) -> Option<String> {
         Request::DeleteAudio { remove: None, .. } => name(&cfg.delete_audio.output, &[]),
         Request::DeleteAudio { merge: true, .. } => name(&cfg.delete_audio.merge_output, &[]),
         Request::DeleteAudio { remove: Some(_), .. } => name(&cfg.delete_audio.tracks_output, &[]),
-        Request::Webp { .. } => name(&cfg.webp.output, &[]),
+        Request::Anim(a) if a.format == AnimFormat::Gif => name(&cfg.gif.output, &[]),
+        Request::Anim(_) => name(&cfg.webp.output, &[]),
         Request::Custom { id } => name(&cfg.settings.custom(id)?.output, &[]),
         Request::CompressImage { format, .. } => short_name(&output::unique_path(image::compressed_path(cfg, format, file)?)),
         Request::Icon { .. } => name(&cfg.icon.output, &[]),
@@ -319,7 +339,7 @@ fn process_one(job: &Job, req: &Request, file: &Path) -> Outcome<Done> {
             convert::format(job, file, &info, *what, format, f)
         }
         Request::DeleteAudio { remove, merge } => convert::delete_audio(job, file, &info, remove.as_deref(), *merge),
-        Request::Webp { size, fps, quality, compression } => convert::webp(job, file, &info, *size, *fps, *quality, *compression),
+        Request::Anim(a) => convert::anim(job, file, &info, a),
         Request::Custom { id } => {
             let c = job.cfg.settings.custom(id).ok_or_else(|| unknown(id))?;
             convert::custom(job, file, &info, c)

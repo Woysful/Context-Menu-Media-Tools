@@ -525,10 +525,11 @@ fn field_names(t: &T, key: &str) -> (String, String) {
         dv::LIMIT_CODEC => (t.codec, limit),
         dv::LIMIT_RESOLUTION => (t.resolution, limit),
         dv::LIMIT_AUDIO => (t.audio, limit),
-        dv::WEBP_SIZE => (t.webp_size, t.t_webp.to_string()),
-        dv::WEBP_FPS => (t.webp_fps, t.t_webp.to_string()),
-        dv::WEBP_QUALITY => (t.webp_quality, t.t_webp.to_string()),
-        dv::WEBP_COMPRESSION => (t.webp_compression, t.t_webp.to_string()),
+        dv::WEBP_SIZE => (t.webp_size, t.t_anim.to_string()),
+        dv::WEBP_FPS => (t.webp_fps, t.t_anim.to_string()),
+        dv::WEBP_QUALITY => (t.webp_quality, format!("{} · WebP", t.t_anim)),
+        dv::WEBP_COMPRESSION => (t.webp_compression, format!("{} · WebP", t.t_anim)),
+        dv::GIF_DITHER => (t.anim_dither, format!("{} · GIF", t.t_anim)),
         dv::DELETE_MERGE => (t.merge_kept, t.t_delete_audio.to_string()),
         dv::DELETE_ORIGINAL => (t.delete_original, ts.every_window.to_string()),
         dv::IMAGE_MODE => (ts.field_tab, t.t_compress_image.to_string()),
@@ -590,6 +591,7 @@ fn choice_options(t: &T, key: &str) -> Vec<(&'static str, &'static str)> {
     match key {
         dv::IMAGE_MODE => vec![("quality", t.img_tab_quality), ("limit", t.img_tab_limit)],
         dv::ICON_SQUARE => vec![("pad", t.icon_pad), ("crop", t.icon_crop)],
+        dv::GIF_DITHER => dv::DITHERS.into_iter().zip(t.anim_dithers).collect(),
         _ => vec![],
     }
 }

@@ -43,7 +43,7 @@ Usage: cmmt <action> [options] [files...]
 
 Actions:
   compress  convert-video  convert-audio  extract-audio  delete-audio
-  frames  webp  convert-image  compress-image  make-icon  frames-to-video  stats
+  frames  make-anim  convert-image  compress-image  make-icon  frames-to-video  stats
   settings                                               the Settings window (also: run cmmt without arguments)
   run <id> [files...]                                    an own menu item of the Settings window
   install [--kde|--gnome|--xfce|--pcmanfm|--windows] [--no-copy] [--path]   add the menu items
@@ -66,7 +66,9 @@ Options:
   --merge            compress, delete-audio: mix the audio tracks that are kept into one
   --delete-original  delete the original file after a successful result (to the trash or
                      permanently, as in Settings > General)
-  --size N --fps N --quality N --compression N          webp
+  make-anim:      --format webp|gif  --size N (the shorter side)  --fps N
+                  webp: --quality 0-100  --compression 0-6   gif: --dither sierra2_4a|floyd_steinberg|bayer|none
+                  and every edit of compress-image (--rotate, --crop, --text, ...)
   compress-image: --format source|jpg|webp|avif|jxl|png  --quality 1-100  or  --limit 500KB|2MB
                   --scale S  --rotate 90|180|270  --flip h|v|hv  --crop x,y,w,h (in % of the picture)
                   colours, -100..100: --brightness --contrast --saturation --gamma --temperature
@@ -104,6 +106,7 @@ impl Cli {
             "fps",
             "quality",
             "compression",
+            "dither",
             "rotate",
             "flip",
             "crop",
@@ -249,12 +252,26 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
             (None, true) => Request::DeleteAudio { remove: Some(vec![]), merge: true },
             (remove, merge) => Request::DeleteAudio { remove, merge },
         },
-        Action::Webp => Request::Webp {
-            size: num("size", cfg.webp.size),
-            fps: num("fps", cfg.webp.fps),
-            quality: num("quality", cfg.webp.quality),
-            compression: num("compression", cfg.webp.compression),
-        },
+        Action::Anim => {
+            let format = match cli.opt("format").unwrap_or("webp") {
+                "webp" => engine::AnimFormat::Webp,
+                "gif" => engine::AnimFormat::Gif,
+                other => return Err(format!("bad --format: {other} (webp or gif)")),
+            };
+            let dither = cli.opt("dither").unwrap_or(&cfg.gif.dither).to_string();
+            if !defaults::DITHERS.contains(&dither.as_str()) {
+                return Err(format!("bad --dither: {dither}"));
+            }
+            Request::Anim(Box::new(engine::Anim {
+                format,
+                size: num("size", cfg.webp.size),
+                fps: num("fps", cfg.webp.fps),
+                quality: num("quality", cfg.webp.quality),
+                compression: num("compression", cfg.webp.compression),
+                dither,
+                edit: edit_from(cli)?,
+            }))
+        }
         _ => return Err(format!("{} has no options", action.cli_name())),
     })
 }
@@ -270,6 +287,12 @@ fn image_request(cli: &Cli, cfg: &Config, scale: ScaleMode) -> Result<Request, S
         (None, Some(q)) => engine::ImageTarget::Quality(q.parse().ok().filter(|v| (1..=100).contains(v)).ok_or_else(|| format!("bad --quality: {q}"))?),
         (None, None) => engine::ImageTarget::Quality(80),
     };
+    let scale = if scale == ScaleMode::Auto { ScaleMode::Orig } else { scale };
+    Ok(Request::CompressImage { format, target, scale, edit: Box::new(edit_from(cli)?) })
+}
+
+/// The turn, the mirror, the crop and the other edits of the options
+fn edit_from(cli: &Cli) -> Result<engine::ImageEdit, String> {
     let turns = match cli.opt("rotate").unwrap_or("0") {
         "0" => 0,
         "90" => 1,
@@ -293,8 +316,7 @@ fn image_request(cli: &Cli, cfg: &Config, scale: ScaleMode) -> Result<Request, S
     };
     let mut edit = engine::ImageEdit { turns, flip_h: flip.contains('h'), flip_v: flip.contains('v'), crop, ..Default::default() };
     edit_options(cli, &mut edit)?;
-    let scale = if scale == ScaleMode::Auto { ScaleMode::Orig } else { scale };
-    Ok(Request::CompressImage { format, target, scale, edit: Box::new(edit) })
+    Ok(edit)
 }
 
 /// "50,90" or "50%,90%" -> numbers

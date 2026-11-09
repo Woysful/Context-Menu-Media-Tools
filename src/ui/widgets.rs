@@ -736,24 +736,47 @@ pub fn slider_row<N: egui::emath::Numeric + std::fmt::Display>(ui: &mut egui::Ui
         if secondary {
             *value = before;
         }
-        match k.look {
-            Look::Classic => {
-                ui.label(RichText::new(value.to_string()).monospace());
-            }
-            Look::Brutal => {
-                let (rect, _) = ui.allocate_exact_size(vec2(44.0, 22.0), Sense::hover());
-                ui.painter().rect(rect, 0.0, k.bg, Stroke::new(1.0_f32, k.border));
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, format!("{:03}", *value), FontId::new(12.0, bold_family()), k.text);
-            }
-            Look::Y2k => {
-                let (rect, _) = ui.allocate_exact_size(vec2(46.0, 22.0), Sense::hover());
-                paint::cut_rect(ui.painter(), rect, 5.0, DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border));
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, value.to_string(), FontId::new(13.0, tech_family()), k.accent);
-            }
-        }
+        value_tag(ui, &if k.look == Look::Brutal { format!("{:03}", *value) } else { value.to_string() });
         r
     })
     .inner
+}
+
+/// The font of the value at the right of a slider
+fn value_font(look: Look) -> Option<FontId> {
+    match look {
+        Look::Classic => None,
+        Look::Brutal => Some(FontId::new(12.0, bold_family())),
+        Look::Y2k => Some(FontId::new(13.0, tech_family())),
+    }
+}
+
+/// The width `value_tag` takes for `text`
+pub fn value_tag_width(ui: &egui::Ui, text: &str) -> f32 {
+    let font = value_font(c().look).unwrap_or_else(|| egui::TextStyle::Monospace.resolve(ui.style()));
+    let w = text_width(ui.ctx(), text, font);
+    match c().look {
+        Look::Classic => w,
+        Look::Brutal => w.max(32.0) + 12.0,
+        Look::Y2k => w.max(32.0) + 14.0,
+    }
+}
+
+/// The value at the right of a slider, in the box of the look
+pub fn value_tag(ui: &mut egui::Ui, text: &str) {
+    let k = c();
+    let Some(font) = value_font(k.look) else {
+        ui.label(RichText::new(text).monospace());
+        return;
+    };
+    let (rect, _) = ui.allocate_exact_size(vec2(value_tag_width(ui, text), 22.0), Sense::hover());
+    if k.look == Look::Brutal {
+        ui.painter().rect(rect, 0.0, k.bg, Stroke::new(1.0_f32, k.border));
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, font, k.text);
+    } else {
+        paint::cut_rect(ui.painter(), rect, 5.0, DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border));
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, font, k.accent);
+    }
 }
 
 /// The crop marks in the corners of a window (Brutalist)

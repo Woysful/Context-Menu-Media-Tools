@@ -1,11 +1,11 @@
 //! The options forms of the actions, and the size of their windows.
 
 use super::dropdown::{build_groups, codec_combo, dropdown, need_id, Col, Group};
-use super::image_forms::{FramesForm, IconForm, ImageForm};
+use super::image_forms::{AnimForm, FramesForm, IconForm, ImageForm};
 use super::scale_field::ScaleField;
 use super::widgets::{
     button_row, card, field, file_name, fit_name, fit_name_in, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button,
-    segmented, slider_row, tagged_card, text_width, title, window, MARGIN,
+    segmented, tagged_card, text_width, title, window, MARGIN,
 };
 use super::Env;
 use crate::action::Action;
@@ -51,13 +51,6 @@ pub struct DeleteForm {
     merge: bool,
 }
 
-pub struct WebpForm {
-    size_text: String,
-    fps_text: String,
-    quality: u32,
-    compression: u32,
-}
-
 /// The fields of the action and "Delete the original"
 pub struct Form {
     fields: Fields,
@@ -72,8 +65,10 @@ impl Form {
     /// The form of the window on the screen (one that is measured loads and estimates nothing)
     pub fn start(env: &Env) -> Form {
         let mut form = Form::new(env);
-        if let Fields::Image(f) = &mut form.fields {
-            f.live = true;
+        match &mut form.fields {
+            Fields::Image(f) => f.ed.live = true,
+            Fields::Anim(f) => f.ed.live = true,
+            _ => {}
         }
         form
     }
@@ -82,7 +77,7 @@ impl Form {
 pub enum Fields {
     Compress(Box<CompressForm>),
     Format(FormatForm),
-    Webp(WebpForm),
+    Anim(Box<AnimForm>),
     DeleteAudio(DeleteForm),
     Image(Box<ImageForm>),
     Icon(IconForm),
@@ -91,7 +86,7 @@ pub enum Fields {
     Confirm(Request),
 }
 
-fn parse_in(text: &str, lo: u32, hi: u32) -> Option<u32> {
+pub(super) fn parse_in(text: &str, lo: u32, hi: u32) -> Option<u32> {
     text.trim().parse::<u32>().ok().filter(|v| (lo..=hi).contains(v))
 }
 
@@ -123,12 +118,7 @@ impl Fields {
                 tracks: track_list(env),
                 merge: dv::flag(cfg, dv::MERGE),
             })),
-            Action::Webp => Fields::Webp(WebpForm {
-                size_text: d(dv::WEBP_SIZE),
-                fps_text: d(dv::WEBP_FPS),
-                quality: d(dv::WEBP_QUALITY).parse().unwrap_or(cfg.webp.quality),
-                compression: d(dv::WEBP_COMPRESSION).parse().unwrap_or(cfg.webp.compression),
-            }),
+            Action::Anim => Fields::Anim(Box::new(AnimForm::new(env))),
             Action::CompressImage => Fields::Image(Box::new(ImageForm::new(env))),
             Action::MakeIcon => Fields::Icon(IconForm::new(env)),
             Action::FramesVideo => Fields::Frames(FramesForm::new(env)),
@@ -150,7 +140,7 @@ impl Fields {
                 }
                 Some(Request::Convert { what: f.what, format: f.selected.clone() })
             }
-            Fields::Webp(f) => f.ui(ui, env, delete_original),
+            Fields::Anim(f) => f.ui(ui, env, delete_original),
             Fields::DeleteAudio(f) => f.ui(ui, env),
             Fields::Image(f) => f.ui(ui, env, delete_original),
             Fields::Icon(f) => f.ui(ui, env, delete_original),
@@ -240,7 +230,7 @@ impl DeleteForm {
 }
 
 /// A number field as high as the other controls, like "Size limit … MB" of Compress Video
-fn small_number(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &str) -> egui::Response {
+pub(super) fn small_number(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &str) -> egui::Response {
     ui.horizontal(|ui| {
         let r = ui.add(line_edit(text, 64.0, valid));
         if !suffix.is_empty() {
@@ -272,55 +262,6 @@ pub(super) fn original_check(ui: &mut egui::Ui, env: &Env, on: &mut bool, text: 
         .inner;
     if let Some(v) = default_menu(&r, env, dv::DELETE_ORIGINAL, Some(bool_text(*on))) {
         *on = v == "true";
-    }
-}
-
-impl WebpForm {
-    /// Rows like those of Compress Video: the name at the left, the control and a line about it
-    fn ui(&mut self, ui: &mut egui::Ui, env: &Env, delete_original: &mut bool) -> Option<Request> {
-        let t = env.t;
-        let size = parse_in(&self.size_text, 64, 4320);
-        let fps = parse_in(&self.fps_text, 1, 120);
-        let r = form_row(ui, t.webp_size, |ui| {
-            let r = small_number(ui, &mut self.size_text, size.is_some(), "px");
-            one_line(ui, t.webp_size_hint, muted());
-            r
-        });
-        if let Some(v) = default_menu(&r, env, dv::WEBP_SIZE, size.map(|v| v.to_string()).as_deref()) {
-            self.size_text = v;
-        }
-        let r = form_row(ui, t.webp_fps, |ui| {
-            let r = small_number(ui, &mut self.fps_text, fps.is_some(), "fps");
-            one_line(ui, t.webp_fps_hint, muted());
-            r
-        });
-        if let Some(v) = default_menu(&r, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
-            self.fps_text = v;
-        }
-        let r = form_row(ui, t.webp_quality, |ui| {
-            let r = slider_row(ui, &mut self.quality, 0..=100);
-            one_line(ui, t.webp_quality_hint, muted());
-            r
-        });
-        if let Some(v) = default_menu(&r, env, dv::WEBP_QUALITY, Some(&self.quality.to_string())) {
-            self.quality = v.parse().unwrap_or(self.quality);
-        }
-        let r = form_row(ui, t.webp_compression, |ui| {
-            let r = slider_row(ui, &mut self.compression, 0..=6);
-            one_line(ui, t.webp_compression_hint, muted());
-            r
-        });
-        if let Some(v) = default_menu(&r, env, dv::WEBP_COMPRESSION, Some(&self.compression.to_string())) {
-            self.compression = v.parse().unwrap_or(self.compression);
-        }
-        form_row(ui, t.original, |ui| original_check(ui, env, delete_original, t.delete_after));
-        let (size, fps) = (parse_in(&self.size_text, 64, 4320), parse_in(&self.fps_text, 1, 120));
-        let req = match (size, fps) {
-            (Some(size), Some(fps)) => Some(Request::Webp { size, fps, quality: self.quality, compression: self.compression }),
-            _ => None,
-        };
-        result_row(ui, env, req.as_ref());
-        req
     }
 }
 
@@ -640,11 +581,13 @@ fn results(ui: &mut egui::Ui, env: &Env, req: &Request) {
 
 /// The content of a form window: what the files are, problems of the config, the fields
 fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
-    if let Fields::Image(f) = &mut form.fields {
-        // the content scrolls: its top here and the height of the view give the bottom of
-        // what is seen without scrolling, wherever it is scrolled to
-        let view = ui.clip_rect().height() - 2.0 * ui.visuals().clip_rect_margin;
-        f.view_bottom = Some(ui.cursor().top() + view);
+    // the content scrolls: its top here and the height of the view give the bottom of what is
+    // seen without scrolling, wherever it is scrolled to
+    let view_bottom = ui.cursor().top() + ui.clip_rect().height() - 2.0 * ui.visuals().clip_rect_margin;
+    match &mut form.fields {
+        Fields::Image(f) => f.ed.view_bottom = Some(view_bottom),
+        Fields::Anim(f) => f.ed.view_bottom = Some(view_bottom),
+        _ => {}
     }
     header(ui, env);
     for w in &env.cfg.warnings {
@@ -652,7 +595,7 @@ fn content(ui: &mut egui::Ui, env: &Env, form: &mut Form) -> Option<Request> {
     }
     ui.add_space(14.0);
     let req = form.fields.ui(ui, env, &mut form.delete_original);
-    if !matches!(form.fields, Fields::Compress(_) | Fields::Webp(_) | Fields::Image(_) | Fields::Icon(_) | Fields::Frames(_)) {
+    if !matches!(form.fields, Fields::Compress(_) | Fields::Anim(_) | Fields::Image(_) | Fields::Icon(_) | Fields::Frames(_)) {
         ui.add_space(2.0);
         original_check(ui, env, &mut form.delete_original, env.t.delete_original);
         if let Some(r) = &req {
@@ -690,11 +633,14 @@ pub struct Shown {
 /// Draw a form window. `valid`: whether the form was valid in the frame before (the buttons
 /// are drawn before the fields)
 pub fn show(ctx: &egui::Context, env: &Env, form: &mut Form, valid: bool) -> Shown {
-    if let Fields::Image(f) = &mut form.fields {
-        if f.big {
-            f.crop_window(ctx, env);
-            return Shown { request: None, delete_original: form.delete_original, start: false, cancel: false, cropping: true };
-        }
+    let editor = match &mut form.fields {
+        Fields::Image(f) => Some(&mut f.ed),
+        Fields::Anim(f) => Some(&mut f.ed),
+        _ => None,
+    };
+    if let Some(ed) = editor.filter(|ed| ed.big) {
+        ed.crop_window(ctx, env);
+        return Shown { request: None, delete_original: form.delete_original, start: false, cancel: false, cropping: true };
     }
     let mut pressed = (false, false);
     let (request, _) = window(ctx, true, |ui| pressed = buttons(ui, env.t, valid), |ui| content(ui, env, form));
@@ -715,6 +661,16 @@ fn measured_forms(env: &Env) -> Vec<Form> {
                 }
                 f.merge = merge;
                 out.push(with(Fields::DeleteAudio(f)));
+            }
+        }
+        return out;
+    }
+    if let Fields::Anim(_) = Fields::new(env) {
+        let mut out = Vec::new();
+        for format in 0..2usize {
+            if let Fields::Anim(mut f) = Fields::new(env) {
+                f.format = format;
+                out.push(with(Fields::Anim(f)));
             }
         }
         return out;
@@ -759,18 +715,19 @@ pub fn measure(env: &Env) -> (f32, f32) {
     }
     let min_w = match (env.action, env.custom_id.is_some()) {
         (Action::Compress, false) => 480.0,
-        (Action::Webp, false) => 480.0,
-        (Action::CompressImage, false) if env.files.len() == 1 => {
+        (Action::CompressImage | Action::Anim, false) if env.files.len() == 1 => {
             super::image_forms::FIELDS_W + super::image_forms::GAP + 2.0 * MARGIN + super::image_forms::preview_width(env)
         }
         (Action::CompressImage | Action::FramesVideo | Action::MakeIcon, false) => 520.0,
+        (Action::Anim, false) => 480.0,
         _ => 440.0,
     };
     // long names are cut to the width, only the line about the file widens the window
     let text_w = env.infos.iter().map(|i| text_width(&ctx, &media::describe(i, env.t.audio_word), FontId::proportional(11.5))).fold(0.0, f32::max);
     // the card adds its margins and border
     // the picture of Compress Image takes what is left, the window does not grow for the line
-    let max_w = if env.action == Action::CompressImage && env.custom_id.is_none() && env.files.len() == 1 { min_w } else { 960.0_f32.max(min_w) };
+    let pictured = matches!(env.action, Action::CompressImage | Action::Anim) && env.custom_id.is_none() && env.files.len() == 1;
+    let max_w = if pictured { min_w } else { 960.0_f32.max(min_w) };
     let width = (text_w + 2.0 * MARGIN + 2.0 * 13.0 + 6.0).clamp(min_w, max_w);
 
     let mut height: f32 = 0.0;

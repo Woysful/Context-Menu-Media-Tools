@@ -13,7 +13,8 @@ pub enum Action {
     ExtractAudio,
     DeleteAudio,
     Frames,
-    Webp,
+    /// A video into an animated WebP or GIF
+    Anim,
     ConvertImage,
     CompressImage,
     MakeIcon,
@@ -31,7 +32,7 @@ impl Action {
         Action::ExtractAudio,
         Action::DeleteAudio,
         Action::Frames,
-        Action::Webp,
+        Action::Anim,
         Action::ConvertImage,
         Action::CompressImage,
         Action::MakeIcon,
@@ -41,8 +42,16 @@ impl Action {
 
     pub fn from_cli(name: &str) -> Option<Action> {
         // the menus of an install before the rename call the old name until the next install
-        let name = if name == "delete-sound" { "delete-audio" } else { name };
-        Action::ALL.into_iter().find(|a| a.cli_name() == name)
+        Action::ALL.into_iter().find(|a| a.cli_name() == name || a.old_cli_name() == Some(name))
+    }
+
+    /// The name before a rename (menus and settings of older versions use it)
+    pub fn old_cli_name(self) -> Option<&'static str> {
+        match self {
+            Action::DeleteAudio => Some("delete-sound"),
+            Action::Anim => Some("webp"),
+            _ => None,
+        }
     }
 
     pub fn cli_name(self) -> &'static str {
@@ -53,7 +62,7 @@ impl Action {
             Action::ExtractAudio => "extract-audio",
             Action::DeleteAudio => "delete-audio",
             Action::Frames => "frames",
-            Action::Webp => "webp",
+            Action::Anim => "make-anim",
             Action::ConvertImage => "convert-image",
             Action::CompressImage => "compress-image",
             Action::MakeIcon => "make-icon",
@@ -85,7 +94,7 @@ impl Action {
             Action::ExtractAudio => t.t_extract_audio,
             Action::DeleteAudio => t.t_delete_audio,
             Action::Frames => t.t_frames,
-            Action::Webp => t.t_webp,
+            Action::Anim => t.t_anim,
             Action::ConvertImage => t.t_convert_image,
             Action::CompressImage => t.t_compress_image,
             Action::MakeIcon => t.t_make_icon,
@@ -106,5 +115,6 @@ mod tests {
         }
         assert_eq!(Action::from_cli("nope"), None);
         assert_eq!(Action::from_cli("delete-sound"), Some(Action::DeleteAudio));
+        assert_eq!(Action::from_cli("webp"), Some(Action::Anim));
     }
 }

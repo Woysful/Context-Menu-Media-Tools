@@ -3,7 +3,7 @@
 //! ffmpeg makes of the edits, made in the background a moment after the last change.
 
 use super::{crop_rect, form_row, grip, hint, muted, one_line, primary_button, secondary_button, segmented, slider_row, Grip};
-use super::{Drag, Env, ImageForm, T};
+use super::{Drag, Editor, Env, T};
 use crate::engine::{self, BlurArea, BlurKind, Caption, ImageEdit, TextMark, Upto};
 use crate::fonts::{self, FontFile};
 use crate::theme::{c, Look, CONTROL_H};
@@ -72,10 +72,10 @@ pub struct Render {
 }
 
 impl Render {
-    /// The texture of `edit` (up to `upto`) on the preview picture of `src` (not turned); the one
-    /// made before while the new one is made, None before the first
-    fn texture(&mut self, ctx: &egui::Context, env: &Env, edit: &ImageEdit, upto: Upto, src: (u32, u32)) -> Option<TextureHandle> {
-        let key = format!("{upto:?} {src:?} {edit:?}");
+    /// The texture of `edit` (up to `upto`) on the preview picture of `src` (not turned), of the
+    /// frame at `at` of a video; the one made before while the new one is made, None before the first
+    fn texture(&mut self, ctx: &egui::Context, env: &Env, edit: &ImageEdit, upto: Upto, src: (u32, u32), at: Option<f64>) -> Option<TextureHandle> {
+        let key = format!("{upto:?} {src:?} {at:?} {edit:?}");
         if let Some((k, r)) = self.slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
             match r {
                 Ok(image) => {
@@ -108,7 +108,7 @@ impl Render {
                     self.busy.store(true, Ordering::SeqCst);
                     let (slot, busy, ctx) = (self.slot.clone(), self.busy.clone(), ctx.clone());
                     std::thread::spawn(move || {
-                        let r = render(&tools, &file, src, &filters, size);
+                        let r = render(&tools, &file, src, &filters, size, at);
                         *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, r));
                         busy.store(false, Ordering::SeqCst);
                         ctx.request_repaint();
@@ -122,8 +122,9 @@ impl Render {
     }
 }
 
-/// The picture scaled to `src` as the preview is, with `filters`; it comes out `out` large
-fn render(tools: &super::super::Tools, file: &Path, src: (u32, u32), filters: &[String], out: (u32, u32)) -> Result<ColorImage, String> {
+/// The picture (the frame at `at` of a video) scaled to `src` as the preview is, with `filters`;
+/// it comes out `out` large
+fn render(tools: &super::super::Tools, file: &Path, src: (u32, u32), filters: &[String], out: (u32, u32), at: Option<f64>) -> Result<ColorImage, String> {
     let mut vf = format!("scale={}:{}:flags=bicubic", src.0, src.1);
     for f in filters {
         vf.push(',');
@@ -131,7 +132,9 @@ fn render(tools: &super::super::Tools, file: &Path, src: (u32, u32), filters: &[
     }
     vf.push_str(",format=rgba");
     let r = crate::proc::command(&tools.ffmpeg)
-        .args(["-v", "error", "-i"])
+        .args(["-v", "error"])
+        .args(super::seek_args(at))
+        .arg("-i")
         .arg(file)
         .args(["-frames:v", "1", "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
         .output()
@@ -332,7 +335,7 @@ enum Item {
     Caption,
 }
 
-impl ImageForm {
+impl Editor {
     /// The size of the preview picture as it was loaded (not turned)
     fn src_size(&self, base: &TextureHandle) -> (u32, u32) {
         let [w, h] = base.size().map(|v| v as u32);
@@ -352,7 +355,7 @@ impl ImageForm {
             return base.clone();
         }
         let src = self.src_size(base);
-        self.work.texture(ctx, env, &e, Upto::Crop, src).filter(|t| t.size() == base.size()).unwrap_or_else(|| base.clone())
+        self.work.texture(ctx, env, &e, Upto::Crop, src, self.seek()).filter(|t| t.size() == base.size()).unwrap_or_else(|| base.clone())
     }
 
     /// The result in `room`: cropped, with every edit (the crop of the plain picture until
@@ -363,7 +366,7 @@ impl ImageForm {
         let [bw, bh] = base.size().map(|v| v as f32);
         let expected = engine::build_edit(&e, Some(src), Upto::All).ok().and_then(|b| b.size);
         let only_crop = e == ImageEdit { turns: e.turns, flip_h: e.flip_h, crop: e.crop, ..Default::default() };
-        let made = if only_crop { None } else { self.result.texture(ctx, env, &e, Upto::All, src) };
+        let made = if only_crop { None } else { self.result.texture(ctx, env, &e, Upto::All, src, self.seek()) };
         let made = made.filter(|t| expected.is_some_and(|(w, h)| t.size() == [w as usize, h as usize]));
         let [x, y, w, h] = e.crop.unwrap_or([0.0, 0.0, 1.0, 1.0]).map(|v| v as f32);
         let (id, uv, size) = match &made {

@@ -1,14 +1,16 @@
 //! The actions that run one command per file: Convert *, Extract Audio, frames, Delete
-//! Audio, WebP animation and the own items.
+//! Audio, Make Anim and the own items.
 
-use super::compress::merge_maps;
+use super::compress::{merge_maps, scale_val};
+use super::image::file_filters;
 use super::output::{base_of, ensure_parent, named, new_file, short_name, unique_path};
-use super::runner::{run_template, Track};
-use super::{ConvertKind, Done, Job, Outcome};
+use super::runner::{run_template, TempDir, Track};
+use super::{Anim, AnimFormat, ConvertKind, Done, Job, Outcome};
 use crate::cmdline::{self, Val};
 use crate::config::Format;
 use crate::i18n;
 use crate::media::Info;
+use crate::scale::ScaleMode;
 use crate::settings::Custom;
 use crate::units::fmt_mb;
 use std::path::{Path, PathBuf};
@@ -80,23 +82,69 @@ pub(super) fn delete_audio(job: &Job, file: &Path, info: &Info, remove: Option<&
     Ok(arrow(file, &output))
 }
 
-pub(super) fn webp(job: &Job, file: &Path, info: &Info, size: u32, fps: u32, quality: u32, compression: u32) -> Outcome<Done> {
-    let w = &job.cfg.webp;
-    let output = new_file(&w.output, file, &[]);
-    let extra = vec![
-        ("size", Val::S(size.to_string())),
-        ("fps", Val::S(fps.to_string())),
-        ("quality", Val::S(quality.to_string())),
-        ("compression", Val::S(compression.to_string())),
+/// A command of an older presets.toml has no {edit}: the edits go after its fps filter
+fn with_edit(command: &str) -> Option<String> {
+    if command.contains("{edit}") {
+        return Some(command.to_string());
+    }
+    command.contains("fps={fps},").then(|| command.replacen("fps={fps},", "fps={fps},{edit}", 1))
+}
+
+/// Make Anim: an animated WebP, or a GIF in two runs (its palette, then the GIF)
+pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Done> {
+    let chain = file_filters(job, file, &a.edit, ScaleMode::Orig)?;
+    let (section, command, output) = match a.format {
+        AnimFormat::Webp => ("[webp_anim]", &job.cfg.webp.command, &job.cfg.webp.output),
+        AnimFormat::Gif => ("[gif_anim]", &job.cfg.gif.command, &job.cfg.gif.output),
+    };
+    let fixed = |command: &str| match with_edit(command) {
+        Some(c) => c,
+        None => {
+            if !chain.is_empty() {
+                job.prog.warn(format!("{section}: {}", i18n::t().anim_no_edit));
+            }
+            command.to_string()
+        }
+    };
+    let output = new_file(output, file, &[]);
+    let mut extra = vec![
+        ("size", Val::S(a.size.to_string())),
+        ("fps", Val::S(a.fps.to_string())),
+        ("quality", Val::S(a.quality.to_string())),
+        ("compression", Val::S(a.compression.to_string())),
+        ("dither", Val::S(a.dither.clone())),
+        ("edit", scale_val(&chain)),
     ];
-    run(job, &w.command, file, &output, extra, info.duration)?;
+    if a.format == AnimFormat::Gif {
+        let work = TempDir::new()?;
+        let palette = work.path().join("palette.png");
+        extra.push(("palette", path_val(&palette)));
+        let mut vars = vec![("input", path_val(file)), ("output", path_val(&output))];
+        vars.extend(extra);
+        let part = |from: f64, to: f64| info.duration.map_or(Track::at(from), |d| Track::part(d, from, to));
+        run_template(job, &fixed(&job.cfg.gif.palette_command), &vars, false, part(0.0, 0.2), None)?;
+        run_template(job, &fixed(command), &vars, false, part(0.2, 1.0), None)?;
+    } else {
+        run(job, &fixed(command), file, &output, extra, info.duration)?;
+    }
     let bytes = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
     Ok(Done::new(format!("{} → {} ({})", short_name(file), short_name(&output), fmt_mb(bytes)), &output))
 }
-
 /// An own item. It has no resolution choice, so {vf} and {scale} are empty.
 pub(super) fn custom(job: &Job, file: &Path, info: &Info, c: &Custom) -> Outcome<Done> {
     let output = new_file(&c.output, file, &[]);
     run(job, &c.command, file, &output, vec![("vf", Val::L(vec![])), ("scale", Val::s(""))], info.duration)?;
     Ok(arrow(file, &output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_edit;
+
+    #[test]
+    fn old_commands_get_the_edits_after_the_fps() {
+        assert_eq!(with_edit("ffmpeg -vf \"fps={fps},scale=1:1\" {output}").unwrap(), "ffmpeg -vf \"fps={fps},{edit}scale=1:1\" {output}");
+        assert_eq!(with_edit("a {edit}b").unwrap(), "a {edit}b");
+        assert_eq!(with_edit("ffmpeg -vf scale=1:1 {output}"), None);
+    }
 }

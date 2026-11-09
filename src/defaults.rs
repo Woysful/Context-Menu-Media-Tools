@@ -20,6 +20,7 @@ pub const WEBP_SIZE: &str = "webp.size";
 pub const WEBP_FPS: &str = "webp.fps";
 pub const WEBP_QUALITY: &str = "webp.quality";
 pub const WEBP_COMPRESSION: &str = "webp.compression";
+pub const GIF_DITHER: &str = "gif.dither";
 pub const DELETE_MERGE: &str = "delete_audio.merge";
 pub const IMAGE_MODE: &str = "image.mode";
 pub const IMAGE_FORMAT: &str = "image.format";
@@ -38,6 +39,8 @@ pub const DELETE_ORIGINAL: &str = "original.delete";
 pub const LEVELS: [&str; 3] = ["low", "medium", "high"];
 /// The tabs of Compress Image
 pub const IMAGE_MODES: [&str; 2] = ["quality", "limit"];
+/// The dithers of a GIF of Make Anim, in the order of the window
+pub const DITHERS: [&str; 4] = ["sierra2_4a", "floyd_steinberg", "bayer", "none"];
 /// The shapes of Make Icon
 pub const SQUARES: [&str; 2] = ["pad", "crop"];
 
@@ -103,6 +106,7 @@ pub fn fields() -> Vec<(String, Kind)> {
             (WEBP_FPS, Kind::Number { lo: 1, hi: 120 }),
             (WEBP_QUALITY, Kind::Number { lo: 0, hi: 100 }),
             (WEBP_COMPRESSION, Kind::Number { lo: 0, hi: 6 }),
+            (GIF_DITHER, Kind::Choice(&DITHERS)),
             (DELETE_MERGE, Kind::Flag),
             (IMAGE_MODE, Kind::Choice(&IMAGE_MODES)),
             (IMAGE_FORMAT, Kind::ImageFormat),
@@ -148,6 +152,7 @@ pub fn standard(cfg: &Config, key: &str) -> String {
         WEBP_FPS => cfg.webp.fps.to_string(),
         WEBP_QUALITY => cfg.webp.quality.to_string(),
         WEBP_COMPRESSION => cfg.webp.compression.to_string(),
+        GIF_DITHER => s(&cfg.gif.dither),
         _ => match kind_of(key) {
             Some(Kind::Format(k)) => cfg.default_format(k).unwrap_or_default().to_string(),
             _ => String::new(),

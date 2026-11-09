@@ -1,13 +1,18 @@
-//! The forms of Compress Image, Make Icon and Frames to Video. Compress Image of one picture
-//! shows it at the right: turned and mirrored as it will be, with a frame to crop it.
+//! The forms of Compress Image, Make Anim, Make Icon and Frames to Video. Compress Image of one
+//! picture (and Make Anim of one video) shows it at the right: turned and mirrored as it will be,
+//! with a frame to crop it and the editor.
 
+mod anim;
 mod tools;
+
+pub use anim::AnimForm;
 
 use super::dropdown::{build_groups, codec_combo, Group};
 use super::forms::{default_menu, original_check, result_row_with};
 use super::scale_field::ScaleField;
 use super::widgets::{
-    button_row, card, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button, segmented, slider_row, title, window,
+    button_row, card, form_row, hint, line_edit, muted, one_line, option_grid, primary_button, secondary_button, segmented, slider_row, title, value_tag,
+    value_tag_width, window,
 };
 use super::Env;
 use crate::defaults::{self as dv, IMAGE_MODES, LEVELS, SQUARES};
@@ -81,9 +86,9 @@ impl Picture {
     }
 }
 
-/// The first frame of `file`, its longest side at most `max_px`; `turn`: turned (quarters
-/// clockwise) and mirrored by ffmpeg
-fn load_picture(tools: &super::Tools, file: &Path, max_px: u32, turn: Option<(u8, bool)>) -> Result<Picture, String> {
+/// The first frame of `file` (of a video: the frame at `at` seconds), its longest side at most
+/// `max_px`; `turn`: turned (quarters clockwise) and mirrored by ffmpeg
+fn load_picture(tools: &super::Tools, file: &Path, max_px: u32, turn: Option<(u8, bool)>, at: Option<f64>) -> Result<Picture, String> {
     let full = media::picture_size(&tools.ffprobe, file).ok_or_else(|| "ffprobe".to_string())?;
     let s = (max_px as f64 / full.0.max(full.1) as f64).min(1.0);
     let (w, h) = (((full.0 as f64 * s).round() as usize).max(1), ((full.1 as f64 * s).round() as usize).max(1));
@@ -100,7 +105,9 @@ fn load_picture(tools: &super::Tools, file: &Path, max_px: u32, turn: Option<(u8
     }
     vf.push_str(",format=rgba");
     let out = crate::proc::command(&tools.ffmpeg)
-        .args(["-v", "error", "-i"])
+        .args(["-v", "error"])
+        .args(seek_args(at))
+        .arg("-i")
         .arg(file)
         .args(["-frames:v", "1", "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
         .output()
@@ -113,80 +120,124 @@ fn load_picture(tools: &super::Tools, file: &Path, max_px: u32, turn: Option<(u8
     Ok(Picture { rgba: Arc::new(out.stdout), w, h, full })
 }
 
+/// "-ss 3.200" before the input: ffmpeg decodes from the key frame before and shows the frame at
+/// that time
+fn seek_args(at: Option<f64>) -> Vec<String> {
+    match at.filter(|t| *t > 0.0) {
+        Some(t) => vec!["-ss".into(), format!("{t:.3}")],
+        None => vec![],
+    }
+}
+
 /// The texture of the preview and the size of the turned picture, or why there is none
 type Shown = Result<(TextureHandle, (u32, u32)), String>;
 /// An estimate: what it was made for and the size
 type Estimated = Option<(String, Result<u64, String>)>;
+/// A frame that was loaded: its time and the picture
+type Loaded = Option<(f64, Result<Picture, String>)>;
+/// A texture of the preview: the quarter turns and the mirror it was made for, the size of the
+/// turned picture, the time of the frame
+type Texture = (TextureHandle, u8, bool, (u32, u32), f64);
 
 #[derive(Default)]
 struct Preview {
-    slot: Arc<Mutex<Option<Result<Picture, String>>>>,
-    started: bool,
-    /// the texture of the picture as it is turned now
-    shown: Option<(TextureHandle, u8, bool, (u32, u32))>,
+    slot: Arc<Mutex<Loaded>>,
+    busy: Arc<AtomicBool>,
+    /// the time of the frame that was asked for last, and when it was chosen
+    asked: Option<f64>,
+    changed: Option<(f64, Instant)>,
+    picture: Loaded,
+    /// the texture of the picture as it is turned now, of the frame at its time
+    shown: Option<Texture>,
 }
 
 impl Preview {
-    fn start(&mut self, env: &Env, ctx: &egui::Context) {
+    /// Loads the picture, or the frame at `at` of a video (a moment after the last change of
+    /// the time, the frame before stays until then)
+    fn update(&mut self, env: &Env, ctx: &egui::Context, at: Option<f64>) {
+        if let Some(r) = self.slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            self.picture = Some(r);
+        }
+        let time = at.unwrap_or(0.0);
+        if self.asked == Some(time) {
+            return;
+        }
+        if self.changed.is_none_or(|(t, _)| t != time) {
+            self.changed = Some((time, Instant::now()));
+        }
+        let since = self.changed.map_or(Duration::ZERO, |(_, at)| at.elapsed());
+        let wait = if self.asked.is_none() { Duration::ZERO } else { Duration::from_millis(80) };
+        if self.busy.load(Ordering::SeqCst) {
+            ctx.request_repaint_after(Duration::from_millis(30));
+            return;
+        }
+        if since < wait {
+            ctx.request_repaint_after(wait - since);
+            return;
+        }
         let (Some(tools), Some(file)) = (env.tools.clone(), env.files.first().cloned()) else { return };
-        self.started = true;
-        let (slot, ctx) = (self.slot.clone(), ctx.clone());
+        self.asked = Some(time);
+        self.busy.store(true, Ordering::SeqCst);
+        let (slot, busy, ctx) = (self.slot.clone(), self.busy.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let r = load_picture(&tools, &file, PREVIEW_PX, None);
-            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
+            let r = load_picture(&tools, &file, PREVIEW_PX, None, at);
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((time, r));
+            busy.store(false, Ordering::SeqCst);
             ctx.request_repaint();
         });
     }
 
-    /// The texture for this turn (made again when the turn changed); Err: why there is none
+    /// The texture for this turn (made again when the turn or the frame changed); Err: why
+    /// there is none
     fn texture(&mut self, ctx: &egui::Context, turns: u8, mirrored: bool) -> Option<Shown> {
-        let picture = self.slot.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+        let (time, picture) = self.picture.as_ref()?;
         let picture = match picture {
             Ok(p) => p,
-            Err(e) => return Some(Err(e)),
+            Err(e) => return Some(Err(e.clone())),
         };
-        if !matches!(&self.shown, Some((_, t, m, _)) if *t == turns && *m == mirrored) {
+        if !matches!(&self.shown, Some((_, t, m, _, at)) if *t == turns && *m == mirrored && at == time) {
             let p = picture.turned(turns, mirrored);
             let image = ColorImage::from_rgba_unmultiplied([p.w, p.h], &p.rgba);
             // mipmaps: the picture is mostly drawn much smaller than it is
             let options = TextureOptions { mipmap_mode: Some(TextureFilter::Linear), ..TextureOptions::LINEAR };
-            self.shown = Some((ctx.load_texture("cmmt_preview", image, options), turns, mirrored, p.full));
+            self.shown = Some((ctx.load_texture("cmmt_preview", image, options), turns, mirrored, p.full, *time));
         }
-        self.shown.as_ref().map(|(tex, _, _, full)| Ok((tex.clone(), *full)))
+        self.shown.as_ref().map(|(tex, _, _, full, _)| Ok((tex.clone(), *full)))
     }
 }
 
-/// A picture made for a turn and a mirror
-type Turned = ((u8, bool), ColorImage);
+/// A picture made for a turn and a mirror (and the time of a frame)
+type Turned = ((u8, bool, f64), ColorImage);
 
 /// The picture at its own size (as far as the graphics card takes it) for the magnifier,
 /// turned and mirrored by ffmpeg
 #[derive(Default)]
 struct Loupe {
-    asked: Option<(u8, bool)>,
+    asked: Option<(u8, bool, f64)>,
     slot: Arc<Mutex<Option<Turned>>>,
     tex: Option<TextureHandle>,
 }
 
 impl Loupe {
-    /// The texture for this turn; None until it is loaded
-    fn texture(&mut self, env: &Env, ctx: &egui::Context, turn: (u8, bool)) -> Option<TextureHandle> {
-        if let Some((key, image)) = self.slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+    /// The texture for this turn (and frame of a video); None until it is loaded
+    fn texture(&mut self, env: &Env, ctx: &egui::Context, turn: (u8, bool), at: Option<f64>) -> Option<TextureHandle> {
+        let key = (turn.0, turn.1, at.unwrap_or(0.0));
+        if let Some((k, image)) = self.slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
             // a picture of a turn asked for before comes too late
-            if Some(key) == self.asked {
+            if Some(k) == self.asked {
                 self.tex = Some(ctx.load_texture("cmmt_loupe", image, TextureOptions::NEAREST));
             }
         }
-        if self.asked != Some(turn) {
+        if self.asked != Some(key) {
             self.tex = None;
             let (Some(tools), Some(file)) = (env.tools.clone(), env.files.first().cloned()) else { return None };
-            self.asked = Some(turn);
+            self.asked = Some(key);
             let max = ctx.input(|i| i.max_texture_side).min(8192) as u32;
             let (slot, ctx) = (self.slot.clone(), ctx.clone());
             std::thread::spawn(move || {
-                if let Ok(p) = load_picture(&tools, &file, max, Some(turn)) {
+                if let Ok(p) = load_picture(&tools, &file, max, Some(turn), at) {
                     let image = ColorImage::from_rgba_unmultiplied([p.w, p.h], &p.rgba);
-                    *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((turn, image));
+                    *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, image));
                     ctx.request_repaint();
                 }
             });
@@ -264,6 +315,13 @@ pub struct ImageForm {
     /// 0 = KB, 1 = MB
     limit_unit: usize,
     pub(super) scale: ScaleField,
+    estimate: Estimate,
+    pub(super) ed: Editor,
+}
+
+/// The picture (or a frame of the video) at the right of a form, and the editor on the whole
+/// window: the turn, the crop and the other edits
+pub struct Editor {
     /// quarter turns clockwise, then mirrored left to right (every turn and mirror comes to this)
     turns: u8,
     mirrored: bool,
@@ -275,7 +333,6 @@ pub struct ImageForm {
     upright: bool,
     drag: Option<Drag>,
     preview: Preview,
-    estimate: Estimate,
     /// a window on the screen, not one that is measured: it loads the picture and estimates
     pub(super) live: bool,
     /// the lowest edge of the window's content that is seen without scrolling (the picture
@@ -304,6 +361,9 @@ pub struct ImageForm {
     work: tools::Render,
     result: tools::Render,
     fonts: tools::FontList,
+    /// a video: its length in seconds; the picture is its frame at `at`
+    length: Option<f64>,
+    at: f64,
 }
 
 /// The width the picture at the right of Compress Image starts with: about as wide as the
@@ -334,31 +394,8 @@ impl ImageForm {
             limit_text,
             limit_unit,
             scale: ScaleField::from_code(&d(dv::IMAGE_RESOLUTION)),
-            turns: 0,
-            mirrored: false,
-            crop: None,
-            ratio: 0,
-            upright: false,
-            drag: None,
-            preview: Preview::default(),
             estimate: Estimate::default(),
-            live: false,
-            view_bottom: None,
-            below: 8.0 + CONTROL_H,
-            big: false,
-            focus: None,
-            loupe: Loupe::default(),
-            loupe_on: false,
-            loupe_zoom: 8.0,
-            loupe_side: 200.0,
-            edits: ImageEdit::default(),
-            tools_open: false,
-            tool: tools::Tool::Crop,
-            chosen: None,
-            blur_last: (engine::BlurKind::Gauss, 30),
-            work: tools::Render::default(),
-            result: tools::Render::default(),
-            fonts: tools::FontList::default(),
+            ed: Editor::new(None),
         }
     }
 
@@ -370,24 +407,8 @@ impl ImageForm {
         self.limit_bytes().map(|_| format!("{} {}", self.limit_text.trim(), ["KB", "MB"][self.limit_unit.min(1)]))
     }
 
-    fn one_file(env: &Env) -> bool {
-        env.files.len() == 1
-    }
-
-    /// The edits of one picture (several pictures are only turned and mirrored)
-    fn edit(&self, env: &Env) -> ImageEdit {
-        let turn = ImageEdit { turns: self.turns, flip_h: self.mirrored, ..Default::default() };
-        if !Self::one_file(env) {
-            return turn;
-        }
-        let mut e = ImageEdit { turns: self.turns, flip_h: self.mirrored, crop: self.crop.filter(|r| r[2] < 0.999 || r[3] < 0.999), ..self.edits.clone() };
-        e.texts.retain(|t| !t.text.trim().is_empty());
-        e.caption = e.caption.filter(|c| !c.is_empty());
-        e
-    }
-
     pub fn ui(&mut self, ui: &mut egui::Ui, env: &Env, delete_original: &mut bool) -> Option<Request> {
-        if !Self::one_file(env) {
+        if !Editor::one_file(env) {
             return self.rows(ui, env, delete_original);
         }
         // the fields keep their width, a wider window widens the picture
@@ -405,7 +426,7 @@ impl ImageForm {
             ui.vertical(|ui| {
                 ui.set_width(right);
                 ui.spacing_mut().item_spacing.x = 8.0;
-                self.crop_panel(ui, env, fields.response.rect.height());
+                self.ed.crop_panel(ui, env, fields.response.rect.height());
             });
             fields.inner
         })
@@ -473,8 +494,8 @@ impl ImageForm {
         if let Some(v) = default_menu(&r, env, dv::IMAGE_RESOLUTION, self.scale.code().as_deref()) {
             self.scale = ScaleField::from_code(&v);
         }
-        form_row(ui, t.img_turn, |ui| self.turn_row(ui, t));
-        if !Self::one_file(env) {
+        form_row(ui, t.img_turn, |ui| self.ed.turn_row(ui, t));
+        if !Editor::one_file(env) {
             form_row(ui, t.img_crop, |ui| {
                 ui.add_enabled_ui(false, |ui| segmented(ui, &ratio_labels(t), &mut 0));
                 one_line(ui, t.img_crop_many, muted());
@@ -484,12 +505,12 @@ impl ImageForm {
 
         let req = match (target, self.scale.invalid) {
             (Some(target), false) => {
-                Some(Request::CompressImage { format: self.format.clone(), target, scale: self.scale.mode, edit: Box::new(self.edit(env)) })
+                Some(Request::CompressImage { format: self.format.clone(), target, scale: self.scale.mode, edit: Box::new(self.ed.edit(env)) })
             }
             _ => None,
         };
         let note = match (&req, self.tab) {
-            (Some(r), 0) if self.live => Some(self.estimate.line(ui.ctx(), env, r, t)),
+            (Some(r), 0) if self.ed.live => Some(self.estimate.line(ui.ctx(), env, r, t)),
             (_, 0) => Some((t.img_estimating.to_string(), muted())),
             _ => {
                 let now = env.files.first().map_or(0, |f| std::fs::metadata(f).map_or(0, |m| m.len()));
@@ -512,8 +533,57 @@ impl ImageForm {
             _ => t.img_source_hint.to_string(),
         }
     }
+}
+impl Editor {
+    /// `length`: of a video
+    pub fn new(length: Option<f64>) -> Editor {
+        Editor {
+            turns: 0,
+            mirrored: false,
+            crop: None,
+            ratio: 0,
+            upright: false,
+            drag: None,
+            preview: Preview::default(),
+            live: false,
+            view_bottom: None,
+            below: 8.0 + CONTROL_H,
+            big: false,
+            focus: None,
+            loupe: Loupe::default(),
+            loupe_on: false,
+            loupe_zoom: 8.0,
+            loupe_side: 200.0,
+            edits: ImageEdit::default(),
+            tools_open: false,
+            tool: tools::Tool::Crop,
+            chosen: None,
+            blur_last: (engine::BlurKind::Gauss, 30),
+            work: tools::Render::default(),
+            result: tools::Render::default(),
+            fonts: tools::FontList::default(),
+            length,
+            at: 0.0,
+        }
+    }
 
-    fn turn_row(&mut self, ui: &mut egui::Ui, t: &T) {
+    pub(super) fn one_file(env: &Env) -> bool {
+        env.files.len() == 1
+    }
+
+    /// The edits of one picture (several pictures are only turned and mirrored)
+    pub(super) fn edit(&self, env: &Env) -> ImageEdit {
+        let turn = ImageEdit { turns: self.turns, flip_h: self.mirrored, ..Default::default() };
+        if !Self::one_file(env) {
+            return turn;
+        }
+        let mut e = ImageEdit { turns: self.turns, flip_h: self.mirrored, crop: self.crop.filter(|r| r[2] < 0.999 || r[3] < 0.999), ..self.edits.clone() };
+        e.texts.retain(|t| !t.text.trim().is_empty());
+        e.caption = e.caption.filter(|c| !c.is_empty());
+        e
+    }
+
+    pub(super) fn turn_row(&mut self, ui: &mut egui::Ui, t: &T) {
         ui.horizontal(|ui| {
             for (sym, tip) in [(Sym::Left, t.img_rotate_left), (Sym::Right, t.img_rotate_right), (Sym::MirrorH, t.img_flip_h), (Sym::MirrorV, t.img_flip_v)] {
                 if symbol_button(ui, sym).on_hover_text(tip).clicked() {
@@ -594,7 +664,7 @@ impl ImageForm {
 
     /// The picture at the right: as tall as the fields, taller when the window has room for
     /// it (but not taller than the picture needs at this width)
-    fn crop_panel(&mut self, ui: &mut egui::Ui, env: &Env, fields_h: f32) {
+    pub(super) fn crop_panel(&mut self, ui: &mut egui::Ui, env: &Env, fields_h: f32) {
         let t = env.t;
         let w = ui.available_width();
         let top = ui.cursor().top();
@@ -611,6 +681,10 @@ impl ImageForm {
         let box_bottom = ui.min_rect().bottom();
         ui.add_space(8.0);
         self.ratio_row(ui, t, full);
+        if self.length.is_some() {
+            ui.add_space(6.0);
+            self.frame_row(ui, t);
+        }
         self.below = ui.min_rect().bottom() - box_bottom;
     }
 
@@ -620,8 +694,8 @@ impl ImageForm {
     /// picture once it is loaded.
     fn picture(&mut self, ui: &mut egui::Ui, env: &Env, size: Vec2, big: bool) -> Option<(u32, u32)> {
         let t = env.t;
-        if self.live && !self.preview.started {
-            self.preview.start(env, ui.ctx());
+        if self.live {
+            self.preview.update(env, ui.ctx(), self.seek());
         }
         let k = c();
         let (area, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
@@ -683,7 +757,7 @@ impl ImageForm {
                     _ => {}
                 }
                 if big && self.loupe_on && matches!(tool, tools::Tool::Crop | tools::Tool::Blur) {
-                    let fine = self.loupe.texture(env, ui.ctx(), (self.turns, self.mirrored));
+                    let fine = self.loupe.texture(env, ui.ctx(), (self.turns, self.mirrored), self.seek());
                     // only while a corner or an edge is dragged
                     if let (true, Some(focus), Some(pointer)) = (resp.dragged(), self.focus, resp.interact_pointer_pos()) {
                         self.wheel(ui.ctx());
@@ -770,13 +844,28 @@ impl ImageForm {
             |ui| {
                 title(ui, if open { t.img_edit } else { t.img_crop }, c().text);
                 ui.add_space(12.0);
+                // a video: the time of the frame under the picture
+                let frame_h = if self.length.is_some() { 8.0 + CONTROL_H } else { 0.0 };
                 if open {
                     let h = ui.available_height().max(120.0);
                     let panel_w = tools::PANEL_W.min(ui.available_width() * 0.45);
                     let pic_w = ui.available_width() - panel_w - GAP;
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        let full = self.picture(ui, env, vec2(pic_w, h), true);
+                        let full = ui
+                            .vertical(|ui| {
+                                ui.set_width(pic_w);
+                                // the same air above the bottom line as under the ratios
+                                let below = if frame_h > 0.0 { frame_h + 14.0 } else { 0.0 };
+                                let full = self.picture(ui, env, vec2(pic_w, (h - below).max(120.0)), true);
+                                if self.length.is_some() {
+                                    ui.spacing_mut().item_spacing.x = 8.0;
+                                    ui.add_space(8.0);
+                                    self.frame_row(ui, t);
+                                }
+                                full
+                            })
+                            .inner;
                         ui.add_space(GAP);
                         ui.vertical(|ui| {
                             ui.set_width(panel_w);
@@ -787,7 +876,7 @@ impl ImageForm {
                     });
                     return;
                 }
-                let size = vec2(ui.available_width(), (ui.available_height() - 8.0 - CONTROL_H - 14.0).max(120.0));
+                let size = vec2(ui.available_width(), (ui.available_height() - 8.0 - CONTROL_H - 14.0 - frame_h).max(120.0));
                 let full = self.picture(ui, env, size, true);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -797,6 +886,10 @@ impl ImageForm {
                     ui.allocate_ui(vec2(w, CONTROL_H), |ui| self.ratio_row(ui, t, full));
                     ui.allocate_ui(vec2(toggle_w, CONTROL_H), |ui| self.loupe_toggle(ui, t, full.is_some()));
                 });
+                if self.length.is_some() {
+                    ui.add_space(8.0);
+                    self.frame_row(ui, t);
+                }
             },
         );
         if reset {
@@ -807,6 +900,32 @@ impl ImageForm {
             self.drag = None;
             ctx.request_repaint();
         }
+    }
+
+    /// The time of the frame a video shows; None: a picture
+    fn seek(&self) -> Option<f64> {
+        self.length.map(|_| self.at)
+    }
+
+    /// A video: the slider of the frame the picture shows
+    fn frame_row(&mut self, ui: &mut egui::Ui, t: &T) {
+        let Some(length) = self.length else { return };
+        // the very end may have no frame to show
+        let last = (length - 0.1).max(0.0);
+        ui.horizontal(|ui| {
+            ui.set_min_height(CONTROL_H);
+            super::widgets::caption(ui, t.anim_frame);
+            let text = frame_time(self.at);
+            let room = value_tag_width(ui, &text) + 12.0;
+            ui.spacing_mut().slider_width = (ui.available_width() - room).max(80.0);
+            let before = self.at;
+            ui.add(egui::Slider::new(&mut self.at, 0.0..=last).step_by(0.1).show_value(false)).on_hover_text(t.anim_frame_hint);
+            // a slider follows every mouse button: the right one opens the context menu instead
+            if ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary) || i.pointer.button_released(egui::PointerButton::Secondary)) {
+                self.at = before;
+            }
+            value_tag(ui, &text);
+        });
     }
 
     /// The magnifier on or off: one part that is chosen while it is on
@@ -928,7 +1047,7 @@ fn rect_cursor(ctx: &egui::Context, resp: &egui::Response, pic: Rect, rect: Opti
     ctx.set_cursor_icon(icon);
 }
 
-impl ImageForm {
+impl Editor {
     /// The wheel zooms the magnifier, Ctrl + wheel makes it larger or smaller
     fn wheel(&mut self, ctx: &egui::Context) {
         let (mut zoom, mut side) = (0.0_f32, 0.0_f32);
@@ -1045,6 +1164,12 @@ fn snap(r: [f64; 4], full: (u32, u32)) -> [f64; 4] {
 fn crop_px(r: [f64; 4], full: (u32, u32)) -> (u32, u32) {
     ((r[2] * full.0 as f64).round() as u32, (r[3] * full.1 as f64).round() as u32)
 }
+/// "0:03.2": the time of a frame
+fn frame_time(sec: f64) -> String {
+    let tenths = (sec.max(0.0) * 10.0).round() as u64;
+    format!("{}:{:02}.{}", tenths / 600, tenths / 10 % 60, tenths % 10)
+}
+
 /// "2.5 s" for a short video, "1:05" for a longer one
 fn length(sec: f64) -> String {
     if sec < 60.0 {
@@ -1585,7 +1710,7 @@ impl FramesForm {
 
 #[cfg(test)]
 mod tests {
-    use super::{edge_drag, grip, snap, Grip};
+    use super::{edge_drag, frame_time, grip, snap, Grip};
     use eframe::egui::{pos2, Rect};
 
     fn close(a: [f64; 4], b: [f64; 4]) -> bool {
@@ -1612,6 +1737,13 @@ mod tests {
         assert!(close(edge_drag(2, r, pos2(0.8, 0.0), Some(1.0)), [0.2, 0.1, 0.6, 0.6]));
         // and stays in the picture
         assert!(close(edge_drag(3, [0.0, 0.0, 0.2, 0.2], pos2(0.0, 0.6), Some(1.0)), [0.0, 0.0, 0.6, 0.6]));
+    }
+
+    #[test]
+    fn times_of_frames() {
+        assert_eq!(frame_time(3.24), "0:03.2");
+        assert_eq!(frame_time(75.06), "1:15.1");
+        assert_eq!(frame_time(0.0), "0:00.0");
     }
 
     #[test]

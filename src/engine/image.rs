@@ -34,7 +34,7 @@ pub fn edit_filters(edit: &ImageEdit, scale: ScaleMode, size: Option<(u32, u32)>
 }
 
 /// The filters of `edit` for `file`; the size of the picture is read only when they need it
-fn file_filters(job: &Job, file: &Path, edit: &ImageEdit, scale: ScaleMode) -> Outcome<Vec<String>> {
+pub(super) fn file_filters(job: &Job, file: &Path, edit: &ImageEdit, scale: ScaleMode) -> Outcome<Vec<String>> {
     let size = if super::edit::needs_size(edit) {
         Some(media::picture_size(&job.ffprobe, file).ok_or_else(|| Failure::Error(format!("ffprobe: {}", short_name(file))))?)
     } else {

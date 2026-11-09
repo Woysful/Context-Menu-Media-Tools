@@ -125,11 +125,11 @@ impl Settings {
         write_creating_dir(&path, text.as_bytes())
     }
 
-    /// Delete Audio was called Delete sound (cli name delete-sound)
+    /// Delete Audio was called Delete sound (cli name delete-sound), Make Anim was webp
     fn renamed_items(&mut self) {
         for d in &mut self.menu.disabled {
-            if d == "delete-sound" {
-                *d = "delete-audio".into();
+            if let Some(a) = crate::action::Action::ALL.into_iter().find(|a| a.old_cli_name() == Some(d.as_str())) {
+                *d = a.cli_name().into();
             }
         }
     }
@@ -319,9 +319,9 @@ mod tests {
 
     #[test]
     fn the_old_name_of_delete_audio_is_switched_off_too() {
-        let mut s: Settings = toml::from_str("[menu]\ndisabled = [\"delete-sound\"]\n").unwrap();
+        let mut s: Settings = toml::from_str("[menu]\ndisabled = [\"delete-sound\", \"webp\"]\n").unwrap();
         s.renamed_items();
-        assert!(!s.enabled(Action::DeleteAudio));
+        assert!(!s.enabled(Action::DeleteAudio) && !s.enabled(Action::Anim));
     }
 
     #[test]
