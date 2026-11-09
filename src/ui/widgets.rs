@@ -233,17 +233,6 @@ pub fn caption_width(ui: &egui::Ui, text: &str) -> f32 {
     ui.fonts(|f| f.layout_job(job)).rect.width()
 }
 
-/// A caption in a cell as wide as the widest of `all`: the controls after such captions line up
-pub fn caption_cell(ui: &mut egui::Ui, text: &str, all: &[&str]) {
-    let w = all.iter().map(|s| caption_width(ui, s)).fold(0.0, f32::max);
-    let start = ui.cursor().left();
-    caption(ui, text);
-    let pad = start + w + ui.spacing().item_spacing.x - ui.cursor().left();
-    if pad > 0.0 {
-        ui.add_space(pad);
-    }
-}
-
 /// A field: the caption above the control
 pub fn field<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     caption(ui, label);
@@ -801,25 +790,39 @@ pub fn value_tag(ui: &mut egui::Ui, text: &str) {
     }
 }
 
-/// A slider with two handles: the part `lo..hi` of `range`, on whole `step`s and at least
-/// `gap` long, drawn like the sliders of the look. Returns the response and the handle that
-/// moved (0: `lo`, 1: `hi`).
-pub fn range_slider(ui: &mut egui::Ui, lo: &mut f64, hi: &mut f64, range: std::ops::RangeInclusive<f64>, step: f64, gap: f64) -> (Response, Option<usize>) {
+/// What a drag on the timeline moves
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Grab {
+    Start,
+    End,
+    Frame,
+}
+
+/// A timeline of `0..=length` seconds: the part that is used between two brackets, at least
+/// `gap` long, and the frame `at` as a handle inside it (it stays a `step` before the end of
+/// the part, where there may be no frame), all on whole `step`s. A press left of the part takes
+/// its start, right of it its end, inside it the frame. A bracket that is dragged takes the frame
+/// along, so the picture shows the new start or end. Returns the response and what moved.
+pub fn timeline(ui: &mut egui::Ui, at: &mut f64, part: &mut (f64, f64), length: f64, step: f64, gap: f64) -> (Response, Option<Grab>) {
+    const BRACKET_W: f32 = 7.0;
     let width = ui.spacing().slider_width;
-    let (rect, response) = ui.allocate_exact_size(vec2(width, ui.spacing().interact_size.y), Sense::click_and_drag());
-    let (min, max) = (*range.start(), *range.end());
-    let shape = ui.visuals().handle_shape;
-    let radius = rect.height() / 2.5;
-    let half = match shape {
-        egui::style::HandleShape::Circle => radius,
-        egui::style::HandleShape::Rect { aspect_ratio } => radius * aspect_ratio,
-    };
-    let track = rect.x_range().shrink(half);
-    let span = (max - min).max(1e-9);
-    let x_of = |v: f64| track.min + ((v - min) / span) as f32 * track.span();
+    let (rect, response) = ui.allocate_exact_size(vec2(width, CONTROL_H), Sense::click_and_drag());
+    let track = rect.x_range().shrink(BRACKET_W);
+    let span = length.max(1e-9);
+    let x_of = |v: f64| track.min + (v / span).clamp(0.0, 1.0) as f32 * track.span();
     let value_at = |x: f32| {
-        let v = min + ((x - track.min) / track.span().max(1.0)).clamp(0.0, 1.0) as f64 * span;
-        ((v / step).round() * step).clamp(min, max)
+        let v = ((x - track.min) / track.span().max(1.0)).clamp(0.0, 1.0) as f64 * span;
+        ((v / step).round() * step).clamp(0.0, length)
+    };
+    let last_frame = |p: (f64, f64)| (p.1 - step).max(p.0);
+    let pick = |x: f32, p: (f64, f64)| {
+        if x < x_of(p.0) {
+            Grab::Start
+        } else if x > x_of(p.1) {
+            Grab::End
+        } else {
+            Grab::Frame
+        }
     };
     let id = response.id;
     let mut moved = None;
@@ -827,58 +830,81 @@ pub fn range_slider(ui: &mut egui::Ui, lo: &mut f64, hi: &mut f64, range: std::o
     let secondary = ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary) || i.pointer.button_released(egui::PointerButton::Secondary));
     match response.interact_pointer_pos() {
         Some(pos) if !secondary => {
-            // the handle nearer to where the button went down stays the one that moves
-            let which = ui.memory(|m| m.data.get_temp::<usize>(id)).unwrap_or_else(|| {
-                let (a, b) = ((pos.x - x_of(*lo)).abs(), (pos.x - x_of(*hi)).abs());
-                usize::from(b < a || (a == b && pos.x > x_of(*hi)))
-            });
-            ui.memory_mut(|m| m.data.insert_temp(id, which));
+            // what the press took stays the one that moves
+            let grab = ui.memory(|m| m.data.get_temp::<Grab>(id)).unwrap_or_else(|| pick(pos.x, *part));
+            ui.memory_mut(|m| m.data.insert_temp(id, grab));
             let v = value_at(pos.x);
-            let (old_lo, old_hi) = (*lo, *hi);
-            if which == 0 {
-                *lo = v.min(*hi - gap).max(min);
-            } else {
-                *hi = v.max(*lo + gap).min(max);
+            let before = (*at, *part);
+            match grab {
+                Grab::Start => {
+                    part.0 = v.min(part.1 - gap).max(0.0);
+                    *at = part.0;
+                }
+                Grab::End => {
+                    part.1 = v.max(part.0 + gap).min(length);
+                    *at = last_frame(*part);
+                }
+                Grab::Frame => *at = v.clamp(part.0, last_frame(*part)),
             }
-            if (*lo, *hi) != (old_lo, old_hi) {
-                moved = Some(which);
+            if (*at, *part) != before {
+                moved = Some(grab);
             }
         }
-        _ => ui.memory_mut(|m| m.data.remove::<usize>(id)),
+        _ => ui.memory_mut(|m| m.data.remove::<Grab>(id)),
     }
     if ui.is_rect_visible(rect) {
         let w = &ui.visuals().widgets;
-        let rail_r = (ui.spacing().slider_rail_height / 2.0).max(0.0);
-        let rail = Rect::from_min_max(pos2(rect.left(), rect.center().y - rail_r), pos2(rect.right(), rect.center().y + rail_r));
-        let p = ui.painter();
-        p.rect_filled(rail, w.inactive.rounding, w.inactive.bg_fill);
-        let part = Rect::from_min_max(pos2(x_of(*lo), rail.top()), pos2(x_of(*hi), rail.bottom()));
-        p.rect_filled(part, w.inactive.rounding, ui.visuals().selection.bg_fill);
-        let active = ui.memory(|m| m.data.get_temp::<usize>(id));
-        let hover = response.hover_pos().map(|pos| usize::from((pos.x - x_of(*hi)).abs() < (pos.x - x_of(*lo)).abs()));
-        for (i, v) in [*lo, *hi].into_iter().enumerate() {
-            let look = if active == Some(i) {
+        let held = ui.memory(|m| m.data.get_temp::<Grab>(id));
+        let hover = response.hover_pos().map(|pos| pick(pos.x, *part));
+        let look = |g: Grab| {
+            if held == Some(g) {
                 &w.active
-            } else if active.is_none() && hover == Some(i) {
+            } else if held.is_none() && hover == Some(g) {
                 &w.hovered
             } else {
                 &w.inactive
-            };
-            let center = pos2(x_of(v), rect.center().y);
-            match shape {
-                egui::style::HandleShape::Circle => {
-                    p.circle(center, radius + look.expansion, look.bg_fill, look.fg_stroke);
-                }
-                egui::style::HandleShape::Rect { aspect_ratio } => {
-                    let r = Rect::from_center_size(center, 2.0 * (vec2(radius * aspect_ratio, radius) + Vec2::splat(look.expansion)));
-                    p.rect(r, look.rounding, look.bg_fill, look.fg_stroke);
-                }
+            }
+        };
+        let p = ui.painter();
+        // the brackets keep below the handle of the frame, so the handle stays in sight on the
+        // start of the part; the rail goes through the middle of the brackets
+        let knob_r = 5.0;
+        let knob_y = rect.top() + knob_r + 1.0;
+        let (top, bottom) = (knob_y + knob_r + 2.0, rect.bottom() - 2.0);
+        let mid = (top + bottom) / 2.0;
+        let rail_r = (ui.spacing().slider_rail_height / 2.0).max(0.0);
+        let rail = Rect::from_min_max(pos2(track.min, mid - rail_r), pos2(track.max, mid + rail_r));
+        p.rect_filled(rail, w.inactive.rounding, w.inactive.bg_fill);
+        let (sx, ex) = (x_of(part.0), x_of(part.1));
+        p.rect_filled(Rect::from_min_max(pos2(sx, rail.top()), pos2(ex, rail.bottom())), w.inactive.rounding, ui.visuals().selection.bg_fill);
+        for (g, r) in [
+            (Grab::Start, Rect::from_min_max(pos2(sx - BRACKET_W, top), pos2(sx, bottom))),
+            (Grab::End, Rect::from_min_max(pos2(ex, top), pos2(ex + BRACKET_W, bottom))),
+        ] {
+            // a bracket "[" or "]": a bar on the outside, ticks toward the part
+            let color = if held == Some(g) || held.is_none() && hover == Some(g) { look(g).fg_stroke.color } else { ui.visuals().selection.bg_fill };
+            let bar = if g == Grab::Start { r.left() } else { r.right() - 3.0 };
+            p.rect_filled(Rect::from_min_max(pos2(bar, r.top()), pos2(bar + 3.0, r.bottom())), 0.0, color);
+            for y in [r.top(), r.bottom() - 3.0] {
+                p.rect_filled(Rect::from_min_max(pos2(r.left(), y), pos2(r.right(), y + 3.0)), 0.0, color);
+            }
+        }
+        // the frame: a line across the timeline with a small handle on top
+        let v = look(Grab::Frame);
+        let x = x_of(*at);
+        p.line_segment([pos2(x, knob_y), pos2(x, rect.bottom() - 1.0)], Stroke::new(2.0_f32, v.fg_stroke.color));
+        let center = pos2(x, knob_y);
+        match ui.visuals().handle_shape {
+            egui::style::HandleShape::Circle => {
+                p.circle(center, knob_r + v.expansion.min(1.0), v.bg_fill, v.fg_stroke);
+            }
+            egui::style::HandleShape::Rect { .. } => {
+                p.rect(Rect::from_center_size(center, Vec2::splat(2.0 * knob_r + v.expansion.min(1.0))), v.rounding.at_most(2.0), v.bg_fill, v.fg_stroke);
             }
         }
     }
     (response, moved)
 }
-
 /// The crop marks in the corners of a window (Brutalist)
 fn crop_marks(ctx: &egui::Context) {
     let k = c();

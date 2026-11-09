@@ -1,11 +1,14 @@
 //! The form of Make Anim: an animated WebP or GIF of a video. One video is shown at the right,
 //! a frame of it chosen with a slider, with the editor of Compress Image.
 
+use super::super::dropdown::{dropdown, Col};
 use super::super::forms::{default_menu, original_check, parse_in, result_row_with, small_number};
+use super::super::widgets::{caption, caption_width};
 use super::frame_time;
 use super::{form_row, muted, one_line, segmented, slider_row, Editor, Env, FIELDS_W, GAP, PREVIEW_MIN_W};
 use crate::defaults::{self as dv, DITHERS, SLOWS};
 use crate::engine::{Anim, AnimFormat, Request};
+use crate::theme::CONTROL_H;
 use crate::units::{parse_clock, parse_decimal};
 use eframe::egui::{self, RichText};
 
@@ -85,20 +88,24 @@ impl AnimForm {
         });
         let size = parse_in(&self.size_text, 64, 4320);
         let fps = parse_in(&self.fps_text, 1, 120);
-        let r = form_row(ui, t.webp_size, |ui| {
-            let r = small_number(ui, &mut self.size_text, size.is_some(), "px");
+        // two small fields: the frame rate at the right of the size
+        let (rs, rf) = form_row(ui, t.webp_size, |ui| {
+            let r = ui
+                .horizontal(|ui| {
+                    let rs = small_number(ui, &mut self.size_text, size.is_some(), "px");
+                    ui.add_space(10.0);
+                    caption(ui, t.webp_fps);
+                    let rf = small_number(ui, &mut self.fps_text, fps.is_some(), "fps").on_hover_text(t.webp_fps_hint);
+                    (rs, rf)
+                })
+                .inner;
             one_line(ui, t.webp_size_hint, muted());
             r
         });
-        if let Some(v) = default_menu(&r, env, dv::WEBP_SIZE, size.map(|v| v.to_string()).as_deref()) {
+        if let Some(v) = default_menu(&rs, env, dv::WEBP_SIZE, size.map(|v| v.to_string()).as_deref()) {
             self.size_text = v;
         }
-        let r = form_row(ui, t.webp_fps, |ui| {
-            let r = small_number(ui, &mut self.fps_text, fps.is_some(), "fps");
-            one_line(ui, t.webp_fps_hint, muted());
-            r
-        });
-        if let Some(v) = default_menu(&r, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
+        if let Some(v) = default_menu(&rf, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
             self.fps_text = v;
         }
         let speed = parse_decimal(&self.speed_text).filter(|v| (0.1..=10.0).contains(v));
@@ -120,20 +127,37 @@ impl AnimForm {
         }
         let part = self.trim_rows(ui, env);
         if self.format == 0 {
-            let r = form_row(ui, t.webp_quality, |ui| {
-                let r = slider_row(ui, &mut self.quality, 0..=100);
+            // the quality, and at its right the effort of the encoder as a short list
+            let (rq, rp) = form_row(ui, t.webp_quality, |ui| {
+                let r = ui
+                    .horizontal(|ui| {
+                        let list_w = 112.0;
+                        let gap = ui.spacing().item_spacing.x;
+                        let slider_w = ui.available_width() - list_w - caption_width(ui, t.webp_compression) - 3.0 * gap - 6.0;
+                        let rq = ui.allocate_ui(egui::vec2(slider_w.max(100.0), CONTROL_H), |ui| slider_row(ui, &mut self.quality, 0..=100)).inner;
+                        ui.add_space(6.0);
+                        caption(ui, t.webp_compression);
+                        let rp = ui
+                            .allocate_ui(egui::vec2(list_w, CONTROL_H), |ui| {
+                                let items = (0..=6u32).map(|n| (n.to_string(), t.anim_presets[n as usize].to_string())).collect();
+                                let mut key = self.compression.min(6).to_string();
+                                let shown = t.anim_presets[self.compression.min(6) as usize];
+                                let r = dropdown(ui, "anim_preset", shown, &[Col { title: None, items }], &mut key);
+                                self.compression = key.parse().unwrap_or(self.compression);
+                                r
+                            })
+                            .inner
+                            .on_hover_text(t.webp_compression_hint);
+                        (rq, rp)
+                    })
+                    .inner;
                 one_line(ui, t.webp_quality_hint, muted());
                 r
             });
-            if let Some(v) = default_menu(&r, env, dv::WEBP_QUALITY, Some(&self.quality.to_string())) {
+            if let Some(v) = default_menu(&rq, env, dv::WEBP_QUALITY, Some(&self.quality.to_string())) {
                 self.quality = v.parse().unwrap_or(self.quality);
             }
-            let r = form_row(ui, t.webp_compression, |ui| {
-                let r = slider_row(ui, &mut self.compression, 0..=6);
-                one_line(ui, t.webp_compression_hint, muted());
-                r
-            });
-            if let Some(v) = default_menu(&r, env, dv::WEBP_COMPRESSION, Some(&self.compression.to_string())) {
+            if let Some(v) = default_menu(&rp, env, dv::WEBP_COMPRESSION, Some(&self.compression.to_string())) {
                 self.compression = v.parse().unwrap_or(self.compression);
             }
         } else {

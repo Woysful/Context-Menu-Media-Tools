@@ -686,8 +686,7 @@ impl Editor {
         self.ratio_row(ui, t, full);
         if self.length.is_some() {
             ui.add_space(6.0);
-            self.trim_row(ui, t);
-            self.frame_row(ui, t);
+            self.timeline_row(ui, t);
         }
         self.below = ui.min_rect().bottom() - box_bottom;
     }
@@ -848,7 +847,7 @@ impl Editor {
             |ui| {
                 title(ui, if open { t.img_edit } else { t.img_crop }, c().text);
                 ui.add_space(12.0);
-                // a video: the time of the frame under the picture
+                // a video: the timeline under the picture
                 let frame_h = if self.length.is_some() { 8.0 + CONTROL_H } else { 0.0 };
                 if open {
                     let h = ui.available_height().max(120.0);
@@ -865,7 +864,7 @@ impl Editor {
                                 if self.length.is_some() {
                                     ui.spacing_mut().item_spacing.x = 8.0;
                                     ui.add_space(8.0);
-                                    self.frame_row(ui, t);
+                                    self.timeline_row(ui, t);
                                 }
                                 full
                             })
@@ -892,7 +891,7 @@ impl Editor {
                 });
                 if self.length.is_some() {
                     ui.add_space(8.0);
-                    self.frame_row(ui, t);
+                    self.timeline_row(ui, t);
                 }
             },
         );
@@ -911,57 +910,28 @@ impl Editor {
         self.length.map(|_| self.at)
     }
 
-    /// A video: the slider of the frame the picture shows
-    fn frame_row(&mut self, ui: &mut egui::Ui, t: &T) {
-        if self.length.is_none() {
-            return;
-        }
-        // the very end may have no frame to show
+    /// A video: the timeline under the picture. The brackets hold the part of the video that is
+    /// used, the line the frame the picture shows, inside the part (the very end of it may have
+    /// no frame to show).
+    fn timeline_row(&mut self, ui: &mut egui::Ui, t: &T) {
+        let Some(length) = self.length else { return };
         let (first, last) = self.frame_range();
         self.at = self.at.clamp(first, last);
         ui.horizontal(|ui| {
             ui.set_min_height(CONTROL_H);
-            super::widgets::caption_cell(ui, t.anim_frame, &[t.anim_frame, t.anim_trim]);
             let text = frame_time(self.at);
             let room = value_tag_width(ui, &text) + 12.0;
             ui.spacing_mut().slider_width = (ui.available_width() - room).max(80.0);
-            let before = self.at;
-            ui.add(egui::Slider::new(&mut self.at, first..=last).step_by(0.1).show_value(false)).on_hover_text(t.anim_frame_hint);
-            // a slider follows every mouse button: the right one opens the context menu instead
-            if ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary) || i.pointer.button_released(egui::PointerButton::Secondary)) {
-                self.at = before;
-            }
-            value_tag(ui, &text);
+            let (r, _) = super::widgets::timeline(ui, &mut self.at, &mut self.trim, length, 0.1, 0.1);
+            r.on_hover_text(t.anim_timeline_hint);
+            value_tag(ui, &frame_time(self.at));
         });
     }
 
-    /// The times the frame slider goes between: those of the part that is used
+    /// The times the frame goes between: those of the part that is used
     fn frame_range(&self) -> (f64, f64) {
         (self.trim.0, (self.trim.1 - 0.1).max(self.trim.0))
     }
-
-    /// A video: the part of it that is used, on a slider with two handles. The picture shows
-    /// the frame at the handle that is moved.
-    fn trim_row(&mut self, ui: &mut egui::Ui, t: &T) {
-        let Some(length) = self.length else { return };
-        ui.horizontal(|ui| {
-            ui.set_min_height(CONTROL_H);
-            super::widgets::caption_cell(ui, t.anim_trim, &[t.anim_frame, t.anim_trim]);
-            let text = frame_time(self.trim.1 - self.trim.0);
-            let room = value_tag_width(ui, &text) + 12.0;
-            ui.spacing_mut().slider_width = (ui.available_width() - room).max(80.0);
-            let (lo, hi) = (&mut self.trim.0, &mut self.trim.1);
-            let (r, moved) = super::widgets::range_slider(ui, lo, hi, 0.0..=length, 0.1, 0.1);
-            r.on_hover_text(t.anim_trim_hint);
-            match moved {
-                Some(0) => self.at = self.trim.0,
-                Some(_) => self.at = self.frame_range().1,
-                None => {}
-            }
-            value_tag(ui, &text);
-        });
-    }
-
     /// The magnifier on or off: one part that is chosen while it is on
     fn loupe_toggle(&mut self, ui: &mut egui::Ui, t: &T, enabled: bool) {
         let mut part = usize::from(!self.loupe_on);
