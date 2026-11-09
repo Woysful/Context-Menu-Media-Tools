@@ -222,6 +222,28 @@ pub fn caption(ui: &mut egui::Ui, text: &str) {
     }
 }
 
+/// The width `caption` takes for `text`
+pub fn caption_width(ui: &egui::Ui, text: &str) -> f32 {
+    let caps = text.to_uppercase();
+    let job = match c().look {
+        Look::Classic => return text_width(ui.ctx(), &caps, FontId::proportional(11.0)),
+        Look::Brutal => spaced(&caps, FontId::proportional(10.5), muted(), 1.0),
+        Look::Y2k => spaced(&caps, FontId::new(11.0, tech_family()), muted(), 1.2),
+    };
+    ui.fonts(|f| f.layout_job(job)).rect.width()
+}
+
+/// A caption in a cell as wide as the widest of `all`: the controls after such captions line up
+pub fn caption_cell(ui: &mut egui::Ui, text: &str, all: &[&str]) {
+    let w = all.iter().map(|s| caption_width(ui, s)).fold(0.0, f32::max);
+    let start = ui.cursor().left();
+    caption(ui, text);
+    let pad = start + w + ui.spacing().item_spacing.x - ui.cursor().left();
+    if pad > 0.0 {
+        ui.add_space(pad);
+    }
+}
+
 /// A field: the caption above the control
 pub fn field<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     caption(ui, label);
@@ -777,6 +799,84 @@ pub fn value_tag(ui: &mut egui::Ui, text: &str) {
         paint::cut_rect(ui.painter(), rect, 5.0, DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border));
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, text, font, k.accent);
     }
+}
+
+/// A slider with two handles: the part `lo..hi` of `range`, on whole `step`s and at least
+/// `gap` long, drawn like the sliders of the look. Returns the response and the handle that
+/// moved (0: `lo`, 1: `hi`).
+pub fn range_slider(ui: &mut egui::Ui, lo: &mut f64, hi: &mut f64, range: std::ops::RangeInclusive<f64>, step: f64, gap: f64) -> (Response, Option<usize>) {
+    let width = ui.spacing().slider_width;
+    let (rect, response) = ui.allocate_exact_size(vec2(width, ui.spacing().interact_size.y), Sense::click_and_drag());
+    let (min, max) = (*range.start(), *range.end());
+    let shape = ui.visuals().handle_shape;
+    let radius = rect.height() / 2.5;
+    let half = match shape {
+        egui::style::HandleShape::Circle => radius,
+        egui::style::HandleShape::Rect { aspect_ratio } => radius * aspect_ratio,
+    };
+    let track = rect.x_range().shrink(half);
+    let span = (max - min).max(1e-9);
+    let x_of = |v: f64| track.min + ((v - min) / span) as f32 * track.span();
+    let value_at = |x: f32| {
+        let v = min + ((x - track.min) / track.span().max(1.0)).clamp(0.0, 1.0) as f64 * span;
+        ((v / step).round() * step).clamp(min, max)
+    };
+    let id = response.id;
+    let mut moved = None;
+    // a slider follows every mouse button: the right one opens the context menu instead
+    let secondary = ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary) || i.pointer.button_released(egui::PointerButton::Secondary));
+    match response.interact_pointer_pos() {
+        Some(pos) if !secondary => {
+            // the handle nearer to where the button went down stays the one that moves
+            let which = ui.memory(|m| m.data.get_temp::<usize>(id)).unwrap_or_else(|| {
+                let (a, b) = ((pos.x - x_of(*lo)).abs(), (pos.x - x_of(*hi)).abs());
+                usize::from(b < a || (a == b && pos.x > x_of(*hi)))
+            });
+            ui.memory_mut(|m| m.data.insert_temp(id, which));
+            let v = value_at(pos.x);
+            let (old_lo, old_hi) = (*lo, *hi);
+            if which == 0 {
+                *lo = v.min(*hi - gap).max(min);
+            } else {
+                *hi = v.max(*lo + gap).min(max);
+            }
+            if (*lo, *hi) != (old_lo, old_hi) {
+                moved = Some(which);
+            }
+        }
+        _ => ui.memory_mut(|m| m.data.remove::<usize>(id)),
+    }
+    if ui.is_rect_visible(rect) {
+        let w = &ui.visuals().widgets;
+        let rail_r = (ui.spacing().slider_rail_height / 2.0).max(0.0);
+        let rail = Rect::from_min_max(pos2(rect.left(), rect.center().y - rail_r), pos2(rect.right(), rect.center().y + rail_r));
+        let p = ui.painter();
+        p.rect_filled(rail, w.inactive.rounding, w.inactive.bg_fill);
+        let part = Rect::from_min_max(pos2(x_of(*lo), rail.top()), pos2(x_of(*hi), rail.bottom()));
+        p.rect_filled(part, w.inactive.rounding, ui.visuals().selection.bg_fill);
+        let active = ui.memory(|m| m.data.get_temp::<usize>(id));
+        let hover = response.hover_pos().map(|pos| usize::from((pos.x - x_of(*hi)).abs() < (pos.x - x_of(*lo)).abs()));
+        for (i, v) in [*lo, *hi].into_iter().enumerate() {
+            let look = if active == Some(i) {
+                &w.active
+            } else if active.is_none() && hover == Some(i) {
+                &w.hovered
+            } else {
+                &w.inactive
+            };
+            let center = pos2(x_of(v), rect.center().y);
+            match shape {
+                egui::style::HandleShape::Circle => {
+                    p.circle(center, radius + look.expansion, look.bg_fill, look.fg_stroke);
+                }
+                egui::style::HandleShape::Rect { aspect_ratio } => {
+                    let r = Rect::from_center_size(center, 2.0 * (vec2(radius * aspect_ratio, radius) + Vec2::splat(look.expansion)));
+                    p.rect(r, look.rounding, look.bg_fill, look.fg_stroke);
+                }
+            }
+        }
+    }
+    (response, moved)
 }
 
 /// The crop marks in the corners of a window (Brutalist)

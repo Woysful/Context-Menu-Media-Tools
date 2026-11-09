@@ -364,6 +364,8 @@ pub struct Editor {
     /// a video: its length in seconds; the picture is its frame at `at`
     length: Option<f64>,
     at: f64,
+    /// a video: the part of it that is used, from and to in seconds
+    pub(super) trim: (f64, f64),
 }
 
 /// The width the picture at the right of Compress Image starts with: about as wide as the
@@ -564,6 +566,7 @@ impl Editor {
             fonts: tools::FontList::default(),
             length,
             at: 0.0,
+            trim: (0.0, length.unwrap_or(0.0)),
         }
     }
 
@@ -683,6 +686,7 @@ impl Editor {
         self.ratio_row(ui, t, full);
         if self.length.is_some() {
             ui.add_space(6.0);
+            self.trim_row(ui, t);
             self.frame_row(ui, t);
         }
         self.below = ui.min_rect().bottom() - box_bottom;
@@ -909,20 +913,50 @@ impl Editor {
 
     /// A video: the slider of the frame the picture shows
     fn frame_row(&mut self, ui: &mut egui::Ui, t: &T) {
-        let Some(length) = self.length else { return };
+        if self.length.is_none() {
+            return;
+        }
         // the very end may have no frame to show
-        let last = (length - 0.1).max(0.0);
+        let (first, last) = self.frame_range();
+        self.at = self.at.clamp(first, last);
         ui.horizontal(|ui| {
             ui.set_min_height(CONTROL_H);
-            super::widgets::caption(ui, t.anim_frame);
+            super::widgets::caption_cell(ui, t.anim_frame, &[t.anim_frame, t.anim_trim]);
             let text = frame_time(self.at);
             let room = value_tag_width(ui, &text) + 12.0;
             ui.spacing_mut().slider_width = (ui.available_width() - room).max(80.0);
             let before = self.at;
-            ui.add(egui::Slider::new(&mut self.at, 0.0..=last).step_by(0.1).show_value(false)).on_hover_text(t.anim_frame_hint);
+            ui.add(egui::Slider::new(&mut self.at, first..=last).step_by(0.1).show_value(false)).on_hover_text(t.anim_frame_hint);
             // a slider follows every mouse button: the right one opens the context menu instead
             if ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary) || i.pointer.button_released(egui::PointerButton::Secondary)) {
                 self.at = before;
+            }
+            value_tag(ui, &text);
+        });
+    }
+
+    /// The times the frame slider goes between: those of the part that is used
+    fn frame_range(&self) -> (f64, f64) {
+        (self.trim.0, (self.trim.1 - 0.1).max(self.trim.0))
+    }
+
+    /// A video: the part of it that is used, on a slider with two handles. The picture shows
+    /// the frame at the handle that is moved.
+    fn trim_row(&mut self, ui: &mut egui::Ui, t: &T) {
+        let Some(length) = self.length else { return };
+        ui.horizontal(|ui| {
+            ui.set_min_height(CONTROL_H);
+            super::widgets::caption_cell(ui, t.anim_trim, &[t.anim_frame, t.anim_trim]);
+            let text = frame_time(self.trim.1 - self.trim.0);
+            let room = value_tag_width(ui, &text) + 12.0;
+            ui.spacing_mut().slider_width = (ui.available_width() - room).max(80.0);
+            let (lo, hi) = (&mut self.trim.0, &mut self.trim.1);
+            let (r, moved) = super::widgets::range_slider(ui, lo, hi, 0.0..=length, 0.1, 0.1);
+            r.on_hover_text(t.anim_trim_hint);
+            match moved {
+                Some(0) => self.at = self.trim.0,
+                Some(_) => self.at = self.frame_range().1,
+                None => {}
             }
             value_tag(ui, &text);
         });

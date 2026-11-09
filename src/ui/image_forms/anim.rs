@@ -2,10 +2,12 @@
 //! a frame of it chosen with a slider, with the editor of Compress Image.
 
 use super::super::forms::{default_menu, original_check, parse_in, result_row_with, small_number};
+use super::frame_time;
 use super::{form_row, muted, one_line, segmented, slider_row, Editor, Env, FIELDS_W, GAP, PREVIEW_MIN_W};
 use crate::defaults::{self as dv, DITHERS, SLOWS};
 use crate::engine::{Anim, AnimFormat, Request};
-use eframe::egui;
+use crate::units::{parse_clock, parse_decimal};
+use eframe::egui::{self, RichText};
 
 pub struct AnimForm {
     /// 0 = WebP, 1 = GIF
@@ -19,6 +21,11 @@ pub struct AnimForm {
     speed_text: String,
     /// a place in SLOWS
     slow: usize,
+    /// the part of the video; an empty end: to the end
+    from_text: String,
+    to_text: String,
+    /// the part the two fields were last filled with (the slider under the picture moves it too)
+    trim_shown: (f64, f64),
     pub(in crate::ui) ed: Editor,
 }
 
@@ -36,6 +43,9 @@ impl AnimForm {
             dither: dither_index(&d(dv::GIF_DITHER)),
             speed_text: "1".into(),
             slow: SLOWS.iter().position(|s| *s == d(dv::ANIM_SLOW)).unwrap_or(0),
+            from_text: frame_time(0.0),
+            to_text: length.filter(|_| env.files.len() == 1).map(frame_time).unwrap_or_default(),
+            trim_shown: (0.0, length.unwrap_or(0.0)),
             // without a known length: the first frame, as of a picture
             ed: Editor::new(length),
         }
@@ -91,20 +101,24 @@ impl AnimForm {
         if let Some(v) = default_menu(&r, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
             self.fps_text = v;
         }
-        let speed = crate::units::parse_decimal(&self.speed_text).filter(|v| (0.1..=10.0).contains(v));
-        form_row(ui, t.anim_speed, |ui| {
-            small_number(ui, &mut self.speed_text, speed.is_some(), "×");
-            one_line(ui, t.anim_speed_hint, muted());
-        });
+        let speed = parse_decimal(&self.speed_text).filter(|v| (0.1..=10.0).contains(v));
         let slower = speed.is_some_and(|s| s < 1.0);
-        let r = form_row(ui, t.anim_slow, |ui| {
-            let r = ui.add_enabled_ui(slower, |ui| segmented(ui, &t.anim_slows, &mut self.slow)).inner;
-            one_line(ui, if slower { t.anim_slow_hints[self.slow.min(1)] } else { t.anim_slow_off }, muted());
+        // the way to slow down is chosen at the right of the speed, for a speed below 1
+        let r = form_row(ui, t.anim_speed, |ui| {
+            let r = ui
+                .horizontal(|ui| {
+                    small_number(ui, &mut self.speed_text, speed.is_some(), "×");
+                    ui.add_space(4.0);
+                    ui.add_enabled_ui(slower, |ui| segmented(ui, &t.anim_slows, &mut self.slow)).inner
+                })
+                .inner;
+            one_line(ui, if slower { t.anim_slow_hints[self.slow.min(1)] } else { t.anim_speed_hint }, muted());
             r
         });
         if let Some(v) = default_menu(&r, env, dv::ANIM_SLOW, Some(SLOWS[self.slow.min(1)])) {
             self.slow = SLOWS.iter().position(|s| *s == v).unwrap_or(0);
         }
+        let part = self.trim_rows(ui, env);
         if self.format == 0 {
             let r = form_row(ui, t.webp_quality, |ui| {
                 let r = slider_row(ui, &mut self.quality, 0..=100);
@@ -140,8 +154,8 @@ impl AnimForm {
             });
         }
         form_row(ui, t.original, |ui| original_check(ui, env, delete_original, t.delete_after));
-        let req = match (size, fps, speed) {
-            (Some(size), Some(fps), Some(speed)) => Some(Request::Anim(Box::new(Anim {
+        let req = match (size, fps, speed, part) {
+            (Some(size), Some(fps), Some(speed), Some((from, to))) => Some(Request::Anim(Box::new(Anim {
                 format: if self.format == 0 { AnimFormat::Webp } else { AnimFormat::Gif },
                 size,
                 fps,
@@ -150,12 +164,64 @@ impl AnimForm {
                 dither: DITHERS[self.dither.min(3)].to_string(),
                 speed,
                 smooth: self.slow == 1,
+                from,
+                to,
                 edit: self.ed.edit(env),
             }))),
             _ => None,
         };
         result_row_with(ui, env, req.as_ref(), None);
         req
+    }
+}
+
+impl AnimForm {
+    /// The part of the video: from, and to (None: to the end), when both fields are right.
+    /// With one video the fields follow the slider under the picture, and it follows them.
+    fn trim_rows(&mut self, ui: &mut egui::Ui, env: &Env) -> Option<(f64, Option<f64>)> {
+        let t = env.t;
+        let length = self.ed.length.filter(|_| Editor::one_file(env));
+        if length.is_some() && self.ed.trim != self.trim_shown {
+            self.from_text = frame_time(self.ed.trim.0);
+            self.to_text = frame_time(self.ed.trim.1);
+            self.trim_shown = self.ed.trim;
+        }
+        let parse = |from: &str, to: &str| {
+            let from = parse_clock(from).filter(|f| length.is_none_or(|l| *f < l));
+            let to = match to.trim() {
+                "" => Some(None),
+                text => parse_clock(text).filter(|v| length.is_none_or(|l| *v <= l + 0.05)).map(Some),
+            };
+            let ordered = matches!((from, to), (Some(f), Some(Some(e))) if e <= f);
+            (from, to, ordered)
+        };
+        let (from, to, ordered) = parse(&self.from_text, &self.to_text);
+        let changed = form_row(ui, t.anim_trim, |ui| {
+            let changed = ui
+                .horizontal(|ui| {
+                    let a = small_number(ui, &mut self.from_text, from.is_some() && !ordered, "");
+                    ui.label(RichText::new("–").color(muted()));
+                    let b = small_number(ui, &mut self.to_text, to.is_some() && !ordered, "");
+                    a.changed() || b.changed()
+                })
+                .inner;
+            one_line(ui, if length.is_some() { t.anim_trim_one } else { t.anim_trim_many }, muted());
+            changed
+        });
+        // what was typed just now
+        let (from, to, ordered) = parse(&self.from_text, &self.to_text);
+        let (from, to) = (from?, to?);
+        if ordered {
+            return None;
+        }
+        let Some(length) = length else { return Some((from, to)) };
+        let end = to.unwrap_or(length).min(length);
+        if changed {
+            self.ed.trim = (from, end);
+            self.trim_shown = self.ed.trim;
+        }
+        // the very end is no cut
+        Some((from, Some(end).filter(|e| length - e > 0.05)))
     }
 }
 

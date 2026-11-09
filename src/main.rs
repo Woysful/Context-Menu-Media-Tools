@@ -69,6 +69,7 @@ Options:
   make-anim:      --format webp|gif  --size N (the shorter side)  --fps N
                   webp: --quality 0-100  --compression 0-6   gif: --dither sierra2_4a|floyd_steinberg|bayer|none
                   --speed 0.1-10 (2 = twice as fast)  --smooth (below 1: draw the frames in between)
+                  --from T  --to T (the part of the video: 12.5, 1:05, 1:02:03.5)
                   and every edit of compress-image (--rotate, --crop, --text, ...)
   compress-image: --format source|jpg|webp|avif|jxl|png  --quality 1-100  or  --limit 500KB|2MB
                   --scale S  --rotate 90|180|270  --flip h|v|hv  --crop x,y,w,h (in % of the picture)
@@ -109,6 +110,8 @@ impl Cli {
             "compression",
             "dither",
             "speed",
+            "from",
+            "to",
             "rotate",
             "flip",
             "crop",
@@ -268,6 +271,13 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
                 Some(s) => units::parse_decimal(s).filter(|v| (0.1..=10.0).contains(v)).ok_or_else(|| format!("bad --speed: {s} (0.1-10)"))?,
                 None => 1.0,
             };
+            let clock = |name: &str| -> Result<Option<f64>, String> {
+                cli.opt(name).map(|v| units::parse_clock(v).ok_or_else(|| format!("bad --{name}: {v}"))).transpose()
+            };
+            let (from, to) = (clock("from")?.unwrap_or(0.0), clock("to")?);
+            if to.is_some_and(|to| to <= from) {
+                return Err("--to must be later than --from".into());
+            }
             Request::Anim(Box::new(engine::Anim {
                 format,
                 size: num("size", cfg.webp.size),
@@ -277,6 +287,8 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
                 dither,
                 speed,
                 smooth: cli.flag("smooth"),
+                from,
+                to,
                 edit: edit_from(cli)?,
             }))
         }

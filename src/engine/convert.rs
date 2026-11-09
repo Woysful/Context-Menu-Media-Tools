@@ -5,7 +5,7 @@ use super::compress::{merge_maps, scale_val};
 use super::image::file_filters;
 use super::output::{base_of, ensure_parent, named, new_file, short_name, unique_path};
 use super::runner::{run_template, TempDir, Track};
-use super::{Anim, AnimFormat, ConvertKind, Done, Job, Outcome};
+use super::{Anim, AnimFormat, ConvertKind, Done, Failure, Job, Outcome};
 use crate::cmdline::{self, Val};
 use crate::config::Format;
 use crate::i18n;
@@ -98,6 +98,26 @@ fn with_speed(command: &str) -> Option<String> {
     command.contains("fps={fps},").then(|| command.replacen("fps={fps},", "{speed}fps={fps},", 1))
 }
 
+/// A command of an older presets.toml has no {trim}: the part goes before its input
+fn with_trim(command: &str) -> Option<String> {
+    if command.contains("{trim}") {
+        return Some(command.to_string());
+    }
+    command.contains("-i {input}").then(|| command.replacen("-i {input}", "{trim} -i {input}", 1))
+}
+
+/// {trim}: the part from `from` to `to` (None = to the end) as options of the input
+fn trim_args(from: f64, to: Option<f64>) -> Vec<String> {
+    let mut args = Vec::new();
+    if from > 0.0 {
+        args.extend(["-ss".to_string(), fmt_float(from)]);
+    }
+    if let Some(to) = to {
+        args.extend(["-t".to_string(), fmt_float(to - from)]);
+    }
+    args
+}
+
 /// {speed}: the filters of the speed with a trailing comma, nothing at the speed 1
 fn speed_filters(speed: f64, smooth: bool, fps: u32) -> String {
     if (speed - 1.0).abs() < 1e-6 {
@@ -123,6 +143,12 @@ pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Don
     };
     let t = i18n::t();
     let speed = speed_filters(a.speed, a.smooth, a.fps);
+    if info.duration.is_some_and(|d| a.from >= d) {
+        return Err(Failure::Error(format!("{}: {}", short_name(file), t.anim_trim_past)));
+    }
+    // the end of a shorter video is its own end
+    let to = a.to.filter(|to| info.duration.is_none_or(|d| *to < d));
+    let trim = trim_args(a.from, to);
     let fixed = |command: &str| {
         let command = with_edit(command).unwrap_or_else(|| {
             if !chain.is_empty() {
@@ -130,16 +156,22 @@ pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Don
             }
             command.to_string()
         });
-        with_speed(&command).unwrap_or_else(|| {
+        let command = with_speed(&command).unwrap_or_else(|| {
             if !speed.is_empty() {
                 job.prog.warn(format!("{section}: {}", t.anim_no_speed));
+            }
+            command
+        });
+        with_trim(&command).unwrap_or_else(|| {
+            if !trim.is_empty() {
+                job.prog.warn(format!("{section}: {}", t.anim_no_trim));
             }
             command
         })
     };
     let output = new_file(output, file, &[]);
-    // the result is as long as the video at its new speed
-    let length = info.duration.map(|d| d / a.speed);
+    // the result is as long as the part at its new speed
+    let length = to.or(info.duration).map(|end| (end - a.from).max(0.0) / a.speed);
     let mut extra = vec![
         ("size", Val::S(a.size.to_string())),
         ("fps", Val::S(a.fps.to_string())),
@@ -148,6 +180,7 @@ pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Don
         ("dither", Val::S(a.dither.clone())),
         ("edit", scale_val(&chain)),
         ("speed", Val::S(speed.clone())),
+        ("trim", Val::L(trim.clone())),
     ];
     if a.format == AnimFormat::Gif {
         let work = TempDir::new()?;
@@ -159,7 +192,9 @@ pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Don
         // ffmpeg tells nothing of its progress until the palette is written
         job.prog.set_step(t.anim_colours);
         job.prog.set_busy(true);
-        let palette_command = with_edit(&job.cfg.gif.palette_command).unwrap_or_else(|| job.cfg.gif.palette_command.clone());
+        let palette = &job.cfg.gif.palette_command;
+        let palette_command = with_edit(palette).unwrap_or_else(|| palette.clone());
+        let palette_command = with_trim(&palette_command).unwrap_or(palette_command);
         run_template(job, &palette_command, &vars, false, Track::at(0.0), None)?;
         job.prog.set_busy(false);
         job.prog.set_step("");
@@ -179,7 +214,7 @@ pub(super) fn custom(job: &Job, file: &Path, info: &Info, c: &Custom) -> Outcome
 
 #[cfg(test)]
 mod tests {
-    use super::{with_edit, with_speed};
+    use super::{trim_args, with_edit, with_speed, with_trim};
 
     #[test]
     fn old_commands_get_the_edits_after_the_fps() {
@@ -194,6 +229,17 @@ mod tests {
         assert_eq!(with_speed(&with_edit(old).unwrap()).unwrap(), "ffmpeg -vf \"{speed}fps={fps},{edit}scale=1:1\" {output}");
         assert_eq!(with_speed("a {speed}b").unwrap(), "a {speed}b");
         assert_eq!(with_speed("ffmpeg -vf scale=1:1 {output}"), None);
+    }
+
+    #[test]
+    fn the_part_of_the_video() {
+        assert!(trim_args(0.0, None).is_empty());
+        assert_eq!(trim_args(1.5, None), ["-ss", "1.5"]);
+        assert_eq!(trim_args(0.0, Some(4.0)), ["-t", "4"]);
+        assert_eq!(trim_args(1.5, Some(4.0)), ["-ss", "1.5", "-t", "2.5"]);
+        assert_eq!(with_trim("ffmpeg -n -i {input} -i {palette} {output}").unwrap(), "ffmpeg -n {trim} -i {input} -i {palette} {output}");
+        assert_eq!(with_trim("ffmpeg {trim} -i {input}").unwrap(), "ffmpeg {trim} -i {input}");
+        assert_eq!(with_trim("magick {input} {output}"), None);
     }
 
     #[test]

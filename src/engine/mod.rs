@@ -77,6 +77,9 @@ pub struct Anim {
     pub speed: f64,
     /// below the speed 1: draw the frames in between instead of showing each one longer
     pub smooth: bool,
+    /// the part of the video, in seconds: from, and to (None = to its end)
+    pub from: f64,
+    pub to: Option<f64>,
     /// the edits of the editor, as in Compress Image
     pub edit: ImageEdit,
 }

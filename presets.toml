@@ -20,8 +20,8 @@
 #      size limit mode only:
 #      {rate}    -b:v -maxrate -bufsize (computed from the limit)   {pass}   two-pass options
 #      {seek}    -ss / -t of a chunk   {overwrite}   -n or -y
-#      {fps} {quality} {compression} {size} {edit} {speed}                   Make Anim (WebP)
-#      {fps} {size} {edit} {speed} {dither} {palette} {palette_fps}       Make Anim (GIF)
+#      {fps} {quality} {compression} {size} {edit} {speed} {trim}            Make Anim (WebP)
+#      {fps} {size} {edit} {speed} {trim} {dither} {palette} {palette_fps}  Make Anim (GIF)
 #
 #  `output` is the name of the result: {base} = path of the file without extension,
 #  {name} = its name, {dir} = its folder, {srcext} = its extension, {ext} = extension
@@ -855,13 +855,15 @@ merge_codec_webm = '-c:a libopus -b:a 160k'
 # {edit}: the filters of the editor (turn, crop, text, ...) with a trailing comma, or nothing.
 # {speed}: faster or slower (setpts, for a smooth slow-down also minterpolate) with a trailing
 # comma, or nothing at the speed 1. It goes before the fps filter.
+# {trim}: the part of the video (-ss start -t length), or nothing for all of it. It goes before
+# -i {input}.
 
 [webp_anim]
 size = 720
 fps = 20
 quality = 80
 compression = 5
-command = '''ffmpeg -n -i {input} -an -vf "{speed}fps={fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos" -c:v libwebp -quality {quality} -compression_level {compression} -loop 0 {output}'''
+command = '''ffmpeg -n {trim} -i {input} -an -vf "{speed}fps={fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos" -c:v libwebp -quality {quality} -compression_level {compression} -loop 0 {output}'''
 output = "{base}.webp"
 
 # ------------------------------------------------------------------ Make Anim: GIF
@@ -873,6 +875,6 @@ output = "{base}.webp"
 
 [gif_anim]
 dither = "sierra2_4a"
-palette_command = '''ffmpeg -y -i {input} -an -vf "fps={palette_fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos,palettegen=stats_mode=diff" {palette}'''
-command = '''ffmpeg -n -i {input} -i {palette} -an -lavfi "[0:v]{speed}fps={fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos[x];[x][1:v]paletteuse=dither={dither}:diff_mode=rectangle" -loop 0 {output}'''
+palette_command = '''ffmpeg -y {trim} -i {input} -an -vf "fps={palette_fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos,palettegen=stats_mode=diff" {palette}'''
+command = '''ffmpeg -n {trim} -i {input} -i {palette} -an -lavfi "[0:v]{speed}fps={fps},{edit}scale=w='if(gt(iw,ih),-2,min(iw,{size}))':h='if(gt(iw,ih),min(ih,{size}),-2)':flags=lanczos[x];[x][1:v]paletteuse=dither={dither}:diff_mode=rectangle" -loop 0 {output}'''
 output = "{base}.gif"

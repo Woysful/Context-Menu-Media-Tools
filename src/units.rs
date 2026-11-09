@@ -46,6 +46,24 @@ pub fn parse_decimal(text: &str) -> Option<f64> {
     text.trim().replace(',', ".").parse().ok()
 }
 
+/// A moment the user typed: "83.5", "1:23.5", "1:02:03" -> seconds
+pub fn parse_clock(text: &str) -> Option<f64> {
+    let mut sec = 0.0;
+    let parts: Vec<&str> = text.trim().split(':').collect();
+    if parts.len() > 3 {
+        return None;
+    }
+    for (i, p) in parts.iter().enumerate() {
+        let last = i == parts.len() - 1;
+        let v = if last { parse_decimal(p)? } else { p.trim().parse::<u32>().ok()? as f64 };
+        if !(v >= 0.0 && v.is_finite()) || (i > 0 && v >= 60.0) {
+            return None;
+        }
+        sec = sec * 60.0 + v;
+    }
+    Some(sec)
+}
+
 /// A size the user typed: "500 KB", "1,5 MB", "500k", "2m" (a plain number is KB) -> bytes
 pub fn parse_size(text: &str) -> Option<u64> {
     let t = text.trim().to_lowercase().replace(' ', "");
@@ -84,5 +102,12 @@ mod tests {
         assert_eq!(fmt_size(812), "812 B");
         assert_eq!(fmt_size(250_000), "244 KB");
         assert_eq!(fmt_size(3_000_000), "2.86 MB");
+        assert_eq!(parse_clock("83.5"), Some(83.5));
+        assert_eq!(parse_clock(" 1:23,5 "), Some(83.5));
+        assert_eq!(parse_clock("1:02:03"), Some(3723.0));
+        assert_eq!(parse_clock("0:00.0"), Some(0.0));
+        assert_eq!(parse_clock("1:75"), None);
+        assert_eq!(parse_clock("-2"), None);
+        assert_eq!(parse_clock(""), None);
     }
 }
