@@ -804,7 +804,7 @@ fn sticker_frame(ctx: &egui::Context) {
     p.rect_filled(Rect::from_min_size(pos2(r.left() - 1.5, r.top() + 34.0), vec2(3.0, 26.0)), 0.0, k.accent);
     let row = Rect::from_min_size(pos2(r.left() + 26.0, r.bottom() - 3.0), vec2(52.0, 6.0));
     p.rect_filled(row.expand2(vec2(4.0, 0.0)), 0.0, k.bg);
-    paint::squares(&p, row, 0.6, line, line);
+    paint::squares(&p, row, 0.6, line, line, None);
 }
 
 /// The layout of the job windows: the buttons at the bottom, the content above them.

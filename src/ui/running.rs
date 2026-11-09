@@ -137,13 +137,13 @@ impl Running {
 
 /// The bar of the progress: separate blocks like the level meter of a device (Brutalist) or a
 /// row of squares in a frame with cut corners (Y2K)
-fn blocks(ui: &mut egui::Ui, done: f32, height: f32) {
+fn blocks(ui: &mut egui::Ui, done: f32, height: f32, sweep: Option<f32>) {
     let k = c();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let p = ui.painter();
     if k.look == Look::Y2k {
         paint::cut_rect(p, rect, 5.0, paint::DIAGONAL, k.surface, Stroke::new(1.0_f32, k.border));
-        paint::squares(p, rect.shrink2(vec2(8.0, 5.0)), done, k.accent, crate::theme::mix(k.surface, k.text, 0.3));
+        paint::squares(p, rect.shrink2(vec2(8.0, 5.0)), done, k.accent, crate::theme::mix(k.surface, k.text, 0.3), sweep);
         return;
     }
     p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, k.border));
@@ -155,7 +155,45 @@ fn blocks(ui: &mut egui::Ui, done: f32, height: f32) {
     let lit = (done.clamp(0.0, 1.0) * n as f32).round() as usize;
     for i in 0..n {
         let r = Rect::from_min_size(pos2(inner.left() + i as f32 * (w + GAP), inner.top()), vec2(w, inner.height()));
-        p.rect_filled(r, 0.0, if i < lit { k.accent } else { k.rule });
+        let color = if i < lit {
+            k.accent
+        } else if sweep.is_some_and(|phase| paint::swept(i, n, lit, phase)) {
+            k.accent.gamma_multiply(0.55)
+        } else {
+            k.rule
+        };
+        p.rect_filled(r, 0.0, color);
+    }
+}
+
+/// A step that tells nothing of its progress: the phase of the part that moves over the bar
+fn sweep(ui: &egui::Ui, s: &State) -> Option<f32> {
+    s.busy.then(|| {
+        ui.ctx().request_repaint();
+        (ui.input(|i| i.time) * 0.6).fract() as f32
+    })
+}
+
+/// The thin bar of Classic; while busy, a part of the bar moves over the rest of it
+fn thin_bar(ui: &mut egui::Ui, done: f32, sweep: Option<f32>) {
+    let k = c();
+    let Some(phase) = sweep else {
+        ui.add(egui::ProgressBar::new(done).desired_height(6.0).rounding(3.0).fill(k.accent));
+        return;
+    };
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+    let start = rect.left() + rect.width() * done.clamp(0.0, 1.0);
+    if start > rect.left() {
+        p.rect_filled(Rect::from_x_y_ranges(rect.left()..=start, rect.y_range()), 3.0, k.accent);
+    }
+    let free = rect.right() - start;
+    let w = free * 0.25;
+    let x = start + (free + w) * phase - w;
+    let (a, b) = (x.max(start), (x + w).min(rect.right()));
+    if b > a {
+        p.rect_filled(Rect::from_x_y_ranges(a..=b, rect.y_range()), 3.0, k.accent.gamma_multiply(0.55));
     }
 }
 
@@ -192,7 +230,7 @@ fn classic_progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
         }
         ui.add_space(6.0);
         let overall = s.overall();
-        ui.add(egui::ProgressBar::new(overall as f32).desired_height(6.0).rounding(3.0).fill(k.accent));
+        thin_bar(ui, overall as f32, sweep(ui, s));
         let mut parts = vec![format!("{:.0}%", overall * 100.0)];
         if !s.step.is_empty() {
             parts.push(s.step.clone());
@@ -240,7 +278,7 @@ fn progress_card(ui: &mut egui::Ui, env: &Env, s: &State) {
             ui.painter().text(r.left_center(), Align2::LEFT_CENTER, format!("{:.0}%", overall * 100.0), font, k.text);
             ui.vertical(|ui| {
                 ui.add_space(if y2k { 2.0 } else { 6.0 });
-                blocks(ui, overall as f32, 18.0);
+                blocks(ui, overall as f32, 18.0, sweep(ui, s));
                 if y2k {
                     // the dots count up while the job runs
                     let dots = (ui.input(|i| i.time) * 2.5) as usize % 4;

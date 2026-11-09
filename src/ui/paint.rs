@@ -109,7 +109,22 @@ pub fn wire(p: &Painter, a: Pos2, b: Pos2, color: Color32, bg: Color32) {
 }
 
 /// A row of small squares across `rect`, the first part of them filled (a loading bar)
-pub fn squares(p: &Painter, rect: Rect, done: f32, lit: Color32, empty: Color32) {
+/// Of the `n` cells of a bar with `lit` done: whether cell `i` is in the part that moves
+/// over the rest of the bar while a step tells nothing of its progress (`phase`: 0..1, again
+/// and again)
+pub fn swept(i: usize, n: usize, lit: usize, phase: f32) -> bool {
+    let span = n.saturating_sub(lit);
+    if span == 0 || i < lit {
+        return false;
+    }
+    let w = (span / 5).clamp(2, 6);
+    let head = (phase.clamp(0.0, 1.0) * (span + w) as f32) as usize;
+    let j = i - lit;
+    j < head && j + w >= head
+}
+
+/// `sweep`: the phase of the moving part of a busy bar (see `swept`)
+pub fn squares(p: &Painter, rect: Rect, done: f32, lit: Color32, empty: Color32, sweep: Option<f32>) {
     let side = rect.height();
     let gap = (side * 0.4).max(2.0);
     let n = ((rect.width() + gap) / (side + gap)).floor().max(1.0) as usize;
@@ -119,6 +134,8 @@ pub fn squares(p: &Painter, rect: Rect, done: f32, lit: Color32, empty: Color32)
         let r = Rect::from_min_size(pos2(rect.left() + i as f32 * (side + gap), rect.top()), vec2(side, side));
         if i < on {
             p.rect_filled(r, 0.0, lit);
+        } else if sweep.is_some_and(|phase| swept(i, n, on, phase)) {
+            p.rect_filled(r, 0.0, lit.gamma_multiply(0.55));
         } else {
             p.rect_stroke(r.shrink(0.5), 0.0, Stroke::new(1.0_f32, empty));
         }

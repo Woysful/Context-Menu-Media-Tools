@@ -3,7 +3,7 @@
 
 use super::super::forms::{default_menu, original_check, parse_in, result_row_with, small_number};
 use super::{form_row, muted, one_line, segmented, slider_row, Editor, Env, FIELDS_W, GAP, PREVIEW_MIN_W};
-use crate::defaults::{self as dv, DITHERS};
+use crate::defaults::{self as dv, DITHERS, SLOWS};
 use crate::engine::{Anim, AnimFormat, Request};
 use eframe::egui;
 
@@ -16,6 +16,9 @@ pub struct AnimForm {
     compression: u32,
     /// a place in DITHERS
     dither: usize,
+    speed_text: String,
+    /// a place in SLOWS
+    slow: usize,
     pub(in crate::ui) ed: Editor,
 }
 
@@ -31,6 +34,8 @@ impl AnimForm {
             quality: d(dv::WEBP_QUALITY).parse().unwrap_or(cfg.webp.quality),
             compression: d(dv::WEBP_COMPRESSION).parse().unwrap_or(cfg.webp.compression),
             dither: dither_index(&d(dv::GIF_DITHER)),
+            speed_text: "1".into(),
+            slow: SLOWS.iter().position(|s| *s == d(dv::ANIM_SLOW)).unwrap_or(0),
             // without a known length: the first frame, as of a picture
             ed: Editor::new(length),
         }
@@ -86,6 +91,20 @@ impl AnimForm {
         if let Some(v) = default_menu(&r, env, dv::WEBP_FPS, fps.map(|v| v.to_string()).as_deref()) {
             self.fps_text = v;
         }
+        let speed = crate::units::parse_decimal(&self.speed_text).filter(|v| (0.1..=10.0).contains(v));
+        form_row(ui, t.anim_speed, |ui| {
+            small_number(ui, &mut self.speed_text, speed.is_some(), "×");
+            one_line(ui, t.anim_speed_hint, muted());
+        });
+        let slower = speed.is_some_and(|s| s < 1.0);
+        let r = form_row(ui, t.anim_slow, |ui| {
+            let r = ui.add_enabled_ui(slower, |ui| segmented(ui, &t.anim_slows, &mut self.slow)).inner;
+            one_line(ui, if slower { t.anim_slow_hints[self.slow.min(1)] } else { t.anim_slow_off }, muted());
+            r
+        });
+        if let Some(v) = default_menu(&r, env, dv::ANIM_SLOW, Some(SLOWS[self.slow.min(1)])) {
+            self.slow = SLOWS.iter().position(|s| *s == v).unwrap_or(0);
+        }
         if self.format == 0 {
             let r = form_row(ui, t.webp_quality, |ui| {
                 let r = slider_row(ui, &mut self.quality, 0..=100);
@@ -121,14 +140,16 @@ impl AnimForm {
             });
         }
         form_row(ui, t.original, |ui| original_check(ui, env, delete_original, t.delete_after));
-        let req = match (size, fps) {
-            (Some(size), Some(fps)) => Some(Request::Anim(Box::new(Anim {
+        let req = match (size, fps, speed) {
+            (Some(size), Some(fps), Some(speed)) => Some(Request::Anim(Box::new(Anim {
                 format: if self.format == 0 { AnimFormat::Webp } else { AnimFormat::Gif },
                 size,
                 fps,
                 quality: self.quality,
                 compression: self.compression,
                 dither: DITHERS[self.dither.min(3)].to_string(),
+                speed,
+                smooth: self.slow == 1,
                 edit: self.ed.edit(env),
             }))),
             _ => None,

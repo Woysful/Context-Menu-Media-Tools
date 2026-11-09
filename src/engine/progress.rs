@@ -24,6 +24,8 @@ pub struct State {
     pub file_count: usize,
     pub file_name: String,
     pub step: String,
+    /// the step tells nothing of its progress: the bar shows that it is busy
+    pub busy: bool,
     /// 0..1 inside the current file
     pub fraction: f64,
     pub speed: Option<f64>,
@@ -125,12 +127,17 @@ impl Progress {
             s.fraction = 0.0;
             s.speed = None;
             s.step.clear();
+            s.busy = false;
             s.file_started = Some(Instant::now());
         });
     }
 
     pub(super) fn set_step(&self, step: &str) {
         self.changed(|s| s.step = step.to_string());
+    }
+
+    pub(super) fn set_busy(&self, busy: bool) {
+        self.changed(|s| s.busy = busy);
     }
 
     pub(super) fn set_fraction(&self, f: f64) {

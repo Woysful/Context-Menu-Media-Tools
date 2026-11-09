@@ -12,7 +12,7 @@ use crate::i18n;
 use crate::media::Info;
 use crate::scale::ScaleMode;
 use crate::settings::Custom;
-use crate::units::fmt_mb;
+use crate::units::{fmt_float, fmt_mb};
 use std::path::{Path, PathBuf};
 
 fn path_val(p: &Path) -> Val {
@@ -90,6 +90,30 @@ fn with_edit(command: &str) -> Option<String> {
     command.contains("fps={fps},").then(|| command.replacen("fps={fps},", "fps={fps},{edit}", 1))
 }
 
+/// A command of an older presets.toml has no {speed}: the speed goes before its fps filter
+fn with_speed(command: &str) -> Option<String> {
+    if command.contains("{speed}") {
+        return Some(command.to_string());
+    }
+    command.contains("fps={fps},").then(|| command.replacen("fps={fps},", "{speed}fps={fps},", 1))
+}
+
+/// {speed}: the filters of the speed with a trailing comma, nothing at the speed 1
+fn speed_filters(speed: f64, smooth: bool, fps: u32) -> String {
+    if (speed - 1.0).abs() < 1e-6 {
+        return String::new();
+    }
+    let pts = format!("setpts=(PTS-STARTPTS)/{},", fmt_float(speed));
+    if smooth && speed < 1.0 {
+        format!("{pts}minterpolate=fps={fps}:mi_mode=mci,")
+    } else {
+        pts
+    }
+}
+
+/// The colours of a GIF are picked at this frame rate at most
+const PALETTE_FPS: u32 = 5;
+
 /// Make Anim: an animated WebP, or a GIF in two runs (its palette, then the GIF)
 pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Done> {
     let chain = file_filters(job, file, &a.edit, ScaleMode::Orig)?;
@@ -97,16 +121,25 @@ pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Don
         AnimFormat::Webp => ("[webp_anim]", &job.cfg.webp.command, &job.cfg.webp.output),
         AnimFormat::Gif => ("[gif_anim]", &job.cfg.gif.command, &job.cfg.gif.output),
     };
-    let fixed = |command: &str| match with_edit(command) {
-        Some(c) => c,
-        None => {
+    let t = i18n::t();
+    let speed = speed_filters(a.speed, a.smooth, a.fps);
+    let fixed = |command: &str| {
+        let command = with_edit(command).unwrap_or_else(|| {
             if !chain.is_empty() {
-                job.prog.warn(format!("{section}: {}", i18n::t().anim_no_edit));
+                job.prog.warn(format!("{section}: {}", t.anim_no_edit));
             }
             command.to_string()
-        }
+        });
+        with_speed(&command).unwrap_or_else(|| {
+            if !speed.is_empty() {
+                job.prog.warn(format!("{section}: {}", t.anim_no_speed));
+            }
+            command
+        })
     };
     let output = new_file(output, file, &[]);
+    // the result is as long as the video at its new speed
+    let length = info.duration.map(|d| d / a.speed);
     let mut extra = vec![
         ("size", Val::S(a.size.to_string())),
         ("fps", Val::S(a.fps.to_string())),
@@ -114,18 +147,25 @@ pub(super) fn anim(job: &Job, file: &Path, info: &Info, a: &Anim) -> Outcome<Don
         ("compression", Val::S(a.compression.to_string())),
         ("dither", Val::S(a.dither.clone())),
         ("edit", scale_val(&chain)),
+        ("speed", Val::S(speed.clone())),
     ];
     if a.format == AnimFormat::Gif {
         let work = TempDir::new()?;
         let palette = work.path().join("palette.png");
         extra.push(("palette", path_val(&palette)));
+        extra.push(("palette_fps", Val::S(a.fps.min(PALETTE_FPS).to_string())));
         let mut vars = vec![("input", path_val(file)), ("output", path_val(&output))];
         vars.extend(extra);
-        let part = |from: f64, to: f64| info.duration.map_or(Track::at(from), |d| Track::part(d, from, to));
-        run_template(job, &fixed(&job.cfg.gif.palette_command), &vars, false, part(0.0, 0.2), None)?;
-        run_template(job, &fixed(command), &vars, false, part(0.2, 1.0), None)?;
+        // ffmpeg tells nothing of its progress until the palette is written
+        job.prog.set_step(t.anim_colours);
+        job.prog.set_busy(true);
+        let palette_command = with_edit(&job.cfg.gif.palette_command).unwrap_or_else(|| job.cfg.gif.palette_command.clone());
+        run_template(job, &palette_command, &vars, false, Track::at(0.0), None)?;
+        job.prog.set_busy(false);
+        job.prog.set_step("");
+        run_template(job, &fixed(command), &vars, false, Track::whole(length), None)?;
     } else {
-        run(job, &fixed(command), file, &output, extra, info.duration)?;
+        run(job, &fixed(command), file, &output, extra, length)?;
     }
     let bytes = std::fs::metadata(&output).map(|m| m.len()).unwrap_or(0);
     Ok(Done::new(format!("{} → {} ({})", short_name(file), short_name(&output), fmt_mb(bytes)), &output))
@@ -139,12 +179,28 @@ pub(super) fn custom(job: &Job, file: &Path, info: &Info, c: &Custom) -> Outcome
 
 #[cfg(test)]
 mod tests {
-    use super::with_edit;
+    use super::{with_edit, with_speed};
 
     #[test]
     fn old_commands_get_the_edits_after_the_fps() {
         assert_eq!(with_edit("ffmpeg -vf \"fps={fps},scale=1:1\" {output}").unwrap(), "ffmpeg -vf \"fps={fps},{edit}scale=1:1\" {output}");
         assert_eq!(with_edit("a {edit}b").unwrap(), "a {edit}b");
         assert_eq!(with_edit("ffmpeg -vf scale=1:1 {output}"), None);
+    }
+
+    #[test]
+    fn old_commands_get_the_speed_before_the_fps() {
+        let old = "ffmpeg -vf \"fps={fps},scale=1:1\" {output}";
+        assert_eq!(with_speed(&with_edit(old).unwrap()).unwrap(), "ffmpeg -vf \"{speed}fps={fps},{edit}scale=1:1\" {output}");
+        assert_eq!(with_speed("a {speed}b").unwrap(), "a {speed}b");
+        assert_eq!(with_speed("ffmpeg -vf scale=1:1 {output}"), None);
+    }
+
+    #[test]
+    fn the_speed_filters() {
+        assert_eq!(super::speed_filters(1.0, true, 20), "");
+        assert_eq!(super::speed_filters(2.0, true, 20), "setpts=(PTS-STARTPTS)/2,");
+        assert_eq!(super::speed_filters(0.5, false, 20), "setpts=(PTS-STARTPTS)/0.5,");
+        assert_eq!(super::speed_filters(0.25, true, 15), "setpts=(PTS-STARTPTS)/0.25,minterpolate=fps=15:mi_mode=mci,");
     }
 }

@@ -530,6 +530,7 @@ fn field_names(t: &T, key: &str) -> (String, String) {
         dv::WEBP_QUALITY => (t.webp_quality, format!("{} · WebP", t.t_anim)),
         dv::WEBP_COMPRESSION => (t.webp_compression, format!("{} · WebP", t.t_anim)),
         dv::GIF_DITHER => (t.anim_dither, format!("{} · GIF", t.t_anim)),
+        dv::ANIM_SLOW => (t.anim_slow, t.t_anim.to_string()),
         dv::DELETE_MERGE => (t.merge_kept, t.t_delete_audio.to_string()),
         dv::DELETE_ORIGINAL => (t.delete_original, ts.every_window.to_string()),
         dv::IMAGE_MODE => (ts.field_tab, t.t_compress_image.to_string()),
@@ -592,6 +593,7 @@ fn choice_options(t: &T, key: &str) -> Vec<(&'static str, &'static str)> {
         dv::IMAGE_MODE => vec![("quality", t.img_tab_quality), ("limit", t.img_tab_limit)],
         dv::ICON_SQUARE => vec![("pad", t.icon_pad), ("crop", t.icon_crop)],
         dv::GIF_DITHER => dv::DITHERS.into_iter().zip(t.anim_dithers).collect(),
+        dv::ANIM_SLOW => dv::SLOWS.into_iter().zip(t.anim_slows).collect(),
         _ => vec![],
     }
 }

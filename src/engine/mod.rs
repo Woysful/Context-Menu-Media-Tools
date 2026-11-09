@@ -73,6 +73,10 @@ pub struct Anim {
     pub compression: u32,
     /// GIF only: the dither of paletteuse
     pub dither: String,
+    /// 2 = twice as fast, 0.5 = half the speed
+    pub speed: f64,
+    /// below the speed 1: draw the frames in between instead of showing each one longer
+    pub smooth: bool,
     /// the edits of the editor, as in Compress Image
     pub edit: ImageEdit,
 }
