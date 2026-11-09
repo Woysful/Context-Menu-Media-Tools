@@ -103,17 +103,46 @@ pub struct Caption {
     pub size: u32,
     /// empty: Impact or one like it
     pub font: PathBuf,
+    /// with strips: the text and the strips
+    pub strip_colors: [[u8; 3]; 2],
+    /// on the picture: the text and its outline
+    pub over_colors: [[u8; 3]; 2],
 }
 
 impl Default for Caption {
     fn default() -> Self {
-        Caption { top: String::new(), bottom: String::new(), strip: true, size: 9, font: PathBuf::new() }
+        Caption {
+            top: String::new(),
+            bottom: String::new(),
+            strip: true,
+            size: 9,
+            font: PathBuf::new(),
+            strip_colors: [[0, 0, 0], [255, 255, 255]],
+            over_colors: [[255, 255, 255], [0, 0, 0]],
+        }
     }
 }
 
 impl Caption {
     pub fn is_empty(&self) -> bool {
         self.top.trim().is_empty() && self.bottom.trim().is_empty()
+    }
+
+    /// The text and the strips, or the text and its outline, as the style is
+    pub fn colors(&self) -> [[u8; 3]; 2] {
+        if self.strip {
+            self.strip_colors
+        } else {
+            self.over_colors
+        }
+    }
+
+    pub fn colors_mut(&mut self) -> &mut [[u8; 3]; 2] {
+        if self.strip {
+            &mut self.strip_colors
+        } else {
+            &mut self.over_colors
+        }
     }
 }
 
@@ -293,25 +322,26 @@ fn caption_filters(c: &Caption, (w, h): (u32, u32), f: &mut Vec<String>) -> Resu
     let pad = (px * 0.35).round();
     let cx = w as f64 / 2.0;
     let mut lines: Vec<(&String, f64)> = Vec::new();
-    let (size, color, border) = if c.strip {
+    let [ink, back] = c.colors();
+    let (size, border) = if c.strip {
         let strip = |n: usize| if n == 0 { 0 } else { (block(n) + 2.0 * pad).ceil() as u32 };
         let (st, sb) = (strip(top.len()), strip(bottom.len()));
         // pad rounds sizes and places down to the half-size colours of yuv420p (WebP, AVIF,
         // after sharpen or vignette): an odd picture or strip would not fit in it
         f.push("format=yuv444p|yuva444p|rgb24|rgba".into());
-        f.push(format!("pad=w=iw:h=ih+{}:x=0:y={st}:color=white", st + sb));
+        f.push(format!("pad=w=iw:h=ih+{}:x=0:y={st}:color={}", st + sb, hex(back)));
         lines.extend(top.iter().enumerate().map(|(i, l)| (l, pad + i as f64 * m.step + m.ascent)));
         let below = (st + h) as f64 + pad;
         lines.extend(bottom.iter().enumerate().map(|(i, l)| (l, below + i as f64 * m.step + m.ascent)));
-        ((w, h + st + sb), [0, 0, 0], None)
+        ((w, h + st + sb), None)
     } else {
         lines.extend(top.iter().enumerate().map(|(i, l)| (l, pad + i as f64 * m.step + m.ascent)));
         let start = h as f64 - pad - block(bottom.len());
         lines.extend(bottom.iter().enumerate().map(|(i, l)| (l, start + i as f64 * m.step + m.ascent)));
-        ((w, h), [255, 255, 255], Some((((px * 0.07).round() as u32).max(1), [0, 0, 0])))
+        ((w, h), Some((((px * 0.07).round() as u32).max(1), back)))
     };
     for (line, baseline) in lines {
-        f.push(line_filter(&path, line, px, color, border, cx, baseline));
+        f.push(line_filter(&path, line, px, ink, border, cx, baseline));
     }
     Ok(size)
 }
@@ -438,7 +468,7 @@ mod tests {
         assert!((b.rect[0] + b.rect[2] / 2.0 - 500.0).abs() < 1e-6 && (b.rect[1] + b.rect[3] / 2.0 - 200.0).abs() < 1e-6);
         let edit = ImageEdit {
             texts: vec![mark],
-            caption: Some(Caption { top: "top text".into(), bottom: String::new(), strip: true, size: 10, font }),
+            caption: Some(Caption { top: "top text".into(), size: 10, font: font.clone(), ..Default::default() }),
             ..Default::default()
         };
         let built = build(&edit, Some((1000, 800)), Upto::All).unwrap();
@@ -449,5 +479,19 @@ mod tests {
         assert!(built.filters[4].starts_with("pad=w=iw:h=ih+"));
         let strip = built.size.unwrap().1 - 800;
         assert!(strip > 100 && strip < 200, "{strip}");
+        assert!(built.filters[4].ends_with(":color=0xFFFFFF") && built.filters[5].contains(":fontcolor=0x000000:x="));
+    }
+
+    #[test]
+    fn captions_in_own_colours() {
+        let Some(font) = fonts::default_text(&fonts::system()) else { return };
+        let mut c =
+            Caption { top: "top".into(), font, strip_colors: [[255, 255, 255], [0, 0, 0]], over_colors: [[255, 221, 0], [0, 0, 128]], ..Default::default() };
+        let made = |c: &Caption| build(&ImageEdit { caption: Some(c.clone()), ..Default::default() }, Some((1000, 800)), Upto::All).unwrap().filters;
+        let f = made(&c);
+        assert!(f[1].ends_with(":color=0x000000") && f[2].contains(":fontcolor=0xFFFFFF:x="), "{f:?}");
+        c.strip = false;
+        let f = made(&c);
+        assert!(f[0].contains(":fontcolor=0xFFDD00:borderw=") && f[0].contains(":bordercolor=0x000080:"), "{f:?}");
     }
 }

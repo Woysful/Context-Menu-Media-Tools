@@ -77,7 +77,8 @@ Options:
                   --text-size % (of the longer side)  --text-color RRGGBB  --text-outline %[,RRGGBB]
                   --text-box RRGGBB[,opacity %]  --font \"Family[:Style]\" or a font file
                   meme: --top-text T  --bottom-text T  --caption strip|overlay  --caption-size %
-                  --caption-font F   (the order: colours, sharpen, blur, text, crop, vignette, captions)
+                  --caption-font F  --caption-color RRGGBB[,RRGGBB] (the text, then the strips or the outline)
+                  (the order: colours, sharpen, blur, text, crop, vignette, captions)
   make-icon:      --sizes 16,24,32,48,64,128,256  --square pad|crop
   frames-to-video (folders or pictures): --fps N  --codec C  --level low|medium|high
 ";
@@ -132,6 +133,7 @@ impl Cli {
             "caption",
             "caption-size",
             "caption-font",
+            "caption-color",
         ];
         let mut it = args.into_iter();
         let mut cli = Cli { action: it.next().unwrap_or_default(), files: vec![], opts: HashMap::new(), flags: vec![] };
@@ -411,6 +413,15 @@ fn edit_options(cli: &Cli, edit: &mut engine::ImageEdit) -> Result<(), String> {
             font: font("caption-font")?,
             ..Default::default()
         };
+        if let Some(v) = cli.opt("caption-color") {
+            let bad = || format!("bad --caption-color: {v} (RRGGBB[,RRGGBB])");
+            let (ink, back) = v.split_once(',').map_or((v, None), |(a, b)| (a, Some(b)));
+            let colors = c.colors_mut();
+            colors[0] = colour(ink).ok_or_else(bad)?;
+            if let Some(back) = back {
+                colors[1] = colour(back).ok_or_else(bad)?;
+            }
+        }
         if let Some(v) = cli.opt("caption-size") {
             c.size = v.trim().trim_end_matches('%').parse().ok().filter(|n| (1..=50).contains(n)).ok_or_else(|| format!("bad --caption-size: {v}"))?;
         }

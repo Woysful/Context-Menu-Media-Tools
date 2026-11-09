@@ -378,7 +378,8 @@ impl ImageForm {
         if made.is_none() && expected.is_some_and(|(_, eh)| (eh as f32) > h * bh + 0.5) {
             // the strips of the captions are not there yet: the cropped picture between them
             let strip = Rect::from_center_size(pic.center(), vec2(pic.width(), pic.width() * h * bh / (w * bw).max(1.0)));
-            p.rect_filled(pic, 0.0, Color32::WHITE);
+            let [r, g, b] = e.caption.as_ref().map_or([255; 3], |c| c.colors()[1]);
+            p.rect_filled(pic, 0.0, Color32::from_rgb(r, g, b));
             p.image(id, strip, uv, Color32::WHITE);
         } else {
             p.image(id, pic, uv, Color32::WHITE);
@@ -717,6 +718,17 @@ impl ImageForm {
             cap.strip = style == 0;
         }
         ui.add_space(2.0);
+        let back = if cap.strip { t.img_caption_back } else { t.img_outline };
+        form_row(ui, t.img_colour, |ui| {
+            ui.horizontal(|ui| {
+                let colors = cap.colors_mut();
+                colour_button(ui, &mut colors[0]).on_hover_text(t.img_caption_text);
+                colour_button(ui, &mut colors[1]).on_hover_text(back);
+                if ui.add(secondary_button(t.img_swap)).on_hover_text(t.img_swap_hint).clicked() {
+                    colors.swap(0, 1);
+                }
+            });
+        });
         form_row(ui, t.img_caption_top, |ui| ui.add(egui::TextEdit::multiline(&mut cap.top).desired_rows(1).desired_width(f32::INFINITY)));
         form_row(ui, t.img_caption_bottom, |ui| ui.add(egui::TextEdit::multiline(&mut cap.bottom).desired_rows(1).desired_width(f32::INFINITY)));
         form_row(ui, t.img_size, |ui| slider_row(ui, &mut cap.size, 3..=20));
