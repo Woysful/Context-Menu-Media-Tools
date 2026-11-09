@@ -548,7 +548,9 @@ impl ImageForm {
         let t = env.t;
         let w = ui.available_width();
         let top = ui.cursor().top();
-        let mut h = fields_h - self.below;
+        // a little shorter than the fields: they may end on the edge of the window, where the
+        // border of the ratios would be cut
+        let mut h = fields_h - self.below - 4.0;
         if let (true, Some(bottom)) = (self.live, self.view_bottom) {
             // a little air above the buttons at the bottom of the window
             let room = bottom - top - self.below - 8.0;
