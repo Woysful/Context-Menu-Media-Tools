@@ -20,33 +20,27 @@ fn path_val(p: &Path) -> Val {
     Val::S(p.to_string_lossy().to_string())
 }
 
-/// The filters of the turn, the mirror, the crop and the size, in this order. The crop is a part
-/// of the turned picture and the size is that of the cropped one, so none of them needs to know
-/// the size of the picture (ffmpeg turns a photo by its EXIF orientation before them).
-pub fn edit_filters(edit: &ImageEdit, scale: ScaleMode) -> Vec<String> {
-    let mut f: Vec<String> = Vec::new();
-    match edit.turns % 4 {
-        1 => f.push("transpose=clock".into()),
-        2 => f.push("hflip,vflip".into()),
-        3 => f.push("transpose=cclock".into()),
-        _ => {}
-    }
-    if edit.flip_h {
-        f.push("hflip".into());
-    }
-    if edit.flip_v {
-        f.push("vflip".into());
-    }
-    if let Some([x, y, w, h]) = edit.crop {
-        // exact: x and y are not moved to even pixels for the subsampled colours of a JPEG
-        f.push(format!("crop=w=iw*{w:.6}:h=ih*{h:.6}:x=iw*{x:.6}:y=ih*{y:.6}:exact=1"));
-    }
+/// The filters of the edits, then the size. The crop is a part of the turned picture and the
+/// size is that of the result, so only areas and text need to know the size of the picture
+/// (`size`: as ffmpeg decodes it, turned by its EXIF orientation).
+pub fn edit_filters(edit: &ImageEdit, scale: ScaleMode, size: Option<(u32, u32)>) -> Result<Vec<String>, String> {
+    let mut f = super::edit::build(edit, size, super::edit::Upto::All)?.filters;
     match scale {
         ScaleMode::Height(px) => f.push(format!("scale=w='if(lte(iw,ih),min(iw,{px}),-2)':h='if(lte(iw,ih),-2,min(ih,{px}))':flags=lanczos")),
         ScaleMode::Factor(v) if v < 0.999 => f.push(format!("scale=w='max(1,trunc(iw*{v:.6}))':h='max(1,trunc(ih*{v:.6}))':flags=lanczos")),
         _ => {}
     }
-    f
+    Ok(f)
+}
+
+/// The filters of `edit` for `file`; the size of the picture is read only when they need it
+fn file_filters(job: &Job, file: &Path, edit: &ImageEdit, scale: ScaleMode) -> Outcome<Vec<String>> {
+    let size = if super::edit::needs_size(edit) {
+        Some(media::picture_size(&job.ffprobe, file).ok_or_else(|| Failure::Error(format!("ffprobe: {}", short_name(file))))?)
+    } else {
+        None
+    };
+    Ok(edit_filters(edit, scale, size)?)
 }
 
 /// The format of the result for `file` ("source" = the format of the file, as far as there is one)
@@ -93,7 +87,7 @@ pub(super) fn estimate(job: &Job, file: &Path, key: &str, quality: u32, scale: S
     let (key, fmt) = format_for(&job.cfg, key, file).ok_or_else(|| Failure::Error(format!("{} {key}", i18n::t().unknown_codec)))?;
     let work = TempDir::new()?;
     let out = work.path().join(format!("estimate.{}", fmt.extension(key)));
-    encode(job, file, fmt, &edit_filters(edit, scale), quality, &out, Track::at(0.0))
+    encode(job, file, fmt, &file_filters(job, file, edit, scale)?, quality, &out, Track::at(0.0))
 }
 
 pub(super) fn compress(job: &Job, file: &Path, key: &str, target: ImageTarget, scale: ScaleMode, edit: &ImageEdit) -> Outcome<Done> {
@@ -101,7 +95,7 @@ pub(super) fn compress(job: &Job, file: &Path, key: &str, target: ImageTarget, s
     let (key, fmt) = format_for(&job.cfg, key, file).ok_or_else(|| Failure::Error(format!("{} {key}", t.unknown_codec)))?;
     let ext = fmt.extension(key).to_string();
     let output = new_file(&fmt.output, file, &[("ext", ext.clone()), ("fmt", key.to_string())]);
-    let chain = edit_filters(edit, scale);
+    let chain = file_filters(job, file, edit, scale)?;
     let before = file_size(file);
     let (size, quality) = match target {
         ImageTarget::Quality(q) => (encode(job, file, fmt, &chain, q, &output, Track::whole(None))?, q),
@@ -396,14 +390,14 @@ mod tests {
 
     #[test]
     fn filters_of_an_edit() {
-        let e = ImageEdit { turns: 1, flip_h: true, flip_v: false, crop: Some([0.1, 0.2, 0.5, 0.4]) };
-        let f = edit_filters(&e, ScaleMode::Height(720));
+        let e = ImageEdit { turns: 1, flip_h: true, crop: Some([0.1, 0.2, 0.5, 0.4]), ..Default::default() };
+        let f = edit_filters(&e, ScaleMode::Height(720), None).unwrap();
         assert_eq!(f[0], "transpose=clock");
         assert_eq!(f[1], "hflip");
         assert_eq!(f[2], "crop=w=iw*0.500000:h=ih*0.400000:x=iw*0.100000:y=ih*0.200000:exact=1");
         assert!(f[3].starts_with("scale=w='if(lte(iw,ih),min(iw,720),-2)'"));
-        assert!(edit_filters(&ImageEdit::default(), ScaleMode::Orig).is_empty());
-        assert_eq!(edit_filters(&ImageEdit { turns: 2, ..Default::default() }, ScaleMode::Factor(1.0)), ["hflip,vflip"]);
+        assert!(edit_filters(&ImageEdit::default(), ScaleMode::Orig, None).unwrap().is_empty());
+        assert_eq!(edit_filters(&ImageEdit { turns: 2, ..Default::default() }, ScaleMode::Factor(1.0), None).unwrap(), ["hflip,vflip"]);
     }
 
     #[test]

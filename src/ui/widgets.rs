@@ -724,7 +724,7 @@ pub fn number_field(ui: &mut egui::Ui, text: &mut String, valid: bool, suffix: &
 }
 
 /// A slider with its value at the right (a readout in a box: Brutalist, Y2K)
-pub fn slider_row(ui: &mut egui::Ui, value: &mut u32, range: std::ops::RangeInclusive<u32>) -> egui::Response {
+pub fn slider_row<N: egui::emath::Numeric + std::fmt::Display>(ui: &mut egui::Ui, value: &mut N, range: std::ops::RangeInclusive<N>) -> egui::Response {
     let k = c();
     ui.horizontal(|ui| {
         let room = if k.look == Look::Classic { 48.0 } else { 60.0 };

@@ -1,6 +1,8 @@
 //! The forms of Compress Image, Make Icon and Frames to Video. Compress Image of one picture
 //! shows it at the right: turned and mirrored as it will be, with a frame to crop it.
 
+mod tools;
+
 use super::dropdown::{build_groups, codec_combo, Group};
 use super::forms::{default_menu, original_check, result_row_with};
 use super::scale_field::ScaleField;
@@ -247,6 +249,11 @@ enum Drag {
     Edge(usize, [f64; 4]),
     /// the frame is moved, the pointer holds it this far from its top left corner
     Move(egui::Vec2),
+    /// a text is moved, the pointer holds it this far from its middle
+    Text(egui::Vec2),
+    /// a text is made larger or smaller: its size and the distance of the pointer from its
+    /// middle when the drag started
+    TextSize(f64, f32),
 }
 
 pub struct ImageForm {
@@ -284,6 +291,19 @@ pub struct ImageForm {
     loupe_on: bool,
     loupe_zoom: f32,
     loupe_side: f32,
+    /// colours, effects, areas, texts and captions (its turn and crop are not used)
+    edits: ImageEdit,
+    /// the panel of the tools at the right of the whole window
+    tools_open: bool,
+    tool: tools::Tool,
+    /// the area or the text of the tool that is chosen
+    chosen: Option<usize>,
+    /// the kind and the strength of the area that was chosen last, for a new one
+    blur_last: (engine::BlurKind, u32),
+    /// the picture as ffmpeg makes it: before the crop, and all of it
+    work: tools::Render,
+    result: tools::Render,
+    fonts: tools::FontList,
 }
 
 /// The width the picture at the right of Compress Image starts with: about as wide as the
@@ -331,6 +351,14 @@ impl ImageForm {
             loupe_on: false,
             loupe_zoom: 8.0,
             loupe_side: 200.0,
+            edits: ImageEdit::default(),
+            tools_open: false,
+            tool: tools::Tool::Crop,
+            chosen: None,
+            blur_last: (engine::BlurKind::Gauss, 30),
+            work: tools::Render::default(),
+            result: tools::Render::default(),
+            fonts: tools::FontList::default(),
         }
     }
 
@@ -346,9 +374,16 @@ impl ImageForm {
         env.files.len() == 1
     }
 
+    /// The edits of one picture (several pictures are only turned and mirrored)
     fn edit(&self, env: &Env) -> ImageEdit {
-        let crop = self.crop.filter(|r| Self::one_file(env) && (r[2] < 0.999 || r[3] < 0.999));
-        ImageEdit { turns: self.turns, flip_h: self.mirrored, flip_v: false, crop }
+        let turn = ImageEdit { turns: self.turns, flip_h: self.mirrored, ..Default::default() };
+        if !Self::one_file(env) {
+            return turn;
+        }
+        let mut e = ImageEdit { turns: self.turns, flip_h: self.mirrored, crop: self.crop.filter(|r| r[2] < 0.999 || r[3] < 0.999), ..self.edits.clone() };
+        e.texts.retain(|t| !t.text.trim().is_empty());
+        e.caption = e.caption.filter(|c| !c.is_empty());
+        e
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, env: &Env, delete_original: &mut bool) -> Option<Request> {
@@ -448,7 +483,9 @@ impl ImageForm {
         form_row(ui, t.original, |ui| original_check(ui, env, delete_original, t.delete_after));
 
         let req = match (target, self.scale.invalid) {
-            (Some(target), false) => Some(Request::CompressImage { format: self.format.clone(), target, scale: self.scale.mode, edit: self.edit(env) }),
+            (Some(target), false) => {
+                Some(Request::CompressImage { format: self.format.clone(), target, scale: self.scale.mode, edit: Box::new(self.edit(env)) })
+            }
             _ => None,
         };
         let note = match (&req, self.tab) {
@@ -507,13 +544,25 @@ impl ImageForm {
                 self.turns = (self.turns + 2) % 4;
             }
         }
-        if let Some([x, y, w, h]) = self.crop {
-            self.crop = Some(match sym {
-                Sym::Right => [1.0 - y - h, x, h, w],
-                Sym::Left => [y, 1.0 - x - w, h, w],
-                Sym::MirrorH => [1.0 - x - w, y, w, h],
-                Sym::MirrorV => [x, 1.0 - y - h, w, h],
-            });
+        let rect = |[x, y, w, h]: [f64; 4]| match sym {
+            Sym::Right => [1.0 - y - h, x, h, w],
+            Sym::Left => [y, 1.0 - x - w, h, w],
+            Sym::MirrorH => [1.0 - x - w, y, w, h],
+            Sym::MirrorV => [x, 1.0 - y - h, w, h],
+        };
+        self.crop = self.crop.map(rect);
+        for b in &mut self.edits.blurs {
+            b.rect = rect(b.rect);
+        }
+        // a text stays upright: only its middle moves with the picture
+        for t in &mut self.edits.texts {
+            let [x, y] = t.at;
+            t.at = match sym {
+                Sym::Right => [1.0 - y, x],
+                Sym::Left => [y, 1.0 - x],
+                Sym::MirrorH => [1.0 - x, y],
+                Sym::MirrorV => [x, 1.0 - y],
+            };
         }
         if matches!(sym, Sym::Left | Sym::Right) {
             self.upright = !self.upright;
@@ -565,9 +614,10 @@ impl ImageForm {
         self.below = ui.min_rect().bottom() - box_bottom;
     }
 
-    /// The picture with the frame of the crop in a box of `size`; a drag on it crops. `big`: on
-    /// the whole window, with the magnifier when it is on; otherwise a button in the corner opens
-    /// the whole window. Returns the size of the turned picture once it is loaded.
+    /// The picture with the frame of the crop in a box of `size`; a drag on it crops (or works
+    /// with the tool of the panel). `big`: on the whole window, with the magnifier when it is on;
+    /// otherwise a button in the corner opens the whole window. Returns the size of the turned
+    /// picture once it is loaded.
     fn picture(&mut self, ui: &mut egui::Ui, env: &Env, size: Vec2, big: bool) -> Option<(u32, u32)> {
         let t = env.t;
         if self.live && !self.preview.started {
@@ -588,6 +638,10 @@ impl ImageForm {
                 painter.rect(area, 4.0, k.surface, frame_stroke);
             }
         }
+        let tool = if big && self.tools_open { self.tool } else { tools::Tool::Crop };
+        // the form shows what comes out once there is more than a crop
+        let e = self.edit(env);
+        let edited = e != ImageEdit { turns: e.turns, flip_h: e.flip_h, crop: e.crop, ..Default::default() };
         let mut full = None;
         match self.preview.texture(ui.ctx(), self.turns, self.mirrored) {
             None => {
@@ -598,41 +652,67 @@ impl ImageForm {
                 let galley = painter.layout(text, egui::FontId::proportional(12.0), k.warn, area.width() - 24.0);
                 painter.galley(area.center() - galley.size() / 2.0, galley, k.warn);
             }
-            Some(Ok((tex, size))) => {
+            Some(Ok((base, size))) if tool.shows_result() || !big && edited => {
                 full = Some(size);
-                let [tw, th] = tex.size().map(|v| v as f32);
+                self.draw_result(ui.ctx(), env, &painter, area.shrink(PREVIEW_PAD), &base);
+            }
+            Some(Ok((base, size))) => {
+                full = Some(size);
+                let tex = self.workspace(ui.ctx(), env, &base);
+                let [tw, th] = base.size().map(|v| v as f32);
                 let room = area.shrink(PREVIEW_PAD);
                 let s = (room.width() / tw).min(room.height() / th);
                 let pic = Rect::from_center_size(area.center(), vec2(tw * s, th * s));
                 painter.image(tex.id(), pic, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-                self.drag_crop(&resp, pic, size);
-                if let Some(r) = self.crop {
-                    draw_crop(&painter, pic, r, Some(size));
+                let crop_tool = tool == tools::Tool::Crop;
+                match tool {
+                    tools::Tool::Text => self.text_tool(ui.ctx(), &resp, pic, size),
+                    tools::Tool::Blur => self.blur_tool(ui.ctx(), &resp, pic, size),
+                    _ => {
+                        let ratio = self.part_ratio(size);
+                        drag_rect(&mut self.drag, &mut self.focus, &mut self.crop, &resp, pic, size, ratio);
+                        rect_cursor(ui.ctx(), &resp, pic, self.crop, self.drag);
+                    }
                 }
-                self.set_cursor(ui.ctx(), &resp, pic);
-                if big && self.loupe_on {
+                if let Some(r) = self.crop {
+                    draw_crop(&painter, pic, r, crop_tool.then_some(size), crop_tool);
+                }
+                match tool {
+                    tools::Tool::Text => self.draw_texts(&painter, pic, size),
+                    tools::Tool::Blur => self.draw_areas(&painter, pic),
+                    _ => {}
+                }
+                if big && self.loupe_on && matches!(tool, tools::Tool::Crop | tools::Tool::Blur) {
                     let fine = self.loupe.texture(env, ui.ctx(), (self.turns, self.mirrored));
                     // only while a corner or an edge is dragged
                     if let (true, Some(focus), Some(pointer)) = (resp.dragged(), self.focus, resp.interact_pointer_pos()) {
                         self.wheel(ui.ctx());
-                        draw_loupe(ui.ctx(), fine.as_ref().unwrap_or(&tex), size, focus, pointer, self.crop, self.loupe_zoom, self.loupe_side);
+                        let frame = if crop_tool { self.crop.map(|r| (r, true)) } else { self.chosen_area().map(|r| (r, false)) };
+                        draw_loupe(ui.ctx(), fine.as_ref().unwrap_or(&tex), size, focus, pointer, frame, self.loupe_zoom, self.loupe_side);
                     }
                 }
             }
         }
         if full.is_some() {
             let (icon, tip) = if big { (CornerIcon::Collapse, t.img_crop_collapse) } else { (CornerIcon::Expand, t.img_crop_expand) };
-            if corner_button(ui, area, 0, icon, tip) {
+            if corner_button(ui, area, 0, icon, tip, false) {
                 self.big = !big;
+                self.tools_open = false;
                 ui.ctx().request_repaint();
             }
-            if self.crop.is_some() && corner_button(ui, area, 1, CornerIcon::Reset, t.img_crop_reset) {
+            let open = big && self.tools_open;
+            if corner_button(ui, area, 1, CornerIcon::Pencil, if open { t.img_tools_close } else { t.img_tools_open }, open) {
+                self.tools_open = !open;
+                self.big = true;
+                self.drag = None;
+                ui.ctx().request_repaint();
+            }
+            if self.crop.is_some() && corner_button(ui, area, 2, CornerIcon::Reset, t.img_crop_reset, false) {
                 self.reset_crop();
             }
         }
         full
     }
-
     /// The ratios of the crop; a ratio clicked again stands up (or lies down)
     fn ratio_row(&mut self, ui: &mut egui::Ui, t: &T, full: Option<(u32, u32)>) {
         let labels = ratio_labels(t);
@@ -663,11 +743,14 @@ impl ImageForm {
         self.ratio = 0;
     }
 
-    /// The crop on the whole window: the picture, the ratios under it, Done at the bottom.
-    /// Done or Escape go back to the form.
+    /// The crop on the whole window: the picture, the ratios under it, Done at the bottom; with
+    /// the panel of the tools at the right of the picture. Done or Escape go back to the form.
     pub fn crop_window(&mut self, ctx: &egui::Context, env: &Env) {
         let t = env.t;
+        // Escape in a text field only leaves the field
+        let typing = ctx.wants_keyboard_input();
         let note = self.crop_note(t, self.preview.shown.as_ref().map(|s| s.3));
+        let open = self.tools_open;
         let (mut done, mut reset, cropped) = (false, false, self.crop.is_some());
         window(
             ctx,
@@ -675,14 +758,35 @@ impl ImageForm {
             |ui| {
                 button_row(ui, |ui| {
                     done = ui.add(primary_button(t.img_crop_done)).clicked();
-                    reset = ui.add_enabled(cropped, secondary_button(t.img_crop_reset)).clicked();
-                    ui.add_space(6.0);
-                    ui.add(egui::Label::new(RichText::new(note).small().color(muted())).truncate());
+                    if !open {
+                        reset = ui.add_enabled(cropped, secondary_button(t.img_crop_reset)).clicked();
+                    }
+                    if !open {
+                        ui.add_space(6.0);
+                        ui.add(egui::Label::new(RichText::new(note).small().color(muted())).truncate());
+                    }
                 });
             },
             |ui| {
-                title(ui, t.img_crop, c().text);
+                title(ui, if open { t.img_edit } else { t.img_crop }, c().text);
                 ui.add_space(12.0);
+                if open {
+                    let h = ui.available_height().max(120.0);
+                    let panel_w = tools::PANEL_W.min(ui.available_width() * 0.45);
+                    let pic_w = ui.available_width() - panel_w - GAP;
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let full = self.picture(ui, env, vec2(pic_w, h), true);
+                        ui.add_space(GAP);
+                        ui.vertical(|ui| {
+                            ui.set_width(panel_w);
+                            ui.set_height(h);
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            self.tools_panel(ui, env, full);
+                        });
+                    });
+                    return;
+                }
                 let size = vec2(ui.available_width(), (ui.available_height() - 8.0 - CONTROL_H - 14.0).max(120.0));
                 let full = self.picture(ui, env, size, true);
                 ui.add_space(8.0);
@@ -691,123 +795,140 @@ impl ImageForm {
                     let toggle_w = 150.0;
                     let w = (ui.available_width() - toggle_w - 12.0).min(560.0);
                     ui.allocate_ui(vec2(w, CONTROL_H), |ui| self.ratio_row(ui, t, full));
-                    // one part that is chosen while the magnifier is on
-                    let mut part = usize::from(!self.loupe_on);
-                    let r = ui
-                        .allocate_ui(vec2(toggle_w, CONTROL_H), |ui| ui.add_enabled_ui(full.is_some(), |ui| segmented(ui, &[t.img_loupe], &mut part)).inner)
-                        .inner;
-                    if r.on_hover_text(t.img_loupe_hint).clicked() {
-                        self.loupe_on = !self.loupe_on;
-                    }
+                    ui.allocate_ui(vec2(toggle_w, CONTROL_H), |ui| self.loupe_toggle(ui, t, full.is_some()));
                 });
             },
         );
         if reset {
             self.reset_crop();
         }
-        if done || ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) {
+        if done || ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !ctx.memory(|m| m.any_popup_open()) && !typing {
             self.big = false;
+            self.drag = None;
             ctx.request_repaint();
         }
     }
-    /// Drag on the picture: a new frame, a corner or an edge of the frame, or the whole frame.
-    /// The frame stays on whole pixels; `focus` is the corner or the point of the edge that moves.
-    fn drag_crop(&mut self, resp: &egui::Response, pic: Rect, full: (u32, u32)) {
-        self.focus = None;
-        let Some(p) = resp.interact_pointer_pos() else {
-            self.drag = None;
-            return;
-        };
-        let to_part = |p: Pos2| pos2(((p.x - pic.left()) / pic.width()).clamp(0.0, 1.0), ((p.y - pic.top()) / pic.height()).clamp(0.0, 1.0));
-        if resp.drag_started() {
-            let at = to_part(p);
-            self.drag = Some(match self.crop {
-                Some(r) => {
-                    let rect = crop_rect(pic, r);
-                    let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()];
-                    match grip(rect, p) {
-                        Grip::Corner(i) => Drag::Corner(to_part(corners[(i + 2) % 4])),
-                        Grip::Edge(i) => Drag::Edge(i, r),
-                        Grip::Inside => Drag::Move(at - pos2(r[0] as f32, r[1] as f32)),
-                        Grip::Outside => Drag::Corner(at),
-                    }
-                }
-                None => Drag::Corner(at),
-            });
+
+    /// The magnifier on or off: one part that is chosen while it is on
+    fn loupe_toggle(&mut self, ui: &mut egui::Ui, t: &T, enabled: bool) {
+        let mut part = usize::from(!self.loupe_on);
+        let r = ui.add_enabled_ui(enabled, |ui| segmented(ui, &[t.img_loupe], &mut part)).inner;
+        if r.on_hover_text(t.img_loupe_hint).clicked() {
+            self.loupe_on = !self.loupe_on;
         }
-        if !resp.dragged() {
-            return;
-        }
+    }
+}
+
+/// Drag on the picture: a new frame, a corner or an edge of the frame `rect`, or the whole
+/// frame. The frame stays on whole pixels; `focus` is the corner or the point of the edge that
+/// moves. `ratio`: width / height in parts of the picture.
+fn drag_rect(
+    drag: &mut Option<Drag>,
+    focus: &mut Option<Pos2>,
+    rect: &mut Option<[f64; 4]>,
+    resp: &egui::Response,
+    pic: Rect,
+    full: (u32, u32),
+    ratio: Option<f64>,
+) {
+    *focus = None;
+    let Some(p) = resp.interact_pointer_pos() else {
+        *drag = None;
+        return;
+    };
+    let to_part = |p: Pos2| pos2(((p.x - pic.left()) / pic.width()).clamp(0.0, 1.0), ((p.y - pic.top()) / pic.height()).clamp(0.0, 1.0));
+    if resp.drag_started() {
+        // where the button went down: the drag starts a few pixels later
+        let p = resp.ctx.input(|i| i.pointer.press_origin()).unwrap_or(p);
         let at = to_part(p);
-        match self.drag {
-            Some(Drag::Corner(anchor)) => {
-                let (dx, dy) = ((at.x - anchor.x) as f64, (at.y - anchor.y) as f64);
-                let (mut w, mut h) = (dx.abs(), dy.abs());
-                let room_w = if dx < 0.0 { anchor.x as f64 } else { 1.0 - anchor.x as f64 };
-                let room_h = if dy < 0.0 { anchor.y as f64 } else { 1.0 - anchor.y as f64 };
-                if let Some(a) = self.part_ratio(full) {
-                    if w / h.max(1e-9) > a {
-                        h = w / a;
-                    } else {
-                        w = h * a;
-                    }
-                    if w > room_w {
-                        w = room_w;
-                        h = w / a;
-                    }
-                    if h > room_h {
-                        h = room_h;
-                        w = h * a;
-                    }
-                }
-                let (w, h) = (w.clamp(0.01, room_w.max(0.01)), h.clamp(0.01, room_h.max(0.01)));
-                let x = if dx < 0.0 { anchor.x as f64 - w } else { anchor.x as f64 };
-                let y = if dy < 0.0 { anchor.y as f64 - h } else { anchor.y as f64 };
-                let r = snap([x.max(0.0), y.max(0.0), w, h], full);
-                let fx = if dx < 0.0 { r[0] } else { r[0] + r[2] };
-                let fy = if dy < 0.0 { r[1] } else { r[1] + r[3] };
-                self.focus = Some(pos2(fx as f32, fy as f32));
-                self.crop = Some(r);
-            }
-            Some(Drag::Edge(side, start)) => {
-                let r = snap(edge_drag(side, start, at, self.part_ratio(full)), full);
-                let along_x = (at.x as f64).clamp(r[0], r[0] + r[2]) as f32;
-                let along_y = (at.y as f64).clamp(r[1], r[1] + r[3]) as f32;
-                self.focus = Some(match side {
-                    0 => pos2(r[0] as f32, along_y),
-                    1 => pos2(along_x, r[1] as f32),
-                    2 => pos2((r[0] + r[2]) as f32, along_y),
-                    _ => pos2(along_x, (r[1] + r[3]) as f32),
-                });
-                self.crop = Some(r);
-            }
-            Some(Drag::Move(off)) => {
-                if let Some([_, _, w, h]) = self.crop {
-                    let (fw, fh) = (full.0.max(1) as f64, full.1.max(1) as f64);
-                    let x = (((at.x - off.x) as f64).clamp(0.0, 1.0 - w) * fw).round() / fw;
-                    let y = (((at.y - off.y) as f64).clamp(0.0, 1.0 - h) * fh).round() / fh;
-                    self.crop = Some([x.min(1.0 - w).max(0.0), y.min(1.0 - h).max(0.0), w, h]);
+        *drag = Some(match *rect {
+            Some(r) => {
+                let frame = crop_rect(pic, r);
+                let corners = [frame.left_top(), frame.right_top(), frame.right_bottom(), frame.left_bottom()];
+                match grip(frame, p) {
+                    Grip::Corner(i) => Drag::Corner(to_part(corners[(i + 2) % 4])),
+                    Grip::Edge(i) => Drag::Edge(i, r),
+                    Grip::Inside => Drag::Move(at - pos2(r[0] as f32, r[1] as f32)),
+                    Grip::Outside => Drag::Corner(at),
                 }
             }
-            None => {}
-        }
+            None => Drag::Corner(at),
+        });
     }
-
-    /// The cursor tells what a drag would do
-    fn set_cursor(&self, ctx: &egui::Context, resp: &egui::Response, pic: Rect) {
-        if !(resp.hovered() || resp.dragged()) {
-            return;
-        }
-        let icon = match (resp.dragged(), self.drag, self.crop, resp.hover_pos()) {
-            (true, Some(Drag::Edge(i, _)), _, _) => grip_cursor(Grip::Edge(i)),
-            (true, Some(Drag::Move(_)), _, _) => egui::CursorIcon::Grabbing,
-            (true, _, _, _) => egui::CursorIcon::Crosshair,
-            (false, _, Some(r), Some(p)) => grip_cursor(grip(crop_rect(pic, r), p)),
-            _ => egui::CursorIcon::Crosshair,
-        };
-        ctx.set_cursor_icon(icon);
+    if !resp.dragged() {
+        return;
     }
+    let at = to_part(p);
+    match *drag {
+        Some(Drag::Corner(anchor)) => {
+            let (dx, dy) = ((at.x - anchor.x) as f64, (at.y - anchor.y) as f64);
+            let (mut w, mut h) = (dx.abs(), dy.abs());
+            let room_w = if dx < 0.0 { anchor.x as f64 } else { 1.0 - anchor.x as f64 };
+            let room_h = if dy < 0.0 { anchor.y as f64 } else { 1.0 - anchor.y as f64 };
+            if let Some(a) = ratio {
+                if w / h.max(1e-9) > a {
+                    h = w / a;
+                } else {
+                    w = h * a;
+                }
+                if w > room_w {
+                    w = room_w;
+                    h = w / a;
+                }
+                if h > room_h {
+                    h = room_h;
+                    w = h * a;
+                }
+            }
+            let (w, h) = (w.clamp(0.01, room_w.max(0.01)), h.clamp(0.01, room_h.max(0.01)));
+            let x = if dx < 0.0 { anchor.x as f64 - w } else { anchor.x as f64 };
+            let y = if dy < 0.0 { anchor.y as f64 - h } else { anchor.y as f64 };
+            let r = snap([x.max(0.0), y.max(0.0), w, h], full);
+            let fx = if dx < 0.0 { r[0] } else { r[0] + r[2] };
+            let fy = if dy < 0.0 { r[1] } else { r[1] + r[3] };
+            *focus = Some(pos2(fx as f32, fy as f32));
+            *rect = Some(r);
+        }
+        Some(Drag::Edge(side, start)) => {
+            let r = snap(edge_drag(side, start, at, ratio), full);
+            let along_x = (at.x as f64).clamp(r[0], r[0] + r[2]) as f32;
+            let along_y = (at.y as f64).clamp(r[1], r[1] + r[3]) as f32;
+            *focus = Some(match side {
+                0 => pos2(r[0] as f32, along_y),
+                1 => pos2(along_x, r[1] as f32),
+                2 => pos2((r[0] + r[2]) as f32, along_y),
+                _ => pos2(along_x, (r[1] + r[3]) as f32),
+            });
+            *rect = Some(r);
+        }
+        Some(Drag::Move(off)) => {
+            if let Some([_, _, w, h]) = *rect {
+                let (fw, fh) = (full.0.max(1) as f64, full.1.max(1) as f64);
+                let x = (((at.x - off.x) as f64).clamp(0.0, 1.0 - w) * fw).round() / fw;
+                let y = (((at.y - off.y) as f64).clamp(0.0, 1.0 - h) * fh).round() / fh;
+                *rect = Some([x.min(1.0 - w).max(0.0), y.min(1.0 - h).max(0.0), w, h]);
+            }
+        }
+        _ => {}
+    }
+}
 
+/// The cursor tells what a drag on the frame `rect` would do
+fn rect_cursor(ctx: &egui::Context, resp: &egui::Response, pic: Rect, rect: Option<[f64; 4]>, drag: Option<Drag>) {
+    if !(resp.hovered() || resp.dragged()) {
+        return;
+    }
+    let icon = match (resp.dragged(), drag, rect, resp.hover_pos()) {
+        (true, Some(Drag::Edge(i, _)), _, _) => grip_cursor(Grip::Edge(i)),
+        (true, Some(Drag::Move(_)), _, _) => egui::CursorIcon::Grabbing,
+        (true, _, _, _) => egui::CursorIcon::Crosshair,
+        (false, _, Some(r), Some(p)) => grip_cursor(grip(crop_rect(pic, r), p)),
+        _ => egui::CursorIcon::Crosshair,
+    };
+    ctx.set_cursor_icon(icon);
+}
+
+impl ImageForm {
     /// The wheel zooms the magnifier, Ctrl + wheel makes it larger or smaller
     fn wheel(&mut self, ctx: &egui::Context) {
         let (mut zoom, mut side) = (0.0_f32, 0.0_f32);
@@ -960,8 +1081,9 @@ fn crop_rect(pic: Rect, r: [f64; 4]) -> Rect {
 }
 
 /// The frame of the crop: the rest of the picture darker, thirds, corners and the middles of
-/// the edges; `full`: the size of the picture, for the tag with the size of the crop
-fn draw_crop(p: &egui::Painter, pic: Rect, r: [f64; 4], full: Option<(u32, u32)>) {
+/// the edges (`handles`; else a thin line); `full`: the size of the picture, for the tag with
+/// the size of the crop
+fn draw_crop(p: &egui::Painter, pic: Rect, r: [f64; 4], full: Option<(u32, u32)>, handles: bool) {
     let k = c();
     let rect = crop_rect(pic, r);
     let shade = Color32::from_black_alpha(150);
@@ -978,6 +1100,10 @@ fn draw_crop(p: &egui::Painter, pic: Rect, r: [f64; 4], full: Option<(u32, u32)>
         }
     }
     p.add(Shape::mesh(mesh));
+    if !handles {
+        p.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, Color32::from_white_alpha(110)));
+        return;
+    }
     let thin = Stroke::new(1.0_f32, Color32::from_white_alpha(70));
     for i in 1..3 {
         let f = i as f32 / 3.0;
@@ -1038,9 +1164,10 @@ fn size_tag(p: &egui::Painter, pic: Rect, rect: Rect, text: String) {
 }
 
 /// The magnifier: the pixels of the picture around `focus` (in parts of the picture), `zoom`
-/// points to a pixel of a picture of `full`, in a square of `side` next to the pointer
+/// points to a pixel of a picture of `full`, in a square of `side` next to the pointer; with the
+/// frame that is dragged (true: the crop)
 #[allow(clippy::too_many_arguments)]
-fn draw_loupe(ctx: &egui::Context, tex: &TextureHandle, full: (u32, u32), focus: Pos2, pointer: Pos2, crop: Option<[f64; 4]>, zoom: f32, side: f32) {
+fn draw_loupe(ctx: &egui::Context, tex: &TextureHandle, full: (u32, u32), focus: Pos2, pointer: Pos2, frame: Option<([f64; 4], bool)>, zoom: f32, side: f32) {
     let k = c();
     let screen = ctx.screen_rect();
     let gap = 26.0;
@@ -1083,8 +1210,10 @@ fn draw_loupe(ctx: &egui::Context, tex: &TextureHandle, full: (u32, u32), focus:
             inner.line_segment([pos2(left, y), pos2(right, y)], line);
         }
     }
-    if let Some(r) = crop {
-        draw_crop(&inner, img, r, None);
+    match frame {
+        Some((r, true)) => draw_crop(&inner, img, r, None, true),
+        Some((r, false)) => tools::draw_area(&inner, img, r, true),
+        None => {}
     }
     // the point itself: a cross with a gap in its middle
     for (a, b) in [(vec2(-9.0, 0.0), vec2(-3.0, 0.0)), (vec2(3.0, 0.0), vec2(9.0, 0.0)), (vec2(0.0, -9.0), vec2(0.0, -3.0)), (vec2(0.0, 3.0), vec2(0.0, 9.0))] {
@@ -1127,11 +1256,14 @@ enum CornerIcon {
     Collapse,
     /// an arrow round to the left
     Reset,
+    /// the tools
+    Pencil,
 }
 
 /// A small button over the top right corner of `area`, `row` buttons under the top; half
-/// transparent until the pointer is on it, so it hides little of the picture. True: clicked.
-fn corner_button(ui: &mut egui::Ui, area: Rect, row: usize, icon: CornerIcon, tip: &str) -> bool {
+/// transparent until the pointer is on it, so it hides little of the picture. `on`: what it
+/// opens is open. True: clicked.
+fn corner_button(ui: &mut egui::Ui, area: Rect, row: usize, icon: CornerIcon, tip: &str, on: bool) -> bool {
     let k = c();
     let side = 28.0;
     let rect = Rect::from_min_size(pos2(area.right() - 8.0 - side, area.top() + 8.0 + row as f32 * (side + 6.0)), vec2(side, side));
@@ -1141,10 +1273,16 @@ fn corner_button(ui: &mut egui::Ui, area: Rect, row: usize, icon: CornerIcon, ti
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let fade = |c: Color32| if hovered { c } else { c.gamma_multiply(0.5) };
+    let fade = |c: Color32| if hovered || on { c } else { c.gamma_multiply(0.5) };
     let p = ui.painter();
-    let fill = fade(if hovered { k.hover } else { k.surface });
-    let stroke = Stroke::new(1.0_f32, fade(if hovered { k.accent } else { k.border }));
+    let fill = fade(if on {
+        k.accent
+    } else if hovered {
+        k.hover
+    } else {
+        k.surface
+    });
+    let stroke = Stroke::new(1.0_f32, fade(if hovered || on { k.accent } else { k.border }));
     match k.look {
         Look::Classic => {
             p.rect(rect, 4.0, fill, stroke);
@@ -1154,7 +1292,13 @@ fn corner_button(ui: &mut egui::Ui, area: Rect, row: usize, icon: CornerIcon, ti
         }
         Look::Y2k => super::paint::cut_rect(p, rect, 6.0, super::paint::DIAGONAL, fill, stroke),
     }
-    let color = if hovered { k.accent } else { k.text.gamma_multiply(0.75) };
+    let color = if on {
+        k.on_accent
+    } else if hovered {
+        k.accent
+    } else {
+        k.text.gamma_multiply(0.75)
+    };
     let line = Stroke::new(1.6_f32, color);
     let m = rect.center();
     match icon {
@@ -1187,6 +1331,17 @@ fn corner_button(ui: &mut egui::Ui, area: Rect, row: usize, icon: CornerIcon, ti
             let start = pos2(m.x, m.y - r);
             let (dir, up) = (vec2(-1.0, 0.0), vec2(0.0, 1.0));
             p.add(Shape::convex_polygon(vec![start + dir * 3.5, start - dir * 1.5 + up * 3.5, start - dir * 1.5 - up * 3.5], color, Stroke::NONE));
+        }
+        CornerIcon::Pencil => {
+            // lying from the lower left (the point) to the upper right
+            let along = vec2(1.0, -1.0).normalized();
+            let across = vec2(1.0, 1.0).normalized() * 2.4;
+            let tip = m + vec2(-6.5, 6.5);
+            let wood = tip + along * 4.5;
+            let end = m + vec2(6.0, -6.0);
+            p.add(Shape::closed_line(vec![tip, wood + across, end + across, end - across, wood - across], line));
+            p.line_segment([wood + across, wood - across], line);
+            p.line_segment([end - along * 2.5 + across, end - along * 2.5 - across], line);
         }
     }
     resp.clicked()

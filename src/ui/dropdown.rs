@@ -26,16 +26,12 @@ pub fn need_id() -> egui::Id {
     egui::Id::new("cmmt_dropdown_need")
 }
 
-/// A drop-down list. The list is a set of columns (groups side by side), so it is short enough to
-/// open completely inside the window: no scrolling, and it never covers its own button. It opens
-/// below the button, or above it when there is no room below. The response of the button is
-/// "changed" when an item was chosen.
-pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: &[Col], selected: &mut String) -> egui::Response {
+/// The button of a drop-down list showing `shown`, as wide as the room; a click opens or closes
+/// the popup `id`. Returns the button and whether the list was open.
+pub fn list_button(ui: &mut egui::Ui, id: egui::Id, shown: &str) -> (egui::Response, bool) {
     let k = c();
-    let ctx = ui.ctx().clone();
-    let id = ui.make_persistent_id(id);
     let width = ui.available_width();
-    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, CONTROL_H), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, CONTROL_H), Sense::click());
     let open = ui.memory(|m| m.is_popup_open(id));
 
     // the button
@@ -74,7 +70,10 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
     // centred between two margins as wide as the arrow, so it stays clear of it
     let clip = rect.shrink2(vec2(margin, 0.0));
     let text_size = if look == Look::Classic { 13.5 } else { 13.0 };
-    painter.with_clip_rect(clip).text(rect.center(), Align2::CENTER_CENTER, shown, FontId::proportional(text_size), k.text);
+    let mut job = egui::text::LayoutJob::simple_singleline(shown.to_string(), FontId::proportional(text_size), k.text);
+    job.wrap = egui::text::TextWrapping { max_width: clip.width(), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    let galley = painter.layout_job(job);
+    painter.with_clip_rect(clip).galley(Align2::CENTER_CENTER.anchor_size(rect.center(), galley.size()).min, galley, k.text);
     let (hw, hh) = if look == Look::Classic { (4.0, 2.5) } else { (5.0, 3.0) };
     let tri = if open {
         vec![pos2(m.x - hw, m.y + hh), pos2(m.x + hw, m.y + hh), pos2(m.x, m.y - hh)]
@@ -85,6 +84,22 @@ pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: 
     if resp.clicked() {
         ui.memory_mut(|mem| mem.toggle_popup(id));
     }
+    (resp, open)
+}
+
+/// A drop-down list. The list is a set of columns (groups side by side), so it is short enough to
+/// open completely inside the window: no scrolling, and it never covers its own button. It opens
+/// below the button, or above it when there is no room below. The response of the button is
+/// "changed" when an item was chosen.
+pub fn dropdown(ui: &mut egui::Ui, id: impl std::hash::Hash, shown: &str, cols: &[Col], selected: &mut String) -> egui::Response {
+    let k = c();
+    let ctx = ui.ctx().clone();
+    let id = ui.make_persistent_id(id);
+    let width = ui.available_width();
+    let (mut resp, open) = list_button(ui, id, shown);
+    let rect = resp.rect;
+    let look = k.look;
+    let text_size = if look == Look::Classic { 13.5 } else { 13.0 };
 
     // the size of the list
     let font = FontId::proportional(text_size);

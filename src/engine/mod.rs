@@ -4,12 +4,14 @@
 mod budget;
 mod compress;
 mod convert;
+mod edit;
 mod image;
 mod output;
 mod progress;
 mod runner;
 
 pub use crate::config::ConvertKind;
+pub use edit::{build as build_edit, text_block, BlurArea, BlurKind, Built, Caption, Colours, TextMark, Upto};
 pub use image::{encoders, frame_sets, set_name, FrameSet, SOURCE};
 pub use progress::{Line, LineKind, Progress, State};
 pub use runner::stats_text;
@@ -32,7 +34,7 @@ pub struct Tracks {
     pub merge: bool,
 }
 
-/// Turning, mirroring and cropping of Compress Image
+/// The edits of Compress Image (see edit.rs for their order)
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ImageEdit {
     /// quarter turns clockwise (0..=3)
@@ -42,6 +44,13 @@ pub struct ImageEdit {
     pub flip_v: bool,
     /// x, y, width, height as parts (0..1) of the turned picture; None = all of it
     pub crop: Option<[f64; 4]>,
+    pub colours: Colours,
+    /// 0..=100
+    pub sharpen: u32,
+    pub vignette: u32,
+    pub blurs: Vec<BlurArea>,
+    pub texts: Vec<TextMark>,
+    pub caption: Option<Caption>,
 }
 
 /// What Compress Image aims at
@@ -92,7 +101,7 @@ pub enum Request {
         format: String,
         target: ImageTarget,
         scale: ScaleMode,
-        edit: ImageEdit,
+        edit: Box<ImageEdit>,
     },
     Icon {
         sizes: Vec<u32>,

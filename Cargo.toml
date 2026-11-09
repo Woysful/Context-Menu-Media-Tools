@@ -1,6 +1,6 @@
 [package]
 name = "cmmt"
-version = "1.4.0"
+version = "1.5.0"
 edition = "2021"
 description = "Media Tools: ffmpeg front end for the file manager context menu"
 license = "MIT"
@@ -13,6 +13,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] } # tags in the order ffprobe gives them
 toml = { version = "0.8", features = ["preserve_order"] }
 raw-window-handle = "0.6"
+# the names and the widths of the fonts for the text on pictures (egui has it already)
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 
 # blur behind the window on KDE Wayland (talks to the compositor through the connection of the window)
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]

@@ -8,6 +8,7 @@ mod config;
 mod defaults;
 mod effects;
 mod engine;
+mod fonts;
 mod gpu;
 mod i18n;
 mod i18n_settings;
@@ -68,6 +69,15 @@ Options:
   --size N --fps N --quality N --compression N          webp
   compress-image: --format source|jpg|webp|avif|jxl|png  --quality 1-100  or  --limit 500KB|2MB
                   --scale S  --rotate 90|180|270  --flip h|v|hv  --crop x,y,w,h (in % of the picture)
+                  colours, -100..100: --brightness --contrast --saturation --gamma --temperature
+                  --vibrance N  --hue -180..180  --shadows r,g,b  --highlights r,g,b
+                  --sharpen 0-100  --vignette 0-100
+                  --blur x,y,w,h[,strength 1-100][,gauss|box|pixels]  (several: separated by ;)
+                  --text T (\\n: a new line)  --text-at x,y (% of the picture, the middle of the text)
+                  --text-size % (of the longer side)  --text-color RRGGBB  --text-outline %[,RRGGBB]
+                  --text-box RRGGBB[,opacity %]  --font \"Family[:Style]\" or a font file
+                  meme: --top-text T  --bottom-text T  --caption strip|overlay  --caption-size %
+                  --caption-font F   (the order: colours, sharpen, blur, text, crop, vignette, captions)
   make-icon:      --sizes 16,24,32,48,64,128,256  --square pad|crop
   frames-to-video (folders or pictures): --fps N  --codec C  --level low|medium|high
 ";
@@ -98,6 +108,30 @@ impl Cli {
             "crop",
             "sizes",
             "square",
+            "brightness",
+            "contrast",
+            "saturation",
+            "gamma",
+            "temperature",
+            "hue",
+            "vibrance",
+            "shadows",
+            "highlights",
+            "sharpen",
+            "vignette",
+            "blur",
+            "text",
+            "text-at",
+            "text-size",
+            "text-color",
+            "text-outline",
+            "text-box",
+            "font",
+            "top-text",
+            "bottom-text",
+            "caption",
+            "caption-size",
+            "caption-font",
         ];
         let mut it = args.into_iter();
         let mut cli = Cli { action: it.next().unwrap_or_default(), files: vec![], opts: HashMap::new(), flags: vec![] };
@@ -255,9 +289,134 @@ fn image_request(cli: &Cli, cfg: &Config, scale: ScaleMode) -> Result<Request, S
         }
         None => None,
     };
-    let edit = engine::ImageEdit { turns, flip_h: flip.contains('h'), flip_v: flip.contains('v'), crop };
+    let mut edit = engine::ImageEdit { turns, flip_h: flip.contains('h'), flip_v: flip.contains('v'), crop, ..Default::default() };
+    edit_options(cli, &mut edit)?;
     let scale = if scale == ScaleMode::Auto { ScaleMode::Orig } else { scale };
-    Ok(Request::CompressImage { format, target, scale, edit })
+    Ok(Request::CompressImage { format, target, scale, edit: Box::new(edit) })
+}
+
+/// "50,90" or "50%,90%" -> numbers
+fn numbers(text: &str) -> Option<Vec<f64>> {
+    text.split(',').map(|n| units::parse_decimal(n.trim().trim_end_matches('%'))).collect()
+}
+
+/// "ff8800" or "#FF8800"
+fn colour(text: &str) -> Option<[u8; 3]> {
+    let h = text.trim().trim_start_matches('#');
+    if h.len() != 6 || !h.is_ascii() {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
+}
+
+/// compress-image: colours, sharpness, vignette, blurred areas, text and captions
+fn edit_options(cli: &Cli, edit: &mut engine::ImageEdit) -> Result<(), String> {
+    let int = |k: &str, lo: i32, hi: i32| -> Result<i32, String> {
+        match cli.opt(k) {
+            None => Ok(0),
+            Some(v) => v.trim().parse::<i32>().ok().filter(|n| (lo..=hi).contains(n)).ok_or_else(|| format!("bad --{k}: {v} ({lo}..{hi})")),
+        }
+    };
+    let three = |k: &str| -> Result<[i32; 3], String> {
+        match cli.opt(k) {
+            None => Ok([0; 3]),
+            Some(v) => match numbers(v).as_deref() {
+                Some(&[r, g, b]) if [r, g, b].iter().all(|n| (-100.0..=100.0).contains(n)) => Ok([r as i32, g as i32, b as i32]),
+                _ => Err(format!("bad --{k}: {v} (r,g,b, each -100..100)")),
+            },
+        }
+    };
+    edit.colours = engine::Colours {
+        brightness: int("brightness", -100, 100)?,
+        contrast: int("contrast", -100, 100)?,
+        saturation: int("saturation", -100, 100)?,
+        gamma: int("gamma", -100, 100)?,
+        temperature: int("temperature", -100, 100)?,
+        hue: int("hue", -180, 180)?,
+        vibrance: int("vibrance", -100, 100)?,
+        shadows: three("shadows")?,
+        highlights: three("highlights")?,
+    };
+    edit.sharpen = int("sharpen", 0, 100)? as u32;
+    edit.vignette = int("vignette", 0, 100)? as u32;
+    if let Some(list) = cli.opt("blur") {
+        for one in list.split(';').filter(|s| !s.trim().is_empty()) {
+            let bad = || format!("bad --blur: {one} (x,y,w,h in % of the picture, then the strength and gauss, box or pixels)");
+            let parts: Vec<&str> = one.split(',').map(str::trim).collect();
+            let rect = numbers(&parts[..parts.len().min(4)].join(",")).ok_or_else(bad)?;
+            let [x, y, w, h] = rect[..] else { return Err(bad()) };
+            if !(x >= 0.0 && y >= 0.0 && w > 0.0 && h > 0.0 && x + w <= 100.0 + 1e-9 && y + h <= 100.0 + 1e-9) {
+                return Err(bad());
+            }
+            let mut area = engine::BlurArea { rect: [x / 100.0, y / 100.0, w / 100.0, h / 100.0], kind: engine::BlurKind::Gauss, strength: 30 };
+            for p in &parts[4..] {
+                if let Some(kind) = engine::BlurKind::ALL.into_iter().find(|k| k.key() == *p) {
+                    area.kind = kind;
+                } else {
+                    area.strength = p.parse().ok().filter(|s| (1..=100).contains(s)).ok_or_else(bad)?;
+                }
+            }
+            edit.blurs.push(area);
+        }
+    }
+    let font = |k: &str| -> Result<std::path::PathBuf, String> {
+        match cli.opt(k) {
+            None => Ok(Default::default()),
+            Some(name) => fonts::find(&fonts::system(), name).ok_or_else(|| format!("bad --{k}: no font \"{name}\"")),
+        }
+    };
+    if let Some(text) = cli.opt("text") {
+        let mut t = engine::TextMark { text: text.replace("\\n", "\n"), at: [0.5, 0.9], font: font("font")?, ..Default::default() };
+        if let Some(v) = cli.opt("text-at") {
+            match numbers(v).as_deref() {
+                Some(&[x, y]) if (0.0..=100.0).contains(&x) && (0.0..=100.0).contains(&y) => t.at = [x / 100.0, y / 100.0],
+                _ => return Err(format!("bad --text-at: {v} (x,y in % of the picture)")),
+            }
+        }
+        if let Some(v) = cli.opt("text-size") {
+            t.size = units::parse_decimal(v.trim().trim_end_matches('%')).filter(|s| *s > 0.0 && *s <= 100.0).ok_or_else(|| format!("bad --text-size: {v}"))?
+                / 100.0;
+        }
+        if let Some(v) = cli.opt("text-color") {
+            t.color = colour(v).ok_or_else(|| format!("bad --text-color: {v} (RRGGBB)"))?;
+        }
+        if let Some(v) = cli.opt("text-outline") {
+            let (n, c) = v.split_once(',').map_or((v, None), |(n, c)| (n, Some(c)));
+            t.outline = n.trim().trim_end_matches('%').parse().ok().filter(|n| *n <= 50).ok_or_else(|| format!("bad --text-outline: {v}"))?;
+            if let Some(c) = c {
+                t.outline_color = colour(c).ok_or_else(|| format!("bad --text-outline: {v}"))?;
+            }
+        }
+        if let Some(v) = cli.opt("text-box") {
+            let (c, o) = v.split_once(',').map_or((v, None), |(c, o)| (c, Some(o)));
+            t.boxed = true;
+            t.box_color = colour(c).ok_or_else(|| format!("bad --text-box: {v}"))?;
+            if let Some(o) = o {
+                t.box_opacity = o.trim().trim_end_matches('%').parse().ok().filter(|n| *n <= 100).ok_or_else(|| format!("bad --text-box: {v}"))?;
+            }
+        }
+        edit.texts.push(t);
+    }
+    if cli.opt("top-text").is_some() || cli.opt("bottom-text").is_some() {
+        let strip = match cli.opt("caption").unwrap_or("strip") {
+            "strip" => true,
+            "overlay" => false,
+            other => return Err(format!("bad --caption: {other} (strip or overlay)")),
+        };
+        let mut c = engine::Caption {
+            top: cli.opt("top-text").unwrap_or("").replace("\\n", "\n"),
+            bottom: cli.opt("bottom-text").unwrap_or("").replace("\\n", "\n"),
+            strip,
+            font: font("caption-font")?,
+            ..Default::default()
+        };
+        if let Some(v) = cli.opt("caption-size") {
+            c.size = v.trim().trim_end_matches('%').parse().ok().filter(|n| (1..=50).contains(n)).ok_or_else(|| format!("bad --caption-size: {v}"))?;
+        }
+        edit.caption = Some(c);
+    }
+    Ok(())
 }
 
 /// Output of a command that is not a menu action. A program without a console (Windows)
