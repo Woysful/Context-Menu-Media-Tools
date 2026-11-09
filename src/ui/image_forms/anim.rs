@@ -9,7 +9,7 @@ use crate::defaults::{self as dv, DITHERS, SLOWS};
 use crate::engine::{Anim, AnimFormat, Request};
 use crate::theme::CONTROL_H;
 use crate::units::{parse_clock, parse_decimal};
-use eframe::egui::{self, RichText};
+use eframe::egui;
 
 pub struct AnimForm {
     /// 0 = WebP, 1 = GIF
@@ -91,8 +91,8 @@ impl AnimForm {
         let (rs, rf) = form_row(ui, t.anim_limits, |ui| {
             let r = ui
                 .horizontal(|ui| {
-                    let rs = small_number(ui, &mut self.size_text, size.is_some(), "px").on_hover_text(t.webp_size_hint);
-                    ui.add_space(10.0);
+                    let rs = small_number(ui, &mut self.size_text, size.is_some(), "").on_hover_text(t.webp_size_hint);
+                    unit_cell(ui, "px");
                     let rf = small_number(ui, &mut self.fps_text, fps.is_some(), "fps").on_hover_text(t.webp_fps_hint);
                     (rs, rf)
                 })
@@ -112,8 +112,8 @@ impl AnimForm {
         let r = form_row(ui, t.anim_speed, |ui| {
             let r = ui
                 .horizontal(|ui| {
-                    small_number(ui, &mut self.speed_text, speed.is_some(), "×");
-                    ui.add_space(4.0);
+                    small_number(ui, &mut self.speed_text, speed.is_some(), "");
+                    unit_cell(ui, "×");
                     ui.add_enabled_ui(slower, |ui| segmented(ui, &t.anim_slows, &mut self.slow)).inner
                 })
                 .inner;
@@ -133,8 +133,14 @@ impl AnimForm {
                         let shown = format!("{} {}", t.webp_compression, self.compression.min(6));
                         let list_w = list_button_width(ui, &format!("{} 6", t.webp_compression));
                         let gap = ui.spacing().item_spacing.x;
-                        let slider_w = ui.available_width() - list_w - 2.0 * gap - 6.0;
-                        let rq = ui.allocate_ui(egui::vec2(slider_w.max(100.0), CONTROL_H), |ui| slider_row(ui, &mut self.quality, 0..=100)).inner;
+                        let slider_w = ui.available_width() - list_w - gap - 6.0;
+                        // the whole width, so the list ends where the other rows do
+                        let rq = ui
+                            .allocate_ui(egui::vec2(slider_w.max(100.0), CONTROL_H), |ui| {
+                                ui.set_min_width(slider_w.max(100.0));
+                                slider_row(ui, &mut self.quality, 0..=100)
+                            })
+                            .inner;
                         ui.add_space(6.0);
                         let rp = ui
                             .allocate_ui(egui::vec2(list_w, CONTROL_H), |ui| {
@@ -222,7 +228,7 @@ impl AnimForm {
             let changed = ui
                 .horizontal(|ui| {
                     let a = small_number(ui, &mut self.from_text, from.is_some() && !ordered, "");
-                    ui.label(RichText::new("–").color(muted()));
+                    unit_cell(ui, "–");
                     let b = small_number(ui, &mut self.to_text, to.is_some() && !ordered, "");
                     a.changed() || b.changed()
                 })
@@ -249,4 +255,12 @@ impl AnimForm {
 
 fn dither_index(key: &str) -> usize {
     DITHERS.iter().position(|d| *d == key).unwrap_or(0)
+}
+
+/// The unit or the dash between the two fields of a row, in a cell of the same width in each
+/// row, so what follows it starts at the same place in all of them
+fn unit_cell(ui: &mut egui::Ui, text: &str) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, CONTROL_H), egui::Sense::hover());
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, font, muted());
 }
