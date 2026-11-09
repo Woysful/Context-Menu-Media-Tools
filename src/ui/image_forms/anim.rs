@@ -1,9 +1,8 @@
 //! The form of Make Anim: an animated WebP or GIF of a video. One video is shown at the right,
 //! a frame of it chosen with a slider, with the editor of Compress Image.
 
-use super::super::dropdown::{dropdown, Col};
+use super::super::dropdown::{dropdown, list_button_width, Col};
 use super::super::forms::{default_menu, original_check, parse_in, result_row_with, small_number};
-use super::super::widgets::{caption, caption_width};
 use super::frame_time;
 use super::{form_row, muted, one_line, segmented, slider_row, Editor, Env, FIELDS_W, GAP, PREVIEW_MIN_W};
 use crate::defaults::{self as dv, DITHERS, SLOWS};
@@ -88,18 +87,17 @@ impl AnimForm {
         });
         let size = parse_in(&self.size_text, 64, 4320);
         let fps = parse_in(&self.fps_text, 1, 120);
-        // two small fields: the frame rate at the right of the size
-        let (rs, rf) = form_row(ui, t.webp_size, |ui| {
+        // two small fields: the size and the frame rate
+        let (rs, rf) = form_row(ui, t.anim_limits, |ui| {
             let r = ui
                 .horizontal(|ui| {
-                    let rs = small_number(ui, &mut self.size_text, size.is_some(), "px");
+                    let rs = small_number(ui, &mut self.size_text, size.is_some(), "px").on_hover_text(t.webp_size_hint);
                     ui.add_space(10.0);
-                    caption(ui, t.webp_fps);
                     let rf = small_number(ui, &mut self.fps_text, fps.is_some(), "fps").on_hover_text(t.webp_fps_hint);
                     (rs, rf)
                 })
                 .inner;
-            one_line(ui, t.webp_size_hint, muted());
+            one_line(ui, t.anim_limits_hint, muted());
             r
         });
         if let Some(v) = default_menu(&rs, env, dv::WEBP_SIZE, size.map(|v| v.to_string()).as_deref()) {
@@ -127,22 +125,22 @@ impl AnimForm {
         }
         let part = self.trim_rows(ui, env);
         if self.format == 0 {
-            // the quality, and at its right the effort of the encoder as a short list
+            // the quality, and at its right the effort of the encoder as a short list that
+            // names itself: "Preset 4"
             let (rq, rp) = form_row(ui, t.webp_quality, |ui| {
                 let r = ui
                     .horizontal(|ui| {
-                        let list_w = 112.0;
+                        let shown = format!("{} {}", t.webp_compression, self.compression.min(6));
+                        let list_w = list_button_width(ui, &format!("{} 6", t.webp_compression));
                         let gap = ui.spacing().item_spacing.x;
-                        let slider_w = ui.available_width() - list_w - caption_width(ui, t.webp_compression) - 3.0 * gap - 6.0;
+                        let slider_w = ui.available_width() - list_w - 2.0 * gap - 6.0;
                         let rq = ui.allocate_ui(egui::vec2(slider_w.max(100.0), CONTROL_H), |ui| slider_row(ui, &mut self.quality, 0..=100)).inner;
                         ui.add_space(6.0);
-                        caption(ui, t.webp_compression);
                         let rp = ui
                             .allocate_ui(egui::vec2(list_w, CONTROL_H), |ui| {
                                 let items = (0..=6u32).map(|n| (n.to_string(), t.anim_presets[n as usize].to_string())).collect();
                                 let mut key = self.compression.min(6).to_string();
-                                let shown = t.anim_presets[self.compression.min(6) as usize];
-                                let r = dropdown(ui, "anim_preset", shown, &[Col { title: None, items }], &mut key);
+                                let r = dropdown(ui, "anim_preset", &shown, &[Col { title: None, items }], &mut key);
                                 self.compression = key.parse().unwrap_or(self.compression);
                                 r
                             })

@@ -222,17 +222,6 @@ pub fn caption(ui: &mut egui::Ui, text: &str) {
     }
 }
 
-/// The width `caption` takes for `text`
-pub fn caption_width(ui: &egui::Ui, text: &str) -> f32 {
-    let caps = text.to_uppercase();
-    let job = match c().look {
-        Look::Classic => return text_width(ui.ctx(), &caps, FontId::proportional(11.0)),
-        Look::Brutal => spaced(&caps, FontId::proportional(10.5), muted(), 1.0),
-        Look::Y2k => spaced(&caps, FontId::new(11.0, tech_family()), muted(), 1.2),
-    };
-    ui.fonts(|f| f.layout_job(job)).rect.width()
-}
-
 /// A field: the caption above the control
 pub fn field<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     caption(ui, label);

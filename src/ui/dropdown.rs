@@ -26,6 +26,31 @@ pub fn need_id() -> egui::Id {
     egui::Id::new("cmmt_dropdown_need")
 }
 
+/// The room left of the text of a narrow list button
+const TEXT_PAD: f32 = 12.0;
+
+/// The room the arrow of a list button takes on each side of the text
+fn arrow_margin(look: Look) -> f32 {
+    match look {
+        Look::Brutal => CONTROL_H + 4.0,
+        Look::Classic => 28.0,
+        Look::Y2k => 32.0,
+    }
+}
+
+fn button_text_size(look: Look) -> f32 {
+    if look == Look::Classic {
+        13.5
+    } else {
+        13.0
+    }
+}
+
+/// The width of a narrow list button that shows `shown` whole
+pub fn list_button_width(ui: &egui::Ui, shown: &str) -> f32 {
+    let look = c().look;
+    text_width(ui.ctx(), shown, FontId::proportional(button_text_size(look))) + TEXT_PAD + arrow_margin(look) + 4.0
+}
 /// The button of a drop-down list showing `shown`, as wide as the room; a click opens or closes
 /// the popup `id`. Returns the button and whether the list was open.
 pub fn list_button(ui: &mut egui::Ui, id: egui::Id, shown: &str) -> (egui::Response, bool) {
@@ -55,25 +80,28 @@ pub fn list_button(ui: &mut egui::Ui, id: egui::Id, shown: &str) -> (egui::Respo
         }
     }
     // the arrow: at the right (Classic, Y2K) or in a square cell of its own (Brutalist)
-    let (m, arrow_c, margin) = match look {
+    let (m, arrow_c) = match look {
         Look::Brutal => {
             let cell = Rect::from_min_max(pos2(rect.right() - CONTROL_H, rect.top()), rect.max);
             if open {
                 painter.rect_filled(cell, 0.0, k.accent);
             }
             painter.line_segment([cell.left_top(), cell.left_bottom()], Stroke::new(1.0_f32, if hot { k.accent } else { k.border }));
-            (cell.center(), if open { k.on_accent } else { k.text }, CONTROL_H + 4.0)
+            (cell.center(), if open { k.on_accent } else { k.text })
         }
-        Look::Classic => (pos2(rect.right() - 15.0, rect.center().y), k.muted, 28.0),
-        Look::Y2k => (pos2(rect.right() - 15.0, rect.center().y), k.accent, 32.0),
+        Look::Classic => (pos2(rect.right() - 15.0, rect.center().y), k.muted),
+        Look::Y2k => (pos2(rect.right() - 15.0, rect.center().y), k.accent),
     };
-    // centred between two margins as wide as the arrow, so it stays clear of it
-    let clip = rect.shrink2(vec2(margin, 0.0));
-    let text_size = if look == Look::Classic { 13.5 } else { 13.0 };
+    // centred between two margins as wide as the arrow, so it stays clear of it; on a narrow
+    // button that has no room for that, centred in what is left of the arrow
+    let text_size = button_text_size(look);
+    let even = rect.shrink2(vec2(arrow_margin(look), 0.0));
+    let fits = text_width(ui.ctx(), shown, FontId::proportional(text_size)) <= even.width();
+    let clip = if fits { even } else { Rect::from_min_max(pos2(rect.left() + TEXT_PAD, rect.top()), pos2(rect.right() - arrow_margin(look), rect.bottom())) };
     let mut job = egui::text::LayoutJob::simple_singleline(shown.to_string(), FontId::proportional(text_size), k.text);
     job.wrap = egui::text::TextWrapping { max_width: clip.width(), max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
     let galley = painter.layout_job(job);
-    painter.with_clip_rect(clip).galley(Align2::CENTER_CENTER.anchor_size(rect.center(), galley.size()).min, galley, k.text);
+    painter.with_clip_rect(clip).galley(Align2::CENTER_CENTER.anchor_size(clip.center(), galley.size()).min, galley, k.text);
     let (hw, hh) = if look == Look::Classic { (4.0, 2.5) } else { (5.0, 3.0) };
     let tri = if open {
         vec![pos2(m.x - hw, m.y + hh), pos2(m.x + hw, m.y + hh), pos2(m.x, m.y - hh)]
