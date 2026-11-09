@@ -619,11 +619,9 @@ impl ImageForm {
                 self.set_cursor(ui.ctx(), &resp, pic);
                 if big && self.loupe_on {
                     let fine = self.loupe.texture(env, ui.ctx(), (self.turns, self.mirrored));
-                    let pointer = if resp.dragged() { resp.interact_pointer_pos() } else { resp.hover_pos() };
-                    if let Some(pointer) = pointer {
+                    // only while a corner or an edge is dragged
+                    if let (true, Some(focus), Some(pointer)) = (resp.dragged(), self.focus, resp.interact_pointer_pos()) {
                         self.wheel(ui.ctx());
-                        let to_part = |p: Pos2| pos2(((p.x - pic.left()) / pic.width()).clamp(0.0, 1.0), ((p.y - pic.top()) / pic.height()).clamp(0.0, 1.0));
-                        let focus = self.focus.unwrap_or_else(|| to_part(pointer));
                         draw_loupe(ui.ctx(), fine.as_ref().unwrap_or(&tex), size, focus, pointer, self.crop, self.loupe_zoom, self.loupe_side);
                     }
                 }

@@ -290,7 +290,7 @@ static EN: T = T {
     img_crop_expand: "Crop on the whole window",
     img_crop_done: "Done",
     img_loupe: "Magnifier",
-    img_loupe_hint: "Shows the pixels under the pointer. Wheel: zoom. Ctrl + wheel: size of the magnifier.",
+    img_loupe_hint: "Shows the pixels while a corner or an edge is dragged. Wheel: zoom. Ctrl + wheel: size of the magnifier.",
     img_preview_loading: "Loading the picture…",
     img_preview_failed: "No preview:",
     img_first_frame: "Animated: only the first frame is kept.",
