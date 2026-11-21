@@ -17,6 +17,10 @@
 #      {q} {p}   values of the compression level (low / medium / high) of the entry
 #      {render_node}   the GPU device of AMD / Intel (VAAPI)
 #      {audio}   Compress Video: the options of the Audio choice ([compress_audio], or -an)
+#      {profile} Compress Video: the options of the Profile choice ([compress_profile]; nothing for
+#                a codec without `profiles`)
+#      {pix_fmt} Compress Video: the pixel format of that profile, for a command that sets it inside its
+#                own -vf chain (VAAPI: format={pix_fmt},hwupload)
 #      size limit mode only:
 #      {rate}    -b:v -maxrate -bufsize (computed from the limit)   {pass}   two-pass options
 #      {seek}    -ss / -t of a chunk   {overwrite}   -n or -y
@@ -26,7 +30,7 @@
 #  `output` is the name of the result: {base} = path of the file without extension,
 #  {name} = its name, {dir} = its folder, {srcext} = its extension, {ext} = extension
 #  of the chosen format, {fmt} = key of the format, {mb} = the size limit.
-#  Other keys: label (what the drop-down shows), group, backend, q / p, rc_max, rc_buf,
+#  Other keys: label (what the drop-down shows), group, backend, profiles, q / p, rc_max, rc_buf,
 #  aim, bpp_min, twopass, chunked - see README.md.
 #  An entry can have [entry.windows] / [entry.linux] sub-tables that override it on
 #  that system only (used for the AMD / Intel GPUs: VAAPI on Linux, AMF / QSV on Windows).
@@ -39,23 +43,26 @@
 label = "H.264"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx264 -profile:v main -crf {q} {audio} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v libx264 {profile} -crf {q} {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "x264"
 q = [22, 30, 35]
 
 [compress.h265_cpu]
 label = "HEVC"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx265 -profile:v main -crf {q} -tag:v hvc1 {audio} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v libx265 {profile} -crf {q} -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "x265"
 q = [22, 30, 35]
 
 [compress.av1_cpu_fast]
 label = "AV1 Fast"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {audio} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 {profile} -preset {p} -rc vbr -crf {q} {audio} {output}'
+profiles = "svtav1"
 output = "{base}_compressed.mp4"
 q = [32, 44, 55]
 p = [7, 7, 5]
@@ -64,7 +71,8 @@ p = [7, 7, 5]
 label = "AV1 Slow"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 -preset {p} -rc vbr -crf {q} {audio} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v libsvtav1 {profile} -preset {p} -rc vbr -crf {q} {audio} {output}'
+profiles = "svtav1"
 output = "{base}_compressed.mp4"
 q = [32, 44, 55]
 p = [5, 5, 4]
@@ -73,24 +81,27 @@ p = [5, 5, 4]
 label = "H.264"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v h264_nvenc -profile:v main -cq {q} -preset p7 {audio} {output}'
+command = 'ffmpeg -n -hwaccel cuda -i {input} {vf} -c:v h264_nvenc {profile} -cq {q} -preset p7 {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "hw_h264"
 q = [29, 37, 41]
 
 [compress.h265_nv]
 label = "HEVC"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v hevc_nvenc -profile:v main -cq {q} -preset p7 -tag:v hvc1 {audio} {output}'
+command = 'ffmpeg -n -hwaccel cuda -i {input} {vf} -c:v hevc_nvenc {profile} -cq {q} -preset p7 -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "nvenc_hevc"
 q = [28, 37, 43]
 
 [compress.av1_nv]
 label = "AV1"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg -n -hwaccel cuda -hwaccel_output_format cuda -i {input} {vf} -c:v av1_nvenc -cq {q} -preset p7 {audio} {output}'
+command = 'ffmpeg -n -hwaccel cuda -i {input} {vf} -c:v av1_nvenc {profile} -cq {q} -preset p7 {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "nvenc_av1"
 q = [37, 47, 56]
 
 [compress.h264_amd]
@@ -98,11 +109,13 @@ label = "H.264"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {audio} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi {profile} -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "vaapi_h264"
 q = [29, 37, 41]
 [compress.h264_amd.windows]
 backend = "amf"
+profiles = ""
 command = 'ffmpeg -n -i {input} {vf} -c:v h264_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -qp_b {q} {audio} {output}'
 
 [compress.h265_amd]
@@ -110,11 +123,13 @@ label = "HEVC"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {audio} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v hevc_vaapi {profile} -global_quality {q} -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "vaapi_hevc"
 q = [28, 37, 43]
 [compress.h265_amd.windows]
 backend = "amf"
+profiles = ""
 command = 'ffmpeg -n -i {input} {vf} -c:v hevc_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} -tag:v hvc1 {audio} {output}'
 
 [compress.av1_amd]
@@ -122,11 +137,13 @@ label = "AV1"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {audio} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v av1_vaapi {profile} -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "vaapi_av1"
 q = [37, 47, 56]
 [compress.av1_amd.windows]
 backend = "amf"
+profiles = ""
 command = 'ffmpeg -n -i {input} {vf} -c:v av1_amf -quality quality -rc cqp -qp_i {q} -qp_p {q} {audio} {output}'
 
 [compress.h264_intel]
@@ -134,36 +151,42 @@ label = "H.264"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main -global_quality {q} {audio} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi {profile} -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "vaapi_h264"
 q = [29, 37, 41]
 [compress.h264_intel.windows]
 backend = "qsv"
-command = 'ffmpeg -n -i {input} {vf} -c:v h264_qsv -profile:v main -preset slower -global_quality {q} {audio} {output}'
+profiles = "hw_h264"
+command = 'ffmpeg -n -i {input} {vf} -c:v h264_qsv {profile} -preset slower -global_quality {q} {audio} {output}'
 
 [compress.h265_intel]
 label = "HEVC"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -global_quality {q} -tag:v hvc1 {audio} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v hevc_vaapi {profile} -global_quality {q} -tag:v hvc1 {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "vaapi_hevc"
 q = [28, 37, 43]
 [compress.h265_intel.windows]
 backend = "qsv"
-command = 'ffmpeg -n -i {input} {vf} -c:v hevc_qsv -preset slower -global_quality {q} -tag:v hvc1 {audio} {output}'
+profiles = "qsv_hevc"
+command = 'ffmpeg -n -i {input} {vf} -c:v hevc_qsv {profile} -preset slower -global_quality {q} -tag:v hvc1 {audio} {output}'
 
 [compress.av1_intel]
 label = "AV1"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi -global_quality {q} {audio} {output}'
+command = 'ffmpeg -n -vaapi_device {render_node} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v av1_vaapi {profile} -global_quality {q} {audio} {output}'
 output = "{base}_compressed.mp4"
+profiles = "vaapi_av1"
 q = [37, 47, 56]
 [compress.av1_intel.windows]
 backend = "qsv"
-command = 'ffmpeg -n -i {input} {vf} -c:v av1_qsv -preset slower -global_quality {q} {audio} {output}'
+profiles = "qsv_av1"
+command = 'ffmpeg -n -i {input} {vf} -c:v av1_qsv {profile} -preset slower -global_quality {q} {audio} {output}'
 
 [compress.h264_pi]
 label = "H.264"
@@ -197,8 +220,9 @@ output = "{base}_discord.mp4"
 label = "H.264"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libx264 -profile:v main -pix_fmt yuv420p -preset medium {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libx264 {profile} -preset medium {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_h264cpu.mp4"
+profiles = "x264"
 rc_max = 200
 rc_buf = 600
 aim = 99.0
@@ -209,8 +233,9 @@ twopass = "x264"
 label = "HEVC"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libx265 -profile:v main -pix_fmt yuv420p -preset medium -tag:v hvc1 {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libx265 {profile} -preset medium -tag:v hvc1 {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_hevccpu.mp4"
+profiles = "x265"
 rc_max = 200
 rc_buf = 600
 aim = 98.5
@@ -221,8 +246,9 @@ twopass = "x265"
 label = "AV1"
 group = "cpu"
 backend = "cpu"
-command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libsvtav1 -preset 6 -pix_fmt yuv420p {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v libsvtav1 {profile} -preset 6 {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_av1cpu.mp4"
+profiles = "svtav1"
 rc_max = 145
 rc_buf = 200
 aim = 96.0
@@ -232,8 +258,9 @@ bpp_min = 0.05
 label = "H.264"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg {overwrite} -hwaccel cuda -hwaccel_output_format cuda {seek} -i {input} {vf} -c:v h264_nvenc -profile:v main -preset p7 -rc:v vbr {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -hwaccel cuda {seek} -i {input} {vf} -c:v h264_nvenc {profile} -preset p7 -rc:v vbr {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_h264gpu.mp4"
+profiles = "hw_h264"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -244,8 +271,9 @@ chunked = true
 label = "HEVC"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg {overwrite} -hwaccel cuda -hwaccel_output_format cuda {seek} -i {input} {vf} -c:v hevc_nvenc -profile:v main -preset p7 -rc:v vbr -tag:v hvc1 {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -hwaccel cuda {seek} -i {input} {vf} -c:v hevc_nvenc {profile} -preset p7 -rc:v vbr -tag:v hvc1 {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_hevcgpu.mp4"
+profiles = "nvenc_hevc"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -256,8 +284,9 @@ chunked = true
 label = "AV1"
 group = "nvidia"
 backend = "nvenc"
-command = 'ffmpeg {overwrite} -hwaccel cuda -hwaccel_output_format cuda {seek} -i {input} {vf} -c:v av1_nvenc -preset p7 -rc:v vbr {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -hwaccel cuda {seek} -i {input} {vf} -c:v av1_nvenc {profile} -preset p7 -rc:v vbr {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_av1gpu.mp4"
+profiles = "nvenc_av1"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -269,8 +298,9 @@ label = "H.264"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi {profile} {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_h264amd.mp4"
+profiles = "vaapi_h264"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -278,6 +308,7 @@ bpp_min = 0.07
 chunked = true
 [limit.h264_amd.windows]
 backend = "amf"
+profiles = ""
 command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v h264_amf -quality quality -rc vbr_peak {rate} {pass} {audio} {output}'
 
 [limit.h265_amd]
@@ -285,8 +316,9 @@ label = "HEVC"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -tag:v hvc1 {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v hevc_vaapi {profile} -tag:v hvc1 {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_h265amd.mp4"
+profiles = "vaapi_hevc"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -294,6 +326,7 @@ bpp_min = 0.05
 chunked = true
 [limit.h265_amd.windows]
 backend = "amf"
+profiles = ""
 command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v hevc_amf -quality quality -rc vbr_peak -tag:v hvc1 {rate} {pass} {audio} {output}'
 
 [limit.av1_amd]
@@ -301,8 +334,9 @@ label = "AV1"
 group = "amd"
 backend = "vaapi"
 vendor = "amd"
-command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v av1_vaapi {profile} {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_av1amd.mp4"
+profiles = "vaapi_av1"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -310,6 +344,7 @@ bpp_min = 0.05
 chunked = true
 [limit.av1_amd.windows]
 backend = "amf"
+profiles = ""
 command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v av1_amf -quality quality -rc vbr_peak {rate} {pass} {audio} {output}'
 
 [limit.h264_intel]
@@ -317,8 +352,9 @@ label = "H.264"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi -profile:v main {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v h264_vaapi {profile} {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_h264intel.mp4"
+profiles = "vaapi_h264"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -326,15 +362,17 @@ bpp_min = 0.07
 chunked = true
 [limit.h264_intel.windows]
 backend = "qsv"
-command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v h264_qsv -profile:v main -preset slower {rate} {pass} {audio} {output}'
+profiles = "hw_h264"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v h264_qsv {profile} -preset slower {rate} {pass} {audio} {output}'
 
 [limit.h265_intel]
 label = "HEVC"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v hevc_vaapi -profile:v main -tag:v hvc1 {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v hevc_vaapi {profile} -tag:v hvc1 {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_h265intel.mp4"
+profiles = "vaapi_hevc"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -342,15 +380,17 @@ bpp_min = 0.05
 chunked = true
 [limit.h265_intel.windows]
 backend = "qsv"
-command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v hevc_qsv -preset slower -tag:v hvc1 {rate} {pass} {audio} {output}'
+profiles = "qsv_hevc"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v hevc_qsv {profile} -preset slower -tag:v hvc1 {rate} {pass} {audio} {output}'
 
 [limit.av1_intel]
 label = "AV1"
 group = "intel"
 backend = "vaapi"
 vendor = "intel"
-command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format=nv12,hwupload" -c:v av1_vaapi {rate} {pass} {audio} {output}'
+command = 'ffmpeg {overwrite} -vaapi_device {render_node} {seek} -i {input} -vf "{scale}format={pix_fmt},hwupload" -c:v av1_vaapi {profile} {rate} {pass} {audio} {output}'
 output = "{base}_limit_{mb}MB_av1intel.mp4"
+profiles = "vaapi_av1"
 rc_max = 145
 rc_buf = 200
 aim = 98.0
@@ -358,7 +398,8 @@ bpp_min = 0.05
 chunked = true
 [limit.av1_intel.windows]
 backend = "qsv"
-command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v av1_qsv -preset slower {rate} {pass} {audio} {output}'
+profiles = "qsv_av1"
+command = 'ffmpeg {overwrite} {seek} -i {input} {vf} -c:v av1_qsv {profile} -preset slower {rate} {pass} {audio} {output}'
 
 [limit.h264_pi]
 label = "H.264"
@@ -372,6 +413,238 @@ aim = 98.0
 bpp_min = 0.07
 chunked = true
 
+
+# ------------------------------------------------------------------ Compress Video: profile
+# The Profile list of Compress Video, for both tabs. A codec entry names the list it uses with
+# `profiles = "<family>"` and puts {profile} into its command; the entries of [compress_profile]
+# with that `family` are the choices. `args` are the ffmpeg options of the choice (the profile,
+# and the pixel format where the encoder takes it from the command). The first entry of a family
+# (or the one with `default = true`) is preselected: Main.
+# A codec without `profiles` has no choice (the AMF encoders of AMD on Windows).
+# AV1 has the one profile Main for 4:2:0, so its choice is the bit depth (the pixel format).
+# The profile of the GPU encoders follows the pixel format of the frames, so the entries set it
+# too: NVENC and QSV with `-pix_fmt` (the frames of NVENC come back to memory: no
+# `-hwaccel_output_format cuda`, the price is a copy per frame), VAAPI with `pix_fmt` -> {pix_fmt}.
+# Without it ffmpeg converts a 4:2:2 or 10-bit source to what the encoder lists first-best, often
+# 4:4:4 16-bit, which AV1 NVENC cannot open at all ("Function not implemented").
+# A command of an older presets.toml has no {profile}: it keeps its own profile while the
+# preselected one is chosen; another choice is put in front of {output} (the later option wins).
+# 10-bit and 4:2:2 / 4:4:4 profiles need a build of the encoder that supports them.
+
+[compress_profile.x264_baseline]
+family = "x264"
+label = "Baseline"
+hint = "8-bit 4:2:0, the oldest devices play it"
+args = '-profile:v baseline -pix_fmt yuv420p'
+
+[compress_profile.x264_main]
+family = "x264"
+label = "Main"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main -pix_fmt yuv420p'
+default = true
+
+[compress_profile.x264_high]
+family = "x264"
+label = "High"
+hint = "8-bit 4:2:0, a bit better compression"
+args = '-profile:v high -pix_fmt yuv420p'
+
+[compress_profile.x264_high10]
+family = "x264"
+label = "High 10"
+hint = "10-bit 4:2:0"
+args = '-profile:v high10 -pix_fmt yuv420p10le'
+
+[compress_profile.x264_high422]
+family = "x264"
+label = "High 4:2:2 10"
+hint = "10-bit 4:2:2, for editing"
+args = '-profile:v high422 -pix_fmt yuv422p10le'
+
+[compress_profile.x264_high444]
+family = "x264"
+label = "High 4:4:4"
+hint = "8-bit 4:4:4, few players read it"
+args = '-profile:v high444 -pix_fmt yuv444p'
+
+[compress_profile.x265_main]
+family = "x265"
+label = "Main"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main -pix_fmt yuv420p'
+default = true
+
+[compress_profile.x265_main10]
+family = "x265"
+label = "Main 10"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-profile:v main10 -pix_fmt yuv420p10le'
+
+[compress_profile.x265_main422_10]
+family = "x265"
+label = "Main 4:2:2 10 (RExt)"
+hint = "10-bit 4:2:2, for editing, few players read it"
+args = '-profile:v main422-10 -pix_fmt yuv422p10le'
+
+[compress_profile.x265_main444]
+family = "x265"
+label = "Main 4:4:4 (RExt)"
+hint = "8-bit 4:4:4, few players read it"
+args = '-profile:v main444-8 -pix_fmt yuv444p'
+
+[compress_profile.x265_main444_10]
+family = "x265"
+label = "Main 4:4:4 10 (RExt)"
+hint = "10-bit 4:4:4, few players read it"
+args = '-profile:v main444-10 -pix_fmt yuv444p10le'
+
+# H.264 of NVENC and QSV (8-bit 4:2:0)
+[compress_profile.hw_h264_baseline]
+family = "hw_h264"
+label = "Baseline"
+hint = "8-bit 4:2:0, the oldest devices play it"
+args = '-profile:v baseline -pix_fmt nv12'
+
+[compress_profile.hw_h264_main]
+family = "hw_h264"
+label = "Main"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main -pix_fmt nv12'
+default = true
+
+[compress_profile.hw_h264_high]
+family = "hw_h264"
+label = "High"
+hint = "8-bit 4:2:0, a bit better compression"
+args = '-profile:v high -pix_fmt nv12'
+
+# H.264 of VAAPI
+[compress_profile.vaapi_h264_baseline]
+family = "vaapi_h264"
+label = "Constrained Baseline"
+hint = "8-bit 4:2:0, the oldest devices play it"
+args = '-profile:v constrained_baseline'
+
+[compress_profile.vaapi_h264_main]
+family = "vaapi_h264"
+label = "Main"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main'
+default = true
+
+[compress_profile.vaapi_h264_high]
+family = "vaapi_h264"
+label = "High"
+hint = "8-bit 4:2:0, a bit better compression"
+args = '-profile:v high'
+
+
+# HEVC of NVENC (Pascal or newer for 4:4:4)
+[compress_profile.nvenc_hevc_main]
+family = "nvenc_hevc"
+label = "Main"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main -pix_fmt nv12'
+default = true
+
+[compress_profile.nvenc_hevc_main10]
+family = "nvenc_hevc"
+label = "Main 10"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-profile:v main10 -pix_fmt p010le'
+
+[compress_profile.nvenc_hevc_main444]
+family = "nvenc_hevc"
+label = "Main 4:4:4 (RExt)"
+hint = "8-bit 4:4:4, few players read it"
+args = '-profile:v rext -pix_fmt yuv444p'
+
+# HEVC of VAAPI (the pixel format goes into the filter chain)
+[compress_profile.vaapi_hevc_main]
+family = "vaapi_hevc"
+label = "Main"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main'
+pix_fmt = "nv12"
+default = true
+
+[compress_profile.vaapi_hevc_main10]
+family = "vaapi_hevc"
+label = "Main 10"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-profile:v main10'
+pix_fmt = "p010"
+
+# HEVC of QSV (Windows)
+[compress_profile.qsv_hevc_main]
+family = "qsv_hevc"
+label = "Main"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main -pix_fmt nv12'
+default = true
+
+[compress_profile.qsv_hevc_main10]
+family = "qsv_hevc"
+label = "Main 10"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-profile:v main10 -pix_fmt p010le'
+
+# AV1: one profile (Main), the choice is the bit depth. SVT-AV1 and NVENC take the pixel format
+# only, VAAPI and QSV the profile too.
+[compress_profile.svtav1_main]
+family = "svtav1"
+label = "Main (8-bit)"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-pix_fmt yuv420p'
+default = true
+
+[compress_profile.svtav1_main10]
+family = "svtav1"
+label = "Main (10-bit)"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-pix_fmt yuv420p10le'
+
+[compress_profile.nvenc_av1_main]
+family = "nvenc_av1"
+label = "Main (8-bit)"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-pix_fmt nv12'
+default = true
+
+[compress_profile.nvenc_av1_main10]
+family = "nvenc_av1"
+label = "Main (10-bit)"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-pix_fmt p010le'
+
+[compress_profile.vaapi_av1_main]
+family = "vaapi_av1"
+label = "Main (8-bit)"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main'
+pix_fmt = "nv12"
+default = true
+
+[compress_profile.vaapi_av1_main10]
+family = "vaapi_av1"
+label = "Main (10-bit)"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-profile:v main'
+pix_fmt = "p010"
+
+[compress_profile.qsv_av1_main]
+family = "qsv_av1"
+label = "Main (8-bit)"
+hint = "8-bit 4:2:0, plays everywhere"
+args = '-profile:v main -pix_fmt nv12'
+default = true
+
+[compress_profile.qsv_av1_main10]
+family = "qsv_av1"
+label = "Main (10-bit)"
+hint = "10-bit 4:2:0, less banding in gradients"
+args = '-profile:v main -pix_fmt p010le'
 
 # ------------------------------------------------------------------ Compress Video: audio
 # The Audio list of Compress Video, for both tabs. `args` are the ffmpeg options of the audio

@@ -1,6 +1,6 @@
 //! Compress Image, Make Icon and Frames to Video.
 
-use super::compress::{file_size, push_node, render_node, scale_val, vf_val};
+use super::compress::{file_size, profile_args, push_node, render_node, scale_val, vf_val};
 use super::output::{base_of, ensure_parent, new_file, short_name, unique_path};
 use super::runner::{run_ffmpeg, run_template, TempDir, Track};
 use super::{Done, Failure, ImageEdit, ImageTarget, Job, Outcome};
@@ -312,6 +312,8 @@ pub(super) fn frames_video(job: &Job, set: &FrameSet, fps: f64, codec_key: &str,
         return Err(Failure::Error(t.fv_too_few.to_string()));
     }
     let node = render_node(t, codec)?;
+    // the preselected profile (Main) of the codec, if it has profiles
+    let (profile, pix_fmt) = profile_args(job, codec, "")?.map(|c| (c.args, c.pix_fmt)).unwrap_or_default();
     let (w, h) = media::picture_size(&job.ffprobe, &set.frames[0]).ok_or_else(|| Failure::Error(format!("ffprobe: {}", short_name(&set.frames[0]))))?;
     let (w, h) = ((w / 2 * 2).max(2), (h / 2 * 2).max(2));
 
@@ -349,6 +351,8 @@ pub(super) fn frames_video(job: &Job, set: &FrameSet, fps: f64, codec_key: &str,
         ("q", Val::S(Codec::pick(&codec.q, level))),
         ("p", Val::S(Codec::pick(&codec.p, level))),
         ("audio", Val::l(["-an"])),
+        ("profile", Val::L(profile)),
+        ("pix_fmt", Val::S(pix_fmt)),
     ];
     push_node(&mut vars, &node);
     let mut args = cmdline::expand(&codec.command, &vars)?;

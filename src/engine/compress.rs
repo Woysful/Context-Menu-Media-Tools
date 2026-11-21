@@ -189,17 +189,61 @@ fn audio_val(has_audio: bool, maps: &[String], args: &[String]) -> Val {
     Val::L(v)
 }
 
-/// A command of an older presets.toml has no {audio}: it goes in front of the last {output}
-fn with_audio(command: &str) -> String {
-    let has = cmdline::placeholders(command).is_ok_and(|p| p.iter().any(|x| x == "audio"));
+/// `{name}` in front of the last {output}, when the command has no `{name}` yet
+fn with_placeholder(command: &str, name: &str) -> String {
+    let has = cmdline::placeholders(command).is_ok_and(|p| p.iter().any(|x| x == name));
     match command.rfind("{output}") {
         Some(i) if !has => {
             let quoted = i > 0 && matches!(command.as_bytes()[i - 1], b'"' | b'\'');
             let at = if quoted { i - 1 } else { i };
-            format!("{}{{audio}} {}", &command[..at], &command[at..])
+            format!("{}{{{name}}} {}", &command[..at], &command[at..])
         }
         _ => command.to_string(),
     }
+}
+
+/// A command of an older presets.toml has no {audio}: it goes in front of the last {output}
+fn with_audio(command: &str) -> String {
+    with_placeholder(command, "audio")
+}
+
+// ------------------------------------------------------------------ profile
+
+/// The profile chosen for a run
+pub(super) struct Chosen {
+    /// {profile}: the ffmpeg options
+    pub args: Vec<String>,
+    /// {pix_fmt}: the pixel format, for an encoder that takes it inside the filter chain (VAAPI)
+    pub pix_fmt: String,
+    /// the preselected profile (Main)
+    pub is_default: bool,
+}
+
+/// The profile `key` of `codec`. An empty key is the preselected profile. None: the codec has
+/// no choice of the profile.
+pub(super) fn profile_args(job: &Job, codec: &Codec, key: &str) -> Outcome<Option<Chosen>> {
+    let Some(default) = job.cfg.default_profile(codec) else { return Ok(None) };
+    let key = if key.is_empty() { default } else { key };
+    let list = job.cfg.profiles_of(codec);
+    let Some((_, profile)) = list.iter().find(|(k, _)| *k == key) else {
+        return Err(Failure::Error(format!("{} {key}", i18n::t().unknown_profile)));
+    };
+    let args = cmdline::split(&profile.args)?;
+    Ok(Some(Chosen { args, pix_fmt: profile.pix_fmt.clone(), is_default: key == default }))
+}
+
+/// `command` of a codec entry with the chosen profile: the values of {profile} and {pix_fmt}, and
+/// the command to run. A command of an older presets.toml has no {profile}: it keeps the profile it names
+/// while the preselected one is chosen, any other choice goes in front of the last {output}
+/// (ffmpeg takes the later option).
+pub(super) fn with_profile(job: &Job, codec: &Codec, key: &str, command: String) -> Outcome<(Val, Val, String)> {
+    Ok(match profile_args(job, codec, key)? {
+        None => (Val::L(vec![]), Val::s(""), command),
+        Some(c) => {
+            let command = if c.is_default { command } else { with_placeholder(&command, "profile") };
+            (Val::L(c.args), Val::S(c.pix_fmt), command)
+        }
+    })
 }
 
 /// Only the chosen audio tracks of the file (`maps`), with `args`, into `out`; returns its size
@@ -216,8 +260,19 @@ fn encode_audio(job: &Job, file: &Path, maps: &[String], args: &[String], out: &
 // ------------------------------------------------------------------ presets
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &Codec, mode: ScaleMode, audio: &str, tracks: &Tracks) -> Outcome<Done> {
+pub(super) fn preset(
+    job: &Job,
+    file: &Path,
+    info: &Info,
+    level: usize,
+    codec: &Codec,
+    mode: ScaleMode,
+    audio: &str,
+    tracks: &Tracks,
+    profile: &str,
+) -> Outcome<Done> {
     let node = render_node(i18n::t(), codec)?;
+    let (profile, pix_fmt, command) = with_profile(job, codec, profile, with_audio(&codec.command))?;
     let (chain, _) = scale_chain(job, file, info, mode, 30.0, 0.0, 0.0);
     let chosen = find_audio(job, audio)?;
     let output = new_file_ext(&codec.output, file, &[], &chosen.ext);
@@ -234,9 +289,11 @@ pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &
         ("q", Val::S(Codec::pick(&codec.q, level))),
         ("p", Val::S(Codec::pick(&codec.p, level))),
         ("audio", audio_val(has_audio, &sel.maps, &audio_opts)),
+        ("profile", profile),
+        ("pix_fmt", pix_fmt),
     ];
     push_node(&mut vars, &node);
-    run_template(job, &with_audio(&codec.command), &vars, !chain.is_empty(), Track::whole(info.duration), None)?;
+    run_template(job, &command, &vars, !chain.is_empty(), Track::whole(info.duration), None)?;
     Ok(Done::new(format!("{} → {} ({})", short_name(file), short_name(&output), fmt_mb(file_size(&output))), &output))
 }
 
@@ -246,6 +303,11 @@ pub(super) fn preset(job: &Job, file: &Path, info: &Info, level: usize, codec: &
 struct Plan<'a> {
     file: &'a Path,
     codec: &'a Codec,
+    /// the command of the entry, with a place for the chosen profile
+    command: String,
+    /// {profile}: the options of the chosen profile, {pix_fmt}: its pixel format
+    profile: Val,
+    pix_fmt: Val,
     mb: f64,
     node: Option<String>,
     /// software filters (scaling)
@@ -285,6 +347,8 @@ impl Plan<'_> {
             ("rate", step.rate),
             ("pass", Val::L(step.pass)),
             ("audio", step.audio),
+            ("profile", self.profile.clone()),
+            ("pix_fmt", self.pix_fmt.clone()),
         ];
         push_node(&mut v, &self.node);
         v
@@ -310,12 +374,14 @@ pub(super) fn limit(
     want_twopass: bool,
     audio: &str,
     tracks: &Tracks,
+    profile: &str,
 ) -> Outcome<Done> {
     let t = i18n::t();
     if mb.is_nan() || mb <= 0.0 {
         return Err(format!("{} {mb}", t.invalid_limit).into());
     }
     let node = render_node(t, codec)?;
+    let (profile, pix_fmt, command) = with_profile(job, codec, profile, codec.command.clone())?;
 
     // The budget math needs the exact duration, the frame rate (container overhead grows
     // with the number of frames) and whether there is an audio track at all.
@@ -359,7 +425,7 @@ pub(super) fn limit(
     // the audio bitrate is shared by the tracks
     let count = sel.count().max(1) as u64;
     let audio_opts = audio_args(a, &(br.audio / count).to_string())?;
-    let plan = Plan { file, codec, mb, node, chain, maps: sel.maps, audio: audio_opts, audio_file, dur, fps, has_audio, aim };
+    let plan = Plan { file, codec, command, profile, pix_fmt, mb, node, chain, maps: sel.maps, audio: audio_opts, audio_file, dur, fps, has_audio, aim };
 
     let mode_note = if chunked {
         " | chunked"
@@ -413,7 +479,7 @@ fn encode_whole(job: &Job, output: &Path, plan: &Plan, video_bps: u64, twopass: 
     if !twopass {
         let step = Step { output: path_val(output), overwrite: "-n", rate, seek: vec![], pass: vec![], audio: plan.audio_val(), filters: &plan.chain };
         let vars = plan.vars(step);
-        return run_template(job, &codec.command, &vars, hw_drop, Track::part(plan.dur, 0.0, 1.0), None);
+        return run_template(job, &plan.command, &vars, hw_drop, Track::part(plan.dur, 0.0, 1.0), None);
     }
     // the pass logs are written to the working folder
     let dir = TempDir::new()?;
@@ -429,10 +495,10 @@ fn encode_whole(job: &Job, output: &Path, plan: &Plan, video_bps: u64, twopass: 
     let scratch = path_val(&dir.path().join(format!("pass1.{ext}")));
     job.prog.set_step(t.pass1);
     let vars = plan.vars(Step { output: scratch, overwrite: "-y", rate: rate.clone(), seek: vec![], pass: p1, audio: no_audio(), filters: &plan.chain });
-    run_template(job, &codec.command, &vars, hw_drop, Track::part(plan.dur, 0.0, 0.5), Some(dir.path()))?;
+    run_template(job, &plan.command, &vars, hw_drop, Track::part(plan.dur, 0.0, 0.5), Some(dir.path()))?;
     job.prog.set_step(t.pass2);
     let vars = plan.vars(Step { output: path_val(output), overwrite: "-n", rate, seek: vec![], pass: p2, audio: plan.audio_val(), filters: &plan.chain });
-    run_template(job, &codec.command, &vars, hw_drop, Track::part(plan.dur, 0.5, 1.0), Some(dir.path()))
+    run_template(job, &plan.command, &vars, hw_drop, Track::part(plan.dur, 0.5, 1.0), Some(dir.path()))
 }
 
 /// Closed-loop encode for hardware encoders (NVENC / VAAPI / AMF / QSV / V4L2). They only
@@ -495,7 +561,7 @@ fn encode_chunked(job: &Job, output: &Path, plan: &Plan, work: &TempDir) -> Outc
         let vars = plan.vars(step);
         // frames stay in normal memory here (trim / setpts are software filters)
         let track = Track::part(dur_i, i as f64 / n as f64, (i + 1) as f64 / n as f64);
-        run_template(job, &plan.codec.command, &vars, true, track, None)?;
+        run_template(job, &plan.command, &vars, true, track, None)?;
 
         let actual = file_size(&chunk_path) as f64;
         job.prog.info(format!("   {} {}/{}: {} B (x{:.2})", t.chunk, i + 1, n, actual as u64, actual / req_bytes));
@@ -519,7 +585,7 @@ fn encode_chunked(job: &Job, output: &Path, plan: &Plan, work: &TempDir) -> Outc
         args.extend([s("-map"), s("1:a")]);
     }
     args.extend([s("-c"), s("copy")]);
-    let tokens = crate::cmdline::split(&plan.codec.command).unwrap_or_default();
+    let tokens = crate::cmdline::split(&plan.command).unwrap_or_default();
     if let Some(tag) = value_after(&tokens, "-tag:v") {
         args.extend([s("-tag:v"), tag.to_string()]);
     }
@@ -537,6 +603,37 @@ mod tests {
         assert_eq!(with_audio("ffmpeg -i {input} \"{output}\""), "ffmpeg -i {input} {audio} \"{output}\"");
         let new = "ffmpeg -i {input} {audio} -movflags +faststart {output}";
         assert_eq!(with_audio(new), new);
+    }
+
+    #[test]
+    fn a_command_without_a_profile_gets_it_only_for_a_choice_of_its_own() {
+        let old = "ffmpeg -i {input} -c:v libx264 -profile:v high {audio} {output}";
+        assert_eq!(with_placeholder(old, "profile"), "ffmpeg -i {input} -c:v libx264 -profile:v high {audio} {profile} {output}");
+        let new = "ffmpeg -i {input} -c:v libx264 {profile} {audio} {output}";
+        assert_eq!(with_placeholder(new, "profile"), new);
+    }
+
+    #[test]
+    fn profiles_come_from_the_family_of_the_codec() {
+        let (job, _) = job_and_info(0);
+        let hevc = job.cfg.compress_codec("h265_cpu").unwrap();
+        // nothing chosen: Main, 8-bit 4:2:0 whatever the source is
+        let c = profile_args(&job, hevc, "").unwrap().unwrap();
+        assert_eq!(c.args, [s("-profile:v"), s("main"), s("-pix_fmt"), s("yuv420p")]);
+        assert!(c.is_default);
+        let c = profile_args(&job, hevc, "x265_main422_10").unwrap().unwrap();
+        assert_eq!(c.args, [s("-profile:v"), s("main422-10"), s("-pix_fmt"), s("yuv422p10le")]);
+        assert!(!c.is_default);
+        // the profile of another family is not offered, a codec without profiles has no choice
+        assert!(profile_args(&job, hevc, "x264_high").is_err());
+        // AV1 has the bit depth to choose, a codec without profiles has no choice
+        let av1 = profile_args(&job, job.cfg.compress_codec("av1_nv").unwrap(), "").unwrap().unwrap();
+        assert_eq!(av1.args, [s("-pix_fmt"), s("nv12")]);
+        assert!(av1.is_default);
+        assert!(profile_args(&job, &Codec::default(), "").unwrap().is_none());
+        // the GPU encoders get the pixel format with the profile
+        let nv = profile_args(&job, job.cfg.compress_codec("h265_nv").unwrap(), "nvenc_hevc_main10").unwrap().unwrap();
+        assert_eq!(nv.args, [s("-profile:v"), s("main10"), s("-pix_fmt"), s("p010le")]);
     }
 
     #[test]

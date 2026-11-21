@@ -57,6 +57,8 @@ pub struct Codec {
     pub vendor: String,
     pub command: String,
     pub output: String,
+    /// the family of [compress_profile] this codec offers (empty = no choice of the profile)
+    pub profiles: String,
     pub q: Vec<Value>,
     pub p: Vec<Value>,
     // size limit mode
@@ -124,6 +126,22 @@ impl AudioCodec {
     pub fn copies(&self) -> bool {
         crate::cmdline::split(&self.args).is_ok_and(|w| w.iter().any(|x| x == "copy"))
     }
+}
+
+/// An entry of the Profile list of Compress Video
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct Profile {
+    /// the list it belongs to: the `profiles` of the codec entries that offer it
+    pub family: String,
+    pub label: String,
+    /// a few words about it ("8-bit 4:2:0"), shown under the list
+    pub hint: String,
+    /// ffmpeg options of the profile (and of the pixel format): {profile} of the command
+    pub args: String,
+    /// the pixel format for an encoder that takes it inside the filter chain (VAAPI): {pix_fmt}
+    pub pix_fmt: String,
+    pub default: bool,
 }
 
 /// "Merge into one track" of Compress Video and Delete Audio
@@ -300,6 +318,7 @@ pub struct Config {
     pub compress: Vec<(String, Codec)>,
     pub limit: Vec<(String, Codec)>,
     pub audio: Vec<(String, AudioCodec)>,
+    pub profile: Vec<(String, Profile)>,
     pub audio_merge: AudioMerge,
     formats: [Formats; 6],
     pub delete_audio: DeleteAudio,
@@ -456,6 +475,7 @@ impl Config {
             compress: section(&root, "compress", &mut warnings),
             limit: section(&root, "limit", &mut warnings),
             audio: section(&root, "compress_audio", &mut warnings),
+            profile: section(&root, "compress_profile", &mut warnings),
             audio_merge: single(&root, "compress_audio_merge", &mut warnings),
             formats: ConvertKind::ALL.map(|k| section(&root, k.section(), &mut warnings)),
             delete_audio: single(&root, "delete_audio", &mut warnings),
@@ -550,6 +570,20 @@ impl Config {
     pub fn default_audio(&self) -> &str {
         self.audio.iter().find(|(_, a)| a.default).or_else(|| self.audio.first()).map_or("copy", |(k, _)| k.as_str())
     }
+
+    /// The profiles `codec` offers, in the order of the file (empty = no choice)
+    pub fn profiles_of(&self, codec: &Codec) -> Vec<(&str, &Profile)> {
+        if codec.profiles.is_empty() {
+            return Vec::new();
+        }
+        self.profile.iter().filter(|(_, p)| p.family == codec.profiles).map(|(k, p)| (k.as_str(), p)).collect()
+    }
+
+    /// The profile of `codec` marked `default = true`, else its first one (Main)
+    pub fn default_profile(&self, codec: &Codec) -> Option<&str> {
+        let list = self.profiles_of(codec);
+        list.iter().find(|(_, p)| p.default).or_else(|| list.first()).map(|(k, _)| *k)
+    }
 }
 
 #[cfg(test)]
@@ -575,6 +609,7 @@ mod tests {
         assert_eq!(c.compress[0].0, "h264_cpu");
         assert_eq!(c.default_format(ConvertKind::Video), Some("mp4"));
         assert_eq!(c.audio.len(), 11);
+        assert_eq!(c.profile.len(), 32);
         assert!(c.audio_codec("none").unwrap().removes() && !c.audio_codec("copy").unwrap().removes());
         assert_eq!(c.audio_codec("pcm16").unwrap().ext, "mov");
         assert_eq!(c.default_audio(), "copy");
@@ -587,6 +622,33 @@ mod tests {
         assert_eq!(c.icon.sizes, [16, 24, 32, 48, 64, 256]);
         assert_eq!(c.frames_video.fps, 30.0);
         assert!(c.frames_video.fit.contains("{w}") && c.frames_video.output.contains("{name}"));
+    }
+
+    #[test]
+    fn profiles_belong_to_the_codecs_that_name_them() {
+        let c = defaults();
+        for (k, e) in c.compress.iter().chain(c.limit.iter()) {
+            let uses = crate::cmdline::placeholders(&e.command).unwrap().iter().any(|p| p == "profile");
+            // a codec offers a list exactly when its command has the place for it
+            assert_eq!(uses, !e.profiles.is_empty(), "{k}");
+            if uses {
+                assert!(!c.profiles_of(e).is_empty(), "{k}");
+                // Main is preselected, and the profile is not named twice
+                assert!(c.default_profile(e).is_some_and(|p| p.ends_with("_main")), "{k}");
+                assert!(!e.command.contains("-profile:v"), "{k}");
+            }
+        }
+        let hevc = c.compress_codec("h265_cpu").unwrap();
+        let keys: Vec<&str> = c.profiles_of(hevc).iter().map(|(k, _)| *k).collect();
+        assert_eq!(keys, ["x265_main", "x265_main10", "x265_main422_10", "x265_main444", "x265_main444_10"]);
+        assert_eq!(c.default_profile(hevc), Some("x265_main"));
+        // the discord preset is HEVC of the CPU
+        assert_eq!(c.default_profile(c.compress_codec("h265_nv").unwrap()), Some("nvenc_hevc_main"));
+        assert_eq!(c.default_profile(c.compress_codec("av1_nv").unwrap()), Some("nvenc_av1_main"));
+        assert_eq!(c.limit_codec("discord").unwrap().profiles, "x265");
+        // every profile sets the profile or the pixel format (or both)
+        let sets = |p: &Profile, o: &str| crate::cmdline::split(&p.args).unwrap().iter().any(|a| a == o);
+        assert!(c.profile.iter().all(|(_, p)| sets(p, "-profile:v") || sets(p, "-pix_fmt") || !p.pix_fmt.is_empty()));
     }
 
     #[test]

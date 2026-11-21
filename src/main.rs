@@ -57,6 +57,7 @@ Options:
   --format F         output format of convert-*, extract-audio, frames
   --level L          compress: low | medium | high
   --codec C          compress: codec key from presets.toml (h264_cpu, h265_nv, ...)
+  --profile P        compress: profile key of [compress_profile] (x264_high, x265_main10, ...); default: Main
   --limit MB         compress: fit the result into this size
   --scale S          compress: orig | auto | 720p | 50% | x0.5 ...
   --twopass          compress with --limit: two-pass encoding (CPU H.264 / HEVC)
@@ -100,6 +101,7 @@ impl Cli {
             "format",
             "level",
             "codec",
+            "profile",
             "limit",
             "scale",
             "audio",
@@ -195,6 +197,8 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
         None => ScaleMode::Orig,
     };
     let audio = cli.opt("audio").unwrap_or(cfg.default_audio()).to_string();
+    // empty: the Main of the codec (the engine says when the codec does not offer the profile)
+    let profile = cli.opt("profile").unwrap_or("").to_string();
     if cfg.audio_codec(&audio).is_none() {
         return Err(format!("bad --audio: {audio}"));
     }
@@ -248,9 +252,9 @@ fn request_from(action: Action, cli: &Cli, cfg: &Config, first_kind: Option<Kind
         Action::Compress => match cli.opt("limit") {
             Some(l) => {
                 let mb = units::parse_decimal(l).filter(|v| *v > 0.0).ok_or_else(|| format!("bad --limit: {l}"))?;
-                Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass"), audio, tracks }
+                Request::CompressLimit { mb, codec, scale, twopass: cli.flag("twopass"), audio, tracks, profile }
             }
-            None => Request::CompressPreset { level: level()?, codec, scale, audio, tracks },
+            None => Request::CompressPreset { level: level()?, codec, scale, audio, tracks, profile },
         },
         // --merge alone: no track is removed, all of them are mixed
         Action::DeleteAudio => match (track_list, cli.flag("merge")) {

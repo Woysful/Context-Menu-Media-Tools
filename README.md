@@ -89,8 +89,9 @@ Each action is a table with a full ffmpeg command line:
 ```toml
 [compress.h264_cpu]
 label = "H.264"
-command = 'ffmpeg -n -i {input} {vf} -pix_fmt yuv420p -c:v libx264 -crf {q} {output}'
+command = 'ffmpeg -n -i {input} {vf} -c:v libx264 {profile} -crf {q} {output}'
 output = "{base}_compressed.mp4"
+profiles = "x264"   # the Profile list of the window, see [compress_profile]
 q = [22, 30, 35]    # low / medium / high
 ```
 
@@ -99,10 +100,20 @@ If the file contains an error, the program ignores it and shows what is wrong.
 The comments in the file list the placeholders (`{input}`, `{output}`, `{base}`, `{vf}`, `{q}`, …) and options.
 To add a format or preset, add a new table.
 
+The **Profile** list of Compress Video (Main by default) is `[compress_profile.*]`: every entry has the ffmpeg options of
+the profile and, where the encoder needs it, of the pixel format (`-profile:v main10 -pix_fmt yuv420p10le`). A codec picks
+its entries with `profiles = "<family>"` and puts `{profile}` into its command. A command of an older `presets.toml`
+without `{profile}` keeps its own profile while Main is chosen; any other choice is added in front of `{output}`.
+Codecs without `profiles` (the AMF encoders of AMD on Windows) have no choice. AV1 has one profile, Main, so its choice is
+the bit depth. The GPU encoders take the profile from the pixel
+format of the frames, so their entries set it too (`-pix_fmt`, or `pix_fmt` -> `{pix_fmt}` inside the `-vf` chain of VAAPI);
+the HEVC command of NVENC therefore lets the frames come back to memory instead of keeping them on the GPU.
+
 ## Command line
 
 ```
 cmmt compress --cli --limit 20 --codec h265_cpu video.mp4    # no window, progress in the terminal
+cmmt compress --cli --codec h265_cpu --profile x265_main10 video.mp4   # the profile (default: Main)
 cmmt convert-audio --yes --format mp3 song.wav               # no options dialog
 cmmt delete-audio --cli --merge --delete-original film.mkv   # one mixed track, the original to the trash
 cmmt compress-image --cli --format webp --limit 300KB photo.jpg

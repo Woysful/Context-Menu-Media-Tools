@@ -26,9 +26,12 @@ pub struct CompressForm {
     level: usize,
     p_groups: Vec<Group>,
     p_codec: String,
+    /// key of [compress_profile] of the codec (empty: it has none)
+    p_profile: String,
     p_scale: ScaleField,
     l_groups: Vec<Group>,
     l_codec: String,
+    l_profile: String,
     l_scale: ScaleField,
     mb_text: String,
     twopass: bool,
@@ -107,9 +110,11 @@ impl Fields {
                 level: dv::level_index(&d(dv::LEVEL)),
                 p_groups: build_groups(&cfg.compress, env.t, cfg),
                 p_codec: d(dv::CODEC),
+                p_profile: String::new(),
                 p_scale: ScaleField::from_code(&d(dv::RESOLUTION)),
                 l_groups: build_groups(&cfg.limit, env.t, cfg),
                 l_codec: d(dv::LIMIT_CODEC),
+                l_profile: String::new(),
                 l_scale: ScaleField::from_code(&d(dv::LIMIT_RESOLUTION)),
                 mb_text: d(dv::LIMIT_SIZE),
                 twopass: dv::flag(cfg, dv::TWO_PASS),
@@ -297,6 +302,7 @@ impl CompressForm {
         if let Some(v) = default_menu(&r, env, dv::CODEC, Some(&self.p_codec)) {
             self.p_codec = v;
         }
+        profile_row(ui, env, "p_profile", env.cfg.compress_codec(&self.p_codec), &mut self.p_profile);
         let r = form_row(ui, t.resolution, |ui| self.p_scale.ui(ui, "p_scale", t, false, &env.infos));
         if let Some(v) = default_menu(&r, env, dv::RESOLUTION, self.p_scale.code().as_deref()) {
             self.p_scale = ScaleField::from_code(&v);
@@ -309,7 +315,14 @@ impl CompressForm {
         if self.p_scale.invalid {
             return None;
         }
-        Some(Request::CompressPreset { level: self.level, codec: self.p_codec.clone(), scale: self.p_scale.mode, audio: self.p_audio.clone(), tracks: tracks? })
+        Some(Request::CompressPreset {
+            level: self.level,
+            codec: self.p_codec.clone(),
+            scale: self.p_scale.mode,
+            audio: self.p_audio.clone(),
+            tracks: tracks?,
+            profile: self.p_profile.clone(),
+        })
     }
 
     /// The audio tracks to keep and "merge into one" (for files with several tracks). None: no
@@ -412,6 +425,7 @@ impl CompressForm {
         if let Some(v) = default_menu(&r, env, dv::LIMIT_CODEC, Some(&self.l_codec)) {
             self.l_codec = v;
         }
+        profile_row(ui, env, "l_profile", env.cfg.limit_codec(&self.l_codec), &mut self.l_profile);
         let r = form_row(ui, t.resolution, |ui| self.l_scale.ui(ui, "l_scale", t, true, &env.infos));
         if let Some(v) = default_menu(&r, env, dv::LIMIT_RESOLUTION, self.l_scale.code().as_deref()) {
             self.l_scale = ScaleField::from_code(&v);
@@ -431,6 +445,7 @@ impl CompressForm {
             twopass: self.twopass && twopass_ok,
             audio: self.l_audio.clone(),
             tracks: tracks?,
+            profile: self.l_profile.clone(),
         })
     }
 }
@@ -467,6 +482,31 @@ fn set_note(ctx: &egui::Context, t: &T, result: Result<(), String>, done: &str) 
         Err(e) => (format!("{} {e}", t.default_failed), false),
     };
     ctx.data_mut(|d| d.insert_temp(note_id(), note));
+}
+
+/// The Profile list of the codec ([compress_profile] of presets.toml), Main preselected. A codec
+/// without profiles shows the list switched off. `selected` is the key of the chosen profile; it
+/// starts again from the preselected one of the list when another codec was chosen.
+fn profile_row(ui: &mut egui::Ui, env: &Env, id: &str, codec: Option<&Codec>, selected: &mut String) {
+    let t = env.t;
+    let list = codec.map(|c| env.cfg.profiles_of(c)).unwrap_or_default();
+    match codec.and_then(|c| env.cfg.default_profile(c)) {
+        Some(default) if !list.iter().any(|(k, _)| *k == selected.as_str()) => *selected = default.to_string(),
+        Some(_) => {}
+        None => selected.clear(),
+    }
+    form_row(ui, t.profile, |ui| {
+        if list.is_empty() {
+            let _ = ui.add_enabled_ui(false, |ui| dropdown(ui, id, "—", &[], &mut String::new()));
+            one_line(ui, t.profile_fixed, muted());
+            return;
+        }
+        let shown = list.iter().find(|(k, _)| *k == selected.as_str()).map_or("", |(_, p)| p.label.as_str());
+        let items: Vec<(String, String)> = list.iter().map(|(k, p)| (k.to_string(), p.label.clone())).collect();
+        dropdown(ui, id, shown, &[Col { title: None, items }], selected);
+        let hint = list.iter().find(|(k, _)| *k == selected.as_str()).map_or("", |(_, p)| p.hint.as_str());
+        one_line(ui, hint, muted());
+    });
 }
 
 /// The Audio list of Compress Video ([compress_audio] of presets.toml), a column per group
